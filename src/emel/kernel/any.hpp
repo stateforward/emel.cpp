@@ -15,7 +15,9 @@ namespace emel::kernel {
 class any {
  public:
   any() : core_(detect_host_kind()) {}
-  explicit any(const kernel_kind kind) : core_(kind) {}
+  explicit any(const kernel_kind kind) : core_(detect_host_kind()) {
+    (void)set_kind(kind);
+  }
 
   any(const any &) = delete;
   any & operator=(const any &) = delete;
@@ -24,15 +26,24 @@ class any {
 
   ~any() = default;
 
-  void set_kind(const kernel_kind kind) { core_.set_kind(kind); }
+  bool set_kind(const kernel_kind kind) noexcept {
+    if (!is_supported_kind(kind)) {
+      return false;
+    }
+    core_.set_kind(kind);
+    return true;
+  }
 
   kernel_kind kind() const noexcept { return core_.kind(); }
 
+  static constexpr bool is_supported_kind(const kernel_kind kind) noexcept {
+    return core_type::is_supported_kind(kind);
+  }
+
   bool process_event(const event::dispatch & ev) { return core_.process_event(ev); }
 
-  bool process_event(const event::configure_kind &ev) {
-    core_.set_kind(ev.kind);
-    return true;
+  bool process_event(const event::configure_kind &ev) noexcept {
+    return set_kind(ev.kind);
   }
 
   bool process_event(const event::capture_diagnostics &ev) {
@@ -388,8 +399,9 @@ class any {
       EMEL_KERNEL_OP_EVENT_LIST(EMEL_KERNEL_ANY_EVENT_TYPE)
 #undef EMEL_KERNEL_ANY_EVENT_TYPE
       >;
+  using core_type = emel::sm_any<kernel_kind, sm_list, event_list>;
 
-  emel::sm_any<kernel_kind, sm_list, event_list> core_{};
+  core_type core_{};
 };
 
 }  // namespace emel::kernel

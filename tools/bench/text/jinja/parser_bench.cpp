@@ -21,11 +21,11 @@ std::string make_long_template() {
   return out;
 }
 
-bool parser_done_sink(const emel::text::jinja::events::parsing_done &) {
+bool parser_done_sink(const emel::text::jinja::events::parsing_done &) noexcept {
   return true;
 }
 
-bool parser_error_sink(const emel::text::jinja::events::parsing_error &) {
+bool parser_error_sink(const emel::text::jinja::events::parsing_error &) noexcept {
   return true;
 }
 

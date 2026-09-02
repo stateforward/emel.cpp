@@ -147,6 +147,14 @@ std::vector<uint8_t> make_nonfinite_codebook_cact_file(const float value) {
   return bytes;
 }
 
+std::vector<uint8_t> make_rope_theta_cact_file(const float value) {
+  std::vector<uint8_t> bytes = make_valid_cact_file();
+  uint32_t raw = 0u;
+  __builtin_memcpy(&raw, &value, sizeof(raw));
+  write_scalar<uint32_t>(bytes, k_header_bytes - sizeof(float), raw);
+  return bytes;
+}
+
 std::vector<uint8_t> make_truncated_directory_cact_file() {
   std::vector<uint8_t> bytes = make_valid_cact_file();
   bytes.resize(k_header_bytes + k_codebook_len * sizeof(float) + 8u);
@@ -283,7 +291,7 @@ struct callback_scope {
   ~callback_scope() { g_callback_state = nullptr; }
 };
 
-void on_probe_done(const emel::cact::loader::events::probe_done &ev) {
+void on_probe_done(const emel::cact::loader::events::probe_done &ev) noexcept {
   if (g_callback_state == nullptr) {
     return;
   }
@@ -291,7 +299,7 @@ void on_probe_done(const emel::cact::loader::events::probe_done &ev) {
   g_callback_state->probe_geometry = ev.geometry_out;
 }
 
-void on_probe_error(const emel::cact::loader::events::probe_error &ev) {
+void on_probe_error(const emel::cact::loader::events::probe_error &ev) noexcept {
   if (g_callback_state == nullptr) {
     return;
   }
@@ -299,13 +307,13 @@ void on_probe_error(const emel::cact::loader::events::probe_error &ev) {
   g_callback_state->probe_error = ev.err;
 }
 
-void on_bind_done(const emel::cact::loader::events::bind_done &) {
+void on_bind_done(const emel::cact::loader::events::bind_done &) noexcept {
   if (g_callback_state != nullptr) {
     ++g_callback_state->bind_done_count;
   }
 }
 
-void on_bind_error(const emel::cact::loader::events::bind_error &ev) {
+void on_bind_error(const emel::cact::loader::events::bind_error &ev) noexcept {
   if (g_callback_state == nullptr) {
     return;
   }
@@ -313,13 +321,13 @@ void on_bind_error(const emel::cact::loader::events::bind_error &ev) {
   g_callback_state->bind_error = ev.err;
 }
 
-void on_parse_done(const emel::cact::loader::events::parse_done &) {
+void on_parse_done(const emel::cact::loader::events::parse_done &) noexcept {
   if (g_callback_state != nullptr) {
     ++g_callback_state->parse_done_count;
   }
 }
 
-void on_parse_error(const emel::cact::loader::events::parse_error &ev) {
+void on_parse_error(const emel::cact::loader::events::parse_error &ev) noexcept {
   if (g_callback_state == nullptr) {
     return;
   }
@@ -581,6 +589,35 @@ TEST_CASE("cact loader rejects non-finite codebook values") {
     CHECK(state.probe_error_count == 1u);
     CHECK(state.probe_error ==
           emel::error::cast(emel::cact::loader::error::model_invalid));
+    CHECK(machine.is(
+        stateforward::sml::state<emel::cact::loader::state_errored>));
+  }
+}
+
+TEST_CASE("cact loader rejects invalid rope theta metadata without publication") {
+  for (const float value : {std::numeric_limits<float>::quiet_NaN(),
+                            std::numeric_limits<float>::infinity(),
+                            -std::numeric_limits<float>::infinity(), 0.0f,
+                            -1.0f}) {
+    CAPTURE(value);
+    emel::cact::loader::sm machine{};
+    callback_state state = {};
+    callback_scope scope{state};
+    const std::vector<uint8_t> file_bytes = make_rope_theta_cact_file(value);
+    emel::cact::loader::geometry geometry = {};
+    geometry.num_tensors = 77u;
+    geometry.rope_theta = 42.0f;
+    const emel::cact::loader::event::probe probe{
+        std::span<const uint8_t>{file_bytes}, geometry, k_probe_done_cb,
+        k_probe_error_cb};
+
+    CHECK_FALSE(machine.process_event(probe));
+    CHECK(state.probe_done_count == 0u);
+    CHECK(state.probe_error_count == 1u);
+    CHECK(state.probe_error ==
+          emel::error::cast(emel::cact::loader::error::model_invalid));
+    CHECK(geometry.num_tensors == 77u);
+    CHECK(geometry.rope_theta == doctest::Approx(42.0f));
     CHECK(machine.is(
         stateforward::sml::state<emel::cact::loader::state_errored>));
   }

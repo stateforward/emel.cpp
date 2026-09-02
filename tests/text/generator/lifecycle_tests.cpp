@@ -75,14 +75,14 @@ struct callback_tracker {
 };
 
 void on_initialize_done(
-    void *owner, const emel::text::generator::events::initialize_done &ev) {
+    void *owner, const emel::text::generator::events::initialize_done &ev) noexcept {
   auto *tracker = static_cast<callback_tracker *>(owner);
   tracker->initialize_done_called = true;
   tracker->initialize_request = ev.request;
 }
 
 void on_initialize_error(
-    void *owner, const emel::text::generator::events::initialize_error &ev) {
+    void *owner, const emel::text::generator::events::initialize_error &ev) noexcept {
   auto *tracker = static_cast<callback_tracker *>(owner);
   tracker->initialize_error_called = true;
   tracker->initialize_request = ev.request;
@@ -90,7 +90,7 @@ void on_initialize_error(
 }
 
 void on_generate_done(
-    void *owner, const emel::text::generator::events::generation_done &ev) {
+    void *owner, const emel::text::generator::events::generation_done &ev) noexcept {
   auto *tracker = static_cast<callback_tracker *>(owner);
   tracker->generate_done_called = true;
   tracker->generate_request = ev.request;
@@ -99,7 +99,7 @@ void on_generate_done(
 }
 
 void on_generate_error(
-    void *owner, const emel::text::generator::events::generation_error &ev) {
+    void *owner, const emel::text::generator::events::generation_error &ev) noexcept {
   auto *tracker = static_cast<callback_tracker *>(owner);
   tracker->generate_error_called = true;
   tracker->generate_request = ev.request;
@@ -138,7 +138,7 @@ bool tokenizer_tokenize_dispatch(
 emel::error::type sampler_select_argmax(int32_t &candidate_ids,
                                         float &candidate_scores,
                                         int32_t &candidate_count,
-                                        int32_t &selected_token_out) {
+                                        int32_t &selected_token_out) noexcept {
   int32_t best_index = 0;
   float best_score = (&candidate_scores)[0];
   for (int32_t idx = 1; idx < candidate_count; ++idx) {

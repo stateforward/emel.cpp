@@ -84,7 +84,7 @@ struct callback_recorder {
 };
 
 bool on_bind_done(void *owner,
-                  const emel::text::conditioner::events::binding_done &) {
+                  const emel::text::conditioner::events::binding_done &) noexcept {
   if (owner == nullptr) {
     return false;
   }
@@ -93,7 +93,7 @@ bool on_bind_done(void *owner,
 }
 
 bool on_bind_error(void *owner,
-                   const emel::text::conditioner::events::binding_error &ev) {
+                   const emel::text::conditioner::events::binding_error &ev) noexcept {
   if (owner == nullptr) {
     return false;
   }
@@ -104,7 +104,7 @@ bool on_bind_error(void *owner,
 }
 
 bool on_prepare_done(
-    void *owner, const emel::text::conditioner::events::conditioning_done &ev) {
+    void *owner, const emel::text::conditioner::events::conditioning_done &ev) noexcept {
   if (owner == nullptr) {
     return false;
   }
@@ -116,7 +116,7 @@ bool on_prepare_done(
 
 bool on_prepare_error(
     void *owner,
-    const emel::text::conditioner::events::conditioning_error &ev) {
+    const emel::text::conditioner::events::conditioning_error &ev) noexcept {
   if (owner == nullptr) {
     return false;
   }

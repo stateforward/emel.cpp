@@ -17,11 +17,11 @@ using emel::text::jinja::events::parsing_error;
 using done_cb = parse::done_callback;
 using error_cb = parse::error_callback;
 
-bool ignore_done_callback(const parsing_done &) {
+bool ignore_done_callback(const parsing_done &) noexcept {
   return true;
 }
 
-bool ignore_error_callback(const parsing_error &) {
+bool ignore_error_callback(const parsing_error &) noexcept {
   return true;
 }
 
@@ -34,12 +34,12 @@ struct callback_tracker {
   int32_t err = static_cast<int32_t>(emel::text::jinja::parser::error::none);
   size_t error_pos = 0;
 
-  bool on_done(const parsing_done &) {
+  bool on_done(const parsing_done &) noexcept {
     done_called = true;
     return true;
   }
 
-  bool on_error(const parsing_error & ev) {
+  bool on_error(const parsing_error & ev) noexcept {
     error_called = true;
     err = ev.err;
     error_pos = ev.error_pos;

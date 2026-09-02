@@ -1,8 +1,10 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <span>
 #include <string>
@@ -36,14 +38,14 @@ struct loader_scope {
   ~loader_scope() { g_loader_state = nullptr; }
 };
 
-void on_load_done(const emel::text::tokenizer::needle::events::load_done &) {
+void on_load_done(const emel::text::tokenizer::needle::events::load_done &) noexcept {
   if (g_loader_state != nullptr) {
     ++g_loader_state->done_count;
   }
 }
 
 void on_load_error(
-    const emel::text::tokenizer::needle::events::load_error &ev) {
+    const emel::text::tokenizer::needle::events::load_error &ev) noexcept {
   if (g_loader_state == nullptr) {
     return;
   }
@@ -56,12 +58,12 @@ const emel::text::tokenizer::needle::event::load_done_fn k_load_done_cb =
 const emel::text::tokenizer::needle::event::load_error_fn k_load_error_cb =
     emel::text::tokenizer::needle::event::load_error_fn::from<&on_load_error>();
 
-void on_cact_probe_done(const emel::cact::loader::events::probe_done &) {}
-void on_cact_probe_error(const emel::cact::loader::events::probe_error &) {}
-void on_cact_bind_done(const emel::cact::loader::events::bind_done &) {}
-void on_cact_bind_error(const emel::cact::loader::events::bind_error &) {}
-void on_cact_parse_done(const emel::cact::loader::events::parse_done &) {}
-void on_cact_parse_error(const emel::cact::loader::events::parse_error &) {}
+void on_cact_probe_done(const emel::cact::loader::events::probe_done &) noexcept {}
+void on_cact_probe_error(const emel::cact::loader::events::probe_error &) noexcept {}
+void on_cact_bind_done(const emel::cact::loader::events::bind_done &) noexcept {}
+void on_cact_bind_error(const emel::cact::loader::events::bind_error &) noexcept {}
+void on_cact_parse_done(const emel::cact::loader::events::parse_done &) noexcept {}
+void on_cact_parse_error(const emel::cact::loader::events::parse_error &) noexcept {}
 
 const emel::cact::loader::event::probe_done_fn k_cact_probe_done_cb =
     emel::cact::loader::event::probe_done_fn::from<&on_cact_probe_done>();
@@ -76,8 +78,8 @@ const emel::cact::loader::event::parse_done_fn k_cact_parse_done_cb =
 const emel::cact::loader::event::parse_error_fn k_cact_parse_error_cb =
     emel::cact::loader::event::parse_error_fn::from<&on_cact_parse_error>();
 
-void on_needle_bind_done(const emel::model::needle::events::bind_done &) {}
-void on_needle_bind_error(const emel::model::needle::events::bind_error &) {}
+void on_needle_bind_done(const emel::model::needle::events::bind_done &) noexcept {}
+void on_needle_bind_error(const emel::model::needle::events::bind_error &) noexcept {}
 
 const emel::model::needle::event::bind_done_fn k_needle_bind_done_cb =
     emel::model::needle::event::bind_done_fn::from<&on_needle_bind_done>();
@@ -682,6 +684,53 @@ TEST_CASE("needle tokenizer loader rejects malformed blobs") {
     CHECK(
         state.err ==
         emel::error::cast(emel::text::tokenizer::needle::error::model_invalid));
+    CHECK(machine.is(stateforward::sml::state<
+                     emel::text::tokenizer::needle::state_errored>));
+  }
+}
+
+TEST_CASE("needle tokenizer loader rejects non-finite piece scores before publication") {
+  const std::vector<uint8_t> file_bytes =
+      read_file_bytes(repo_relative("tests/models/route-w4-qat.cact"));
+  std::vector<emel::cact::loader::tensor_view> tensors;
+  emel::model::needle::contract contract = {};
+  const std::span<const uint8_t> blob =
+      fixture_tokenizer_blob(file_bytes, tensors, contract);
+
+  for (const float value : {std::numeric_limits<float>::quiet_NaN(),
+                            std::numeric_limits<float>::infinity(),
+                            -std::numeric_limits<float>::infinity()}) {
+    CAPTURE(value);
+    std::vector<uint8_t> corrupted{blob.begin(), blob.end()};
+    uint32_t raw = 0u;
+    static_assert(sizeof(raw) == sizeof(value));
+    std::memcpy(&raw, &value, sizeof(raw));
+    for (size_t byte = 0u; byte < sizeof(raw); ++byte) {
+      corrupted[emel::text::tokenizer::needle::detail::constants::header_bytes +
+                byte] = static_cast<uint8_t>(raw >> (byte * 8u));
+    }
+
+    emel::text::tokenizer::needle::sm machine{};
+    loader_state state = {};
+    loader_scope scope{state};
+    auto vocab = std::make_unique<emel::model::data::vocab>();
+    vocab->n_tokens = 9u;
+    vocab->token_bytes_used = 7u;
+    vocab->entries[0].text_length = 3u;
+    vocab->token_storage[0] = 'x';
+    const emel::text::tokenizer::needle::event::load load{
+        std::span<const uint8_t>{corrupted}, *vocab, k_load_done_cb,
+        k_load_error_cb};
+
+    CHECK_FALSE(machine.process_event(load));
+    CHECK(state.done_count == 0u);
+    CHECK(state.error_count == 1u);
+    CHECK(state.err == emel::error::cast(
+                           emel::text::tokenizer::needle::error::model_invalid));
+    CHECK(vocab->n_tokens == 0u);
+    CHECK(vocab->token_bytes_used == 0u);
+    CHECK(vocab->entries[0].text_length == 0u);
+    CHECK(vocab->token_storage[0] == '\0');
     CHECK(machine.is(stateforward::sml::state<
                      emel::text::tokenizer::needle::state_errored>));
   }

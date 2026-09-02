@@ -13,11 +13,11 @@
 
 namespace {
 
-bool parser_done_sink(const emel::text::jinja::events::parsing_done &) {
+bool parser_done_sink(const emel::text::jinja::events::parsing_done &) noexcept {
   return true;
 }
 
-bool parser_error_sink(const emel::text::jinja::events::parsing_error &) {
+bool parser_error_sink(const emel::text::jinja::events::parsing_error &) noexcept {
   return true;
 }
 
@@ -94,11 +94,11 @@ emel::text::jinja::value make_array(emel::text::jinja::value * items, size_t cou
   return out;
 }
 
-bool formatter_done_sink(const emel::text::jinja::events::rendering_done &) {
+bool formatter_done_sink(const emel::text::jinja::events::rendering_done &) noexcept {
   return true;
 }
 
-bool formatter_error_sink(const emel::text::jinja::events::rendering_error &) {
+bool formatter_error_sink(const emel::text::jinja::events::rendering_error &) noexcept {
   return true;
 }
 

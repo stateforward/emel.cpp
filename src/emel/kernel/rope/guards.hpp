@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cmath>
+
 #include "emel/kernel/rope/actions.hpp"
 
 namespace emel::kernel::rope::guard {
@@ -10,9 +12,10 @@ struct guard_execute_precompute {
     const auto &request = ev.request;
     const uint64_t table =
         static_cast<uint64_t>(request.positions) * (request.head_dim / 2u);
-    return request.theta > 0.0f && request.head_dim >= 2u &&
-           (request.head_dim % 2u) == 0u && request.positions > 0u &&
-           request.cos_out.size() >= table && request.sin_out.size() >= table;
+    return std::isfinite(request.theta) && request.theta > 0.0f &&
+           request.head_dim >= 2u && (request.head_dim % 2u) == 0u &&
+           request.positions > 0u && request.cos_out.size() >= table &&
+           request.sin_out.size() >= table;
   }
 };
 

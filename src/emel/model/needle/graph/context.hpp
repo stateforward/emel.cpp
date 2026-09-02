@@ -2,6 +2,7 @@
 
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <utility>
@@ -20,6 +21,7 @@
 #include "emel/model/needle/graph/errors.hpp"
 #include "emel/model/needle/events.hpp"
 #include "emel/model/needle/detail.hpp"
+#include "emel/kernel/cq/detail.hpp"
 
 
 namespace emel::model::needle::graph::action {
@@ -126,12 +128,130 @@ inline uint64_t compute_in_pad(const tensor_view &view) noexcept {
   const uint64_t group = view.group != 0u ? view.group : 1u;
   return (static_cast<uint64_t>(view.shape[1]) + group - 1u) / group * group;
 }
+inline bool validate_fp16_payload(const tensor_view &view,
+                                  const uint64_t elements) noexcept {
+  uint64_t required = 0u;
+  return checked_mul(elements, sizeof(uint16_t), required) &&
+         view.data != nullptr && view.nbytes >= required &&
+         (reinterpret_cast<uintptr_t>(view.data) % alignof(uint16_t)) == 0u;
+}
+
+inline bool validate_cq4_payload(const tensor_view &view,
+                                 const needle::geometry &geo) noexcept {
+  return emel::kernel::cq::detail::valid_packed_view<4u>(
+      view, std::span<const float>{geo.codebook.data(),
+                                  emel::cact::loader::k_codebook_len});
+}
+
+inline bool validate_layer_views(const needle::layer_views &layer,
+                                 const needle::geometry &geo) noexcept {
+  const std::array<tensor_view, needle::k_layer_tensor_count> views = {
+      layer.norm_in,   layer.q_proj,   layer.k_proj,  layer.v_proj,
+      layer.q_norm,    layer.k_norm,   layer.gate_proj,
+      layer.out_proj,  layer.post_norm, layer.attn_gate,
+      layer.pre_hada,  layer.d1,       layer.d2,      layer.d3,
+  };
+  needle::layer_views validated{};
+  if (needle::detail::bind_layer(views, geo, validated) !=
+      needle::detail::cast_needle_error(needle::error::none))
+    return false;
+  return validate_fp16_payload(layer.norm_in, geo.d_model) &&
+         validate_cq4_payload(layer.q_proj, geo) &&
+         validate_cq4_payload(layer.k_proj, geo) &&
+         validate_cq4_payload(layer.v_proj, geo) &&
+         validate_fp16_payload(layer.q_norm, geo.head_dim) &&
+         validate_fp16_payload(layer.k_norm, geo.head_dim) &&
+         validate_cq4_payload(layer.gate_proj, geo) &&
+         validate_cq4_payload(layer.out_proj, geo) &&
+         validate_fp16_payload(layer.post_norm, geo.d_model) &&
+         validate_fp16_payload(layer.attn_gate, 1u) &&
+         validate_fp16_payload(layer.pre_hada, geo.d_model) &&
+         validate_fp16_payload(layer.d1, geo.hada_n) &&
+         validate_fp16_payload(layer.d2, geo.hada_n) &&
+         validate_fp16_payload(layer.d3, geo.hada_n);
+}
+
+inline bool validate_mhc_views(const needle::mhc_views &mhc,
+                               const needle::geometry &geo) noexcept {
+  const std::array<tensor_view, needle::k_mhc_tensor_count> views = {
+      mhc.a_pre, mhc.a_post, mhc.a_res, mhc.b_pre, mhc.b_post,
+      mhc.b_res, mhc.phi_pre, mhc.phi_post, mhc.phi_res,
+  };
+  needle::mhc_views validated{};
+  if (needle::detail::bind_mhc(views, geo, validated) !=
+      needle::detail::cast_needle_error(needle::error::none))
+    return false;
+  uint64_t layer_lanes = 0u;
+  uint64_t layer_lane_pairs = 0u;
+  if (!checked_mul(geo.num_layers, geo.mhc_lanes, layer_lanes) ||
+      !checked_mul(layer_lanes, geo.mhc_lanes, layer_lane_pairs))
+    return false;
+  return validate_fp16_payload(mhc.a_pre, geo.num_layers) &&
+         validate_fp16_payload(mhc.a_post, geo.num_layers) &&
+         validate_fp16_payload(mhc.a_res, geo.num_layers) &&
+         validate_fp16_payload(mhc.b_pre, layer_lanes) &&
+         validate_fp16_payload(mhc.b_post, layer_lanes) &&
+         validate_fp16_payload(mhc.b_res, layer_lane_pairs) &&
+         validate_cq4_payload(mhc.phi_pre, geo) &&
+         validate_cq4_payload(mhc.phi_post, geo) &&
+         validate_cq4_payload(mhc.phi_res, geo);
+}
+
+inline bool validate_engram_views(const needle::engram_site_views &site,
+                                  const needle::geometry &geo) noexcept {
+  const std::array<tensor_view, needle::k_engram_site_tensor_count> views = {
+      site.tables, site.key_proj, site.value_proj, site.taps};
+  needle::engram_site_views validated{};
+  if (needle::detail::bind_engram_site(views, geo, validated) !=
+      needle::detail::cast_needle_error(needle::error::none))
+    return false;
+  uint64_t taps = 0u;
+  return checked_mul(geo.engram_conv_taps, geo.d_model, taps) &&
+         validate_cq4_payload(site.tables, geo) &&
+         validate_cq4_payload(site.key_proj, geo) &&
+         validate_cq4_payload(site.value_proj, geo) &&
+         validate_fp16_payload(site.taps, taps);
+}
+
+inline bool validate_graph_contract(const needle::contract &bound) noexcept {
+  const auto &geo = bound.geo;
+  if (needle::detail::validate_geometry(geo) !=
+          needle::detail::cast_needle_error(needle::error::none) ||
+      bound.layer_count != geo.num_layers ||
+      bound.engram_site_count != geo.num_engram_sites ||
+      !std::isfinite(geo.rope_theta) || geo.rope_theta <= 0.0f)
+    return false;
+  for (const float value : geo.codebook)
+    if (!std::isfinite(value))
+      return false;
+  const needle::detail::role_spec embedding_spec = {
+      needle::detail::constants::dtype_cq, 2u,
+      {geo.vocab_size, geo.d_model, 0u, 0u}};
+  if (needle::detail::validate_role(bound.embedding, embedding_spec) !=
+          needle::detail::cast_needle_error(needle::error::none) ||
+      !validate_cq4_payload(bound.embedding, geo))
+    return false;
+  for (uint32_t layer = 0u; layer < bound.layer_count; ++layer)
+    if (!validate_layer_views(bound.layers[layer], geo))
+      return false;
+  if (!validate_mhc_views(bound.mhc, geo))
+    return false;
+  for (uint32_t site = 0u; site < bound.engram_site_count; ++site)
+    if (!validate_engram_views(bound.engram_sites[site], geo))
+      return false;
+  const needle::detail::role_spec final_norm_spec = {
+      needle::detail::constants::dtype_fp16, 1u,
+      {geo.d_model, 0u, 0u, 0u}};
+  return needle::detail::validate_role(bound.final_norm, final_norm_spec) ==
+             needle::detail::cast_needle_error(needle::error::none) &&
+         validate_fp16_payload(bound.final_norm, geo.d_model);
+}
+
 
 inline bool compute_storage_plan(const needle::contract &bound,
                                  storage_plan &plan) noexcept {
   const auto &geo = bound.geo;
-  if (needle::detail::validate_geometry(geo) !=
-      needle::detail::cast_needle_error(needle::error::none))
+  if (!validate_graph_contract(bound))
     return false;
 
   uint64_t cache_layer = 0u;
@@ -269,17 +389,17 @@ validate_construction(const needle::contract &bound) noexcept {
 struct context {
   explicit context(const needle::contract &contract_in,
                    const bool parallel_projection_wave = false)
-      : bound(&contract_in),
+      : bound(contract_in),
         parallel_projection_wave(parallel_projection_wave) {
     storage_plan plan{};
-    construction_error = compute_storage_plan(contract_in, plan)
+    construction_error = compute_storage_plan(bound, plan)
                              ? emel::error::cast(error::none)
                              : emel::error::cast(error::geometry_unsupported);
     storage_valid = construction_error == emel::error::cast(error::none);
     if (!storage_valid)
       return;
 
-    const auto &geo = contract_in.geo;
+    const auto &geo = bound.geo;
     const uint64_t d_model = geo.d_model;
     const uint64_t lanes_dim = plan.lanes_dim;
     const uint64_t attn_dim = plan.attn_dim;
@@ -375,8 +495,9 @@ struct context {
   }
 
 
-  // Bound contract (named views over the mmapped .cact); outlives the graph.
-  const needle::contract *bound = nullptr;
+  // Immutable graph-owned metadata. Tensor payload bytes remain borrowed from
+  // the mapped model image and must outlive this graph.
+  const needle::contract bound;
   bool storage_valid = false;
   bool avx2_fma_available =
       emel::kernel::x86_64::detail::detect_avx2() &&

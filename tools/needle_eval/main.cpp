@@ -115,16 +115,16 @@ void on_release_error(
   static_cast<release_owner_state *>(object)->error = true;
 }
 
-void on_probe_done(const cact_loader::events::probe_done &) {}
-void on_probe_error(const cact_loader::events::probe_error &) {}
-void on_bind_done(const cact_loader::events::bind_done &) {}
-void on_bind_error(const cact_loader::events::bind_error &) {}
-void on_parse_done(const cact_loader::events::parse_done &) {}
-void on_parse_error(const cact_loader::events::parse_error &) {}
-void on_needle_done(const needle::events::bind_done &) {}
-void on_needle_error(const needle::events::bind_error &) {}
-void on_tok_load_done(const emel::text::tokenizer::needle::events::load_done &) {}
-void on_tok_load_error(const emel::text::tokenizer::needle::events::load_error &) {}
+void on_probe_done(const cact_loader::events::probe_done &) noexcept {}
+void on_probe_error(const cact_loader::events::probe_error &) noexcept {}
+void on_bind_done(const cact_loader::events::bind_done &) noexcept {}
+void on_bind_error(const cact_loader::events::bind_error &) noexcept {}
+void on_parse_done(const cact_loader::events::parse_done &) noexcept {}
+void on_parse_error(const cact_loader::events::parse_error &) noexcept {}
+void on_needle_done(const needle::events::bind_done &) noexcept {}
+void on_needle_error(const needle::events::bind_error &) noexcept {}
+void on_tok_load_done(const emel::text::tokenizer::needle::events::load_done &) noexcept {}
+void on_tok_load_error(const emel::text::tokenizer::needle::events::load_error &) noexcept {}
 
 uint64_t bounded_file_size(const char *path, const uint64_t max_bytes,
                            const char *open_error, const char *size_error,

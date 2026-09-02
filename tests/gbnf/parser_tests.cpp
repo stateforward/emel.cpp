@@ -23,14 +23,16 @@ struct error_capture {
   int32_t err = 0;
 };
 
-bool dispatch_done_test(void *owner, const emel::gbnf::rule_parser::events::parsing_done &ev) {
+bool dispatch_done_test(void *owner,
+                        const emel::gbnf::rule_parser::events::parsing_done &ev) noexcept {
   auto *capture = static_cast<done_capture *>(owner);
   capture->called = true;
   capture->grammar = &ev.grammar;
   return true;
 }
 
-bool dispatch_error_test(void *owner, const emel::gbnf::rule_parser::events::parsing_error &ev) {
+bool dispatch_error_test(
+    void *owner, const emel::gbnf::rule_parser::events::parsing_error &ev) noexcept {
   auto *capture = static_cast<error_capture *>(owner);
   capture->called = true;
   capture->grammar = &ev.grammar;

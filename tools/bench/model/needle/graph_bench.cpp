@@ -289,14 +289,14 @@ std::uint64_t benchmark_timestamp_now_ns() noexcept {
   std::exit(1);
 }
 
-void on_loader_probe_done(const cact_loader::events::probe_done &) {}
-void on_loader_probe_error(const cact_loader::events::probe_error &) {}
-void on_loader_bind_done(const cact_loader::events::bind_done &) {}
-void on_loader_bind_error(const cact_loader::events::bind_error &) {}
-void on_loader_parse_done(const cact_loader::events::parse_done &) {}
-void on_loader_parse_error(const cact_loader::events::parse_error &) {}
-void on_needle_bind_done(const needle::events::bind_done &) {}
-void on_needle_bind_error(const needle::events::bind_error &) {}
+void on_loader_probe_done(const cact_loader::events::probe_done &) noexcept {}
+void on_loader_probe_error(const cact_loader::events::probe_error &) noexcept {}
+void on_loader_bind_done(const cact_loader::events::bind_done &) noexcept {}
+void on_loader_bind_error(const cact_loader::events::bind_error &) noexcept {}
+void on_loader_parse_done(const cact_loader::events::parse_done &) noexcept {}
+void on_loader_parse_error(const cact_loader::events::parse_error &) noexcept {}
+void on_needle_bind_done(const needle::events::bind_done &) noexcept {}
+void on_needle_bind_error(const needle::events::bind_error &) noexcept {}
 
 const cact_loader::event::probe_done_fn k_probe_done =
     cact_loader::event::probe_done_fn::from<&on_loader_probe_done>();

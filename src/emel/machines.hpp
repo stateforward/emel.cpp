@@ -21,6 +21,8 @@
 #include "emel/memory/recurrent/sm.hpp"
 #include "emel/memory/streaming/sm.hpp"
 #include "emel/model/loader/sm.hpp"
+#include "emel/model/needle/graph/sm.hpp"
+#include "emel/model/needle/sm.hpp"
 #include "emel/model/tensor/sm.hpp"
 #include "emel/speech/codec/mimi/sm.hpp"
 #include "emel/speech/generator/sm.hpp"
@@ -29,6 +31,7 @@
 #include "emel/text/encoders/any.hpp"
 #include "emel/text/generator/sm.hpp"
 #include "emel/text/renderer/sm.hpp"
+#include "emel/text/tokenizer/needle/sm.hpp"
 #include "emel/text/tokenizer/sm.hpp"
 
 namespace emel {
@@ -66,6 +69,9 @@ using MemoryStreaming = emel::memory::streaming::sm;
 using ModelLoader = emel::model::loader::sm;
 using Parser = emel::gguf::loader::sm;
 using CactLoader = emel::cact::loader::sm;
+using NeedleBinder = emel::model::needle::sm;
+using NeedleGraph = emel::model::needle::graph::sm;
+using NeedleTokenizerLoader = emel::text::tokenizer::needle::sm;
 using Renderer = emel::text::renderer::sm;
 using Tokenizer = emel::text::tokenizer::sm;
 using ModelTensor = emel::model::tensor::sm;

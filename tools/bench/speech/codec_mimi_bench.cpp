@@ -28,17 +28,17 @@ namespace mimi = emel::speech::codec::mimi;
 
 int32_t g_frame_samples = 0;
 int32_t g_n_q = 0;
-void on_codec_initialized(const mimi::events::initialize_done &done) {
+void on_codec_initialized(const mimi::events::initialize_done &done) noexcept {
   g_frame_samples = done.frame_samples;
   g_n_q = done.n_q;
 }
 
-void noop_probe_done(const emel::gguf::loader::events::probe_done &) {}
-void noop_probe_error(const emel::gguf::loader::events::probe_error &) {}
-void noop_bind_done(const emel::gguf::loader::events::bind_done &) {}
-void noop_bind_error(const emel::gguf::loader::events::bind_error &) {}
-void noop_parse_done(const emel::gguf::loader::events::parse_done &) {}
-void noop_parse_error(const emel::gguf::loader::events::parse_error &) {}
+void noop_probe_done(const emel::gguf::loader::events::probe_done &) noexcept {}
+void noop_probe_error(const emel::gguf::loader::events::probe_error &) noexcept {}
+void noop_bind_done(const emel::gguf::loader::events::bind_done &) noexcept {}
+void noop_bind_error(const emel::gguf::loader::events::bind_error &) noexcept {}
+void noop_parse_done(const emel::gguf::loader::events::parse_done &) noexcept {}
+void noop_parse_error(const emel::gguf::loader::events::parse_error &) noexcept {}
 
 struct codec_fixture {
   std::vector<uint8_t> file_bytes = {};

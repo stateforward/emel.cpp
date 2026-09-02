@@ -49,7 +49,7 @@ inline bool layer_is_engram_site(const emel::cact::loader::geometry &geo,
 struct guard_route_avx2 {
   bool operator()(const event::step_run &,
                   const action::context &ctx) const noexcept {
-    const auto &geo = ctx.bound->geo;
+    const auto &geo = ctx.bound.geo;
     return ctx.storage_valid && k_avx2_route_available &&
            ctx.avx2_fma_available &&
 #if defined(__F16C__)
@@ -58,7 +58,7 @@ struct guard_route_avx2 {
            false &&
 #endif
            geo.d_model == 512u && geo.hada_n == 512u &&
-           cq_group128(*ctx.bound);
+           cq_group128(ctx.bound);
   }
 };
 
@@ -72,7 +72,7 @@ struct guard_route_scalar {
 struct guard_attend_gqa2 {
   bool operator()(const event::step_run &ev,
                   const action::context &ctx) const noexcept {
-    const auto &geo = ctx.bound->geo;
+    const auto &geo = ctx.bound.geo;
     return ev.ctx.err == emel::error::cast(error::none) &&
            k_avx2_route_available && ctx.avx2_fma_available &&
            geo.num_heads == geo.num_kv_heads * 2u && geo.head_dim > 0u &&
@@ -115,13 +115,13 @@ struct guard_deployment_f32 {
 struct guard_init_supported {
   bool operator()(const event::init_run &,
                   const action::context &ctx) const noexcept {
-    const auto &geo = ctx.bound->geo;
+    const auto &geo = ctx.bound.geo;
     return ctx.storage_valid && geo.d_model > 0u && geo.num_heads > 0u &&
            geo.num_kv_heads > 0u &&
            (geo.num_heads % geo.num_kv_heads) == 0u && geo.head_dim >= 2u &&
            (geo.head_dim % 2u) == 0u &&
            static_cast<uint64_t>(geo.num_heads) * geo.head_dim >= geo.d_model &&
-           geo.num_layers > 0u && ctx.bound->layer_count == geo.num_layers &&
+           geo.num_layers > 0u && ctx.bound.layer_count == geo.num_layers &&
            is_power_of_two(geo.hada_n) && geo.hada_n >= geo.d_model &&
            geo.mhc_lanes > 0u &&
            geo.mhc_lanes <= emel::kernel::mhc::event::k_max_lanes &&
@@ -131,9 +131,9 @@ struct guard_init_supported {
              (geo.num_engram_tables % geo.num_engram_orders) == 0u &&
              geo.engram_conv_taps > 0u && geo.engram_conv_dilation > 0u &&
              geo.engram_slots > 0u)) &&
-           ctx.bound->engram_site_count == geo.num_engram_sites &&
+           ctx.bound.engram_site_count == geo.num_engram_sites &&
            geo.kv_window > 0u && geo.max_seq_len > 0u && geo.vocab_size > 0u &&
-           geo.rope_theta > 0.0f && ctx.bound->embedding.bits == 4u;
+           geo.rope_theta > 0.0f && ctx.bound.embedding.bits == 4u;
   }
 };
 
@@ -163,7 +163,7 @@ struct guard_init_failed {
 struct guard_step_valid {
   bool operator()(const event::step_run &ev,
                   const action::context &ctx) const noexcept {
-    const auto &geo = ctx.bound->geo;
+    const auto &geo = ctx.bound.geo;
     const bool logits_ok =
         !ev.ctx.want_logits || ev.ctx.logits_out.size() >= geo.vocab_size;
     return ev.ctx.token >= 0 &&
@@ -196,14 +196,14 @@ struct guard_step_failed {
 struct guard_engram_present {
   bool operator()(const event::step_run &,
                   const action::context &ctx) const noexcept {
-    return ctx.bound->geo.num_engram_sites > 0u;
+    return ctx.bound.geo.num_engram_sites > 0u;
   }
 };
 
 struct guard_engram_absent {
   bool operator()(const event::step_run &,
                   const action::context &ctx) const noexcept {
-    return ctx.bound->geo.num_engram_sites == 0u;
+    return ctx.bound.geo.num_engram_sites == 0u;
   }
 };
 
@@ -211,7 +211,7 @@ struct guard_layer_engram_site {
   bool operator()(const event::step_run &ev,
                   const action::context &ctx) const noexcept {
     return guard_step_ok{}(ev, ctx) &&
-           layer_is_engram_site(ctx.bound->geo, ev.ctx.layer_index);
+           layer_is_engram_site(ctx.bound.geo, ev.ctx.layer_index);
   }
 };
 
@@ -219,7 +219,7 @@ struct guard_layer_plain {
   bool operator()(const event::step_run &ev,
                   const action::context &ctx) const noexcept {
     return guard_step_ok{}(ev, ctx) &&
-           !layer_is_engram_site(ctx.bound->geo, ev.ctx.layer_index);
+           !layer_is_engram_site(ctx.bound.geo, ev.ctx.layer_index);
   }
 };
 
@@ -229,7 +229,7 @@ struct guard_window_growing {
   bool operator()(const event::step_run &ev,
                   const action::context &ctx) const noexcept {
     return guard_step_ok{}(ev, ctx) &&
-           ctx.position + 1u <= ctx.bound->geo.kv_window;
+           ctx.position + 1u <= ctx.bound.geo.kv_window;
   }
 };
 
@@ -237,7 +237,7 @@ struct guard_window_full {
   bool operator()(const event::step_run &ev,
                   const action::context &ctx) const noexcept {
     return guard_step_ok{}(ev, ctx) &&
-           ctx.position + 1u > ctx.bound->geo.kv_window;
+           ctx.position + 1u > ctx.bound.geo.kv_window;
   }
 };
 
@@ -245,7 +245,7 @@ struct guard_more_layers {
   bool operator()(const event::step_run &ev,
                   const action::context &ctx) const noexcept {
     return guard_step_ok{}(ev, ctx) &&
-           ev.ctx.layer_index + 1u < ctx.bound->geo.num_layers;
+           ev.ctx.layer_index + 1u < ctx.bound.geo.num_layers;
   }
 };
 
@@ -253,7 +253,7 @@ struct guard_layers_done_want_logits {
   bool operator()(const event::step_run &ev,
                   const action::context &ctx) const noexcept {
     return guard_step_ok{}(ev, ctx) &&
-           ev.ctx.layer_index + 1u >= ctx.bound->geo.num_layers &&
+           ev.ctx.layer_index + 1u >= ctx.bound.geo.num_layers &&
            ev.ctx.want_logits;
   }
 };
@@ -262,7 +262,7 @@ struct guard_layers_done_no_logits {
   bool operator()(const event::step_run &ev,
                   const action::context &ctx) const noexcept {
     return guard_step_ok{}(ev, ctx) &&
-           ev.ctx.layer_index + 1u >= ctx.bound->geo.num_layers &&
+           ev.ctx.layer_index + 1u >= ctx.bound.geo.num_layers &&
            !ev.ctx.want_logits;
   }
 };

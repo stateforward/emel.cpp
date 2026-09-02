@@ -98,7 +98,7 @@ struct sm : public emel::sm<model, action::context> {
   emel::error::type sample(int32_t & candidate_ids,
                            float & candidate_scores,
                            int32_t & candidate_count,
-                           int32_t & selected_token_out) {
+                           int32_t & selected_token_out) noexcept {
     emel::error::type err = emel::error::cast(error::none);
     const event::sample request{
       candidate_ids,

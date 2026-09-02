@@ -245,6 +245,10 @@ inline emel::error::type read_header(bounded_reader &reader,
   if (!reader.read_f32(geometry_out.rope_theta)) {
     return cast_loader_error(error::parse_failed);
   }
+  if (!std::isfinite(geometry_out.rope_theta) ||
+      geometry_out.rope_theta <= 0.0f) {
+    return cast_loader_error(error::model_invalid);
+  }
 
   if (reader.offset != constants::header_bytes) {
     return cast_loader_error(error::internal_error);

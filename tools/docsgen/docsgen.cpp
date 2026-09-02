@@ -266,11 +266,11 @@ struct template_var {
   std::string value;
 };
 
-bool parser_parse_done_sink(const emel::text::jinja::events::parsing_done &) {
+bool parser_parse_done_sink(const emel::text::jinja::events::parsing_done &) noexcept {
   return true;
 }
 
-bool parser_parse_error_sink(const emel::text::jinja::events::parsing_error &) {
+bool parser_parse_error_sink(const emel::text::jinja::events::parsing_error &) noexcept {
   return true;
 }
 

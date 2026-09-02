@@ -13,12 +13,12 @@ constexpr size_t k_max_fuzz_kv_arena_bytes = 16 * 1024;
 constexpr size_t k_max_fuzz_kv_entries = 256;
 constexpr size_t k_max_fuzz_tensors = 256;
 
-void on_probe_done(const emel::gguf::loader::events::probe_done &) {}
-void on_probe_error(const emel::gguf::loader::events::probe_error &) {}
-void on_bind_done(const emel::gguf::loader::events::bind_done &) {}
-void on_bind_error(const emel::gguf::loader::events::bind_error &) {}
-void on_parse_done(const emel::gguf::loader::events::parse_done &) {}
-void on_parse_error(const emel::gguf::loader::events::parse_error &) {}
+void on_probe_done(const emel::gguf::loader::events::probe_done &) noexcept {}
+void on_probe_error(const emel::gguf::loader::events::probe_error &) noexcept {}
+void on_bind_done(const emel::gguf::loader::events::bind_done &) noexcept {}
+void on_bind_error(const emel::gguf::loader::events::bind_error &) noexcept {}
+void on_parse_done(const emel::gguf::loader::events::parse_done &) noexcept {}
+void on_parse_error(const emel::gguf::loader::events::parse_error &) noexcept {}
 
 }  // namespace
 

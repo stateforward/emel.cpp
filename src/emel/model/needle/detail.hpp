@@ -2,6 +2,7 @@
 
 #include <array>
 #include <bit>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -168,7 +169,8 @@ inline emel::error::type validate_geometry(const geometry &geo) noexcept {
   if (geo.d_model == 0u || geo.vocab_size == 0u || geo.num_heads == 0u ||
       geo.num_kv_heads == 0u || geo.head_dim == 0u || geo.hada_n == 0u ||
       geo.mhc_lanes == 0u || geo.kv_window == 0u ||
-      geo.max_seq_len == 0u) {
+      geo.max_seq_len == 0u || !std::isfinite(geo.rope_theta) ||
+      geo.rope_theta <= 0.0f) {
     return cast_needle_error(error::geometry_invalid);
   }
   if (geo.d_model > k_max_d_model || geo.vocab_size > k_max_vocab_size ||

@@ -31,14 +31,14 @@ struct outcome_counts {
 };
 
 void count_done(void *object, const f32_matvec::events::dispatch_done<
-                                  f32_matvec::event::prepare_f32> &outcome) {
+                                  f32_matvec::event::prepare_f32> &outcome) noexcept {
   auto &counts = *static_cast<outcome_counts *>(object);
   ++counts.done;
   counts.done_request = &outcome.request;
 }
 
 void count_error(void *object, const f32_matvec::events::dispatch_error<
-                                   f32_matvec::event::prepare_f32> &outcome) {
+                                   f32_matvec::event::prepare_f32> &outcome) noexcept {
   auto &counts = *static_cast<outcome_counts *>(object);
   ++counts.error;
   counts.error_request = &outcome.request;

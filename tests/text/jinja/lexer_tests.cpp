@@ -31,7 +31,7 @@ struct token_step_result {
   int32_t err = k_ok;
   size_t error_pos = 0;
 
-  bool on_done(const next_done &ev) {
+  bool on_done(const next_done &ev) noexcept {
     done_called = true;
     token = ev.token;
     has_token = ev.has_token;
@@ -39,7 +39,7 @@ struct token_step_result {
     return true;
   }
 
-  bool on_error(const next_error &ev) {
+  bool on_error(const next_error &ev) noexcept {
     error_called = true;
     err = ev.err;
     error_pos = ev.error_pos;

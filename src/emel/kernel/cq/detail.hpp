@@ -18,6 +18,73 @@ namespace emel::kernel::cq::detail {
 inline constexpr uint32_t k_ternary_record_bits = 5u;
 inline constexpr float k_ternary_centroid = 1.2240064f;
 inline constexpr uint32_t k_max_group = 4096u;
+inline float round_ties_to_even(const float value) noexcept {
+  const int32_t truncated = static_cast<int32_t>(value);
+  const float truncated_value = static_cast<float>(truncated);
+  const float fraction = value - truncated_value;
+  if (fraction > 0.5f || (fraction == 0.5f && (truncated & 1) != 0))
+    return static_cast<float>(truncated + 1);
+  if (fraction < -0.5f || (fraction == -0.5f && (truncated & 1) != 0))
+    return static_cast<float>(truncated - 1);
+  return truncated_value;
+}
+
+struct layout {
+  uint32_t in_pad = 0u;
+  uint64_t packed_row_bytes = 0u;
+  uint64_t packed_bytes = 0u;
+  uint64_t norm_row_bytes = 0u;
+  uint64_t norm_bytes = 0u;
+  uint64_t total_bytes = 0u;
+};
+
+inline bool checked_multiply_u64(const uint64_t lhs, const uint64_t rhs,
+                                 uint64_t &product) noexcept {
+  if (lhs != 0u && rhs > UINT64_MAX / lhs)
+    return false;
+  product = lhs * rhs;
+  return true;
+}
+
+inline bool checked_add_u64(const uint64_t lhs, const uint64_t rhs,
+                            uint64_t &sum) noexcept {
+  if (rhs > UINT64_MAX - lhs)
+    return false;
+  sum = lhs + rhs;
+  return true;
+}
+
+template <uint32_t Bits>
+inline bool checked_layout(const uint32_t out, const uint32_t in,
+                           const uint32_t group, layout &result) noexcept {
+  constexpr uint32_t storage_bits =
+      Bits == k_ternary_record_bits ? 2u : Bits;
+  if (out == 0u || in == 0u || group == 0u)
+    return false;
+  const uint64_t in_pad =
+      (static_cast<uint64_t>(in) + group - 1u) / group * group;
+  if (in_pad > UINT32_MAX)
+    return false;
+  uint64_t packed_bits = 0u;
+  uint64_t packed_bytes = 0u;
+  uint64_t norm_row_bytes = 0u;
+  uint64_t norm_bytes = 0u;
+  uint64_t total_bytes = 0u;
+  if (!checked_multiply_u64(in_pad, storage_bits, packed_bits) ||
+      (packed_bits & 7u) != 0u ||
+      !checked_multiply_u64(out, packed_bits / 8u, packed_bytes) ||
+      !checked_multiply_u64(in_pad / group, 2u, norm_row_bytes) ||
+      !checked_multiply_u64(out, norm_row_bytes, norm_bytes) ||
+      !checked_add_u64(packed_bytes, norm_bytes, total_bytes))
+    return false;
+  result = layout{.in_pad = static_cast<uint32_t>(in_pad),
+                  .packed_row_bytes = packed_bits / 8u,
+                  .packed_bytes = packed_bytes,
+                  .norm_row_bytes = norm_row_bytes,
+                  .norm_bytes = norm_bytes,
+                  .total_bytes = total_bytes};
+  return true;
+}
 #if defined(__x86_64__) || defined(_M_X64)
 #if defined(__GNUC__) || defined(__clang__)
 #define EMEL_KERNEL_CQ_DETAIL_AVX2_TARGET __attribute__((target("avx2,fma")))
@@ -167,8 +234,9 @@ inline bool is_power_of_two(const uint32_t n) noexcept {
 
 template <uint32_t Bits>
 inline size_t packed_row_bytes(const uint32_t in_pad) noexcept {
-  constexpr uint32_t StorageBits = Bits == k_ternary_record_bits ? 2u : Bits;
-  return static_cast<size_t>(in_pad) * StorageBits / 8u;
+  constexpr uint32_t storage_bits =
+      Bits == k_ternary_record_bits ? 2u : Bits;
+  return static_cast<size_t>(in_pad) * storage_bits / 8u;
 }
 
 template <uint32_t Bits>
@@ -179,17 +247,13 @@ inline bool valid_view(const emel::cact::loader::tensor_view &view,
   const uint32_t out = view.shape[0];
   const uint32_t in = view.shape[1];
   const uint32_t group = view.group;
-  if (view.data == nullptr || view.bits != Bits || out == 0u || in == 0u ||
-      group == 0u || group > k_max_group || !is_power_of_two(group) ||
-      activation.size() < in || output.size() < out ||
-      (Bits != k_ternary_record_bits && codebook.size() < 28u))
-    return false;
-  const uint64_t in_pad =
-      (static_cast<uint64_t>(in) + group - 1u) / group * group;
-  const uint64_t packed = static_cast<uint64_t>(out) *
-                          packed_row_bytes<Bits>(static_cast<uint32_t>(in_pad));
-  const uint64_t norms = static_cast<uint64_t>(out) * (in_pad / group) * 2u;
-  return packed + norms <= view.nbytes;
+  layout checked{};
+  return view.data != nullptr && view.bits == Bits && group <= k_max_group &&
+         is_power_of_two(group) && activation.size() >= in &&
+         output.size() >= out &&
+         (Bits == k_ternary_record_bits || codebook.size() >= 28u) &&
+         checked_layout<Bits>(out, in, group, checked) &&
+         checked.total_bytes <= view.nbytes;
 }
 
 template <uint32_t Bits>
@@ -204,13 +268,12 @@ inline float code_value(const uint32_t index, const uint32_t group,
     return codebook_for<Bits>(codebook)[index];
   }
 }
-
 template <uint32_t Bits>
 inline float
-dequant_dot_row(const uint8_t *packed, const uint8_t *norms, const uint32_t in,
-                const uint32_t group, const std::span<const float> codebook,
+dequant_dot_row(const uint8_t *packed, const uint8_t *norms,
+                const uint32_t group, const uint32_t in_pad,
+                const std::span<const float> codebook,
                 const std::span<const float> activation_fwht) noexcept {
-  const uint32_t in_pad = (in + group - 1u) / group * group;
   const size_t group_bytes = packed_row_bytes<Bits>(group);
   float result = 0.0f;
   for (uint32_t begin = 0u, group_index = 0u; begin < in_pad;
@@ -226,16 +289,12 @@ dequant_dot_row(const uint8_t *packed, const uint8_t *norms, const uint32_t in,
   return result;
 }
 
-// Reconstructs one packed row's f32 values exactly like the exporter's
-// `_cq_unpack`: per group, codebook value scaled by the fp16 group norm,
-// then the normalized Walsh-Hadamard rotation; truncated to `in` columns
-// and scaled by `scale`.
 template <uint32_t Bits>
 inline void dequant_row_values(const uint8_t *packed, const uint8_t *norms,
                                const uint32_t in, const uint32_t group,
+                               const uint32_t in_pad,
                                const std::span<const float> codebook,
                                const float scale, float *row_out) noexcept {
-  const uint32_t in_pad = (in + group - 1u) / group * group;
   const size_t group_bytes = packed_row_bytes<Bits>(group);
   float values[k_max_group];
   for (uint32_t begin = 0u, group_index = 0u; begin < in_pad;
@@ -259,25 +318,19 @@ inline void dequant_row_values(const uint8_t *packed, const uint8_t *norms,
 template <uint32_t Bits>
 inline bool valid_packed_view(const emel::cact::loader::tensor_view &view,
                               const std::span<const float> codebook) noexcept {
-  const uint32_t out = view.shape[0];
-  const uint32_t in = view.shape[1];
-  const uint32_t group = view.group;
-  if (view.data == nullptr || view.bits != Bits || out == 0u || in == 0u ||
-      group == 0u || group > k_max_group || !is_power_of_two(group) ||
-      (Bits != k_ternary_record_bits && codebook.size() < 28u))
-    return false;
-  const uint64_t in_pad =
-      (static_cast<uint64_t>(in) + group - 1u) / group * group;
-  const uint64_t packed = static_cast<uint64_t>(out) *
-                          packed_row_bytes<Bits>(static_cast<uint32_t>(in_pad));
-  const uint64_t norms = static_cast<uint64_t>(out) * (in_pad / group) * 2u;
-  return packed + norms <= view.nbytes;
+  layout checked{};
+  return view.data != nullptr && view.bits == Bits &&
+         view.group <= k_max_group && is_power_of_two(view.group) &&
+         (Bits == k_ternary_record_bits || codebook.size() >= 28u) &&
+         checked_layout<Bits>(view.shape[0], view.shape[1], view.group,
+                              checked) &&
+         checked.total_bytes <= view.nbytes;
 }
 
 inline void compute_fwht_groups(const std::span<const float> activation,
                                 const uint32_t in, const uint32_t group,
+                                const uint32_t in_pad,
                                 std::span<float> transformed) noexcept {
-  const uint32_t in_pad = (in + group - 1u) / group * group;
   for (uint32_t begin = 0u; begin < in_pad; begin += group) {
     for (uint32_t i = 0u; i < group; ++i)
       transformed[begin + i] = begin + i < in ? activation[begin + i] : 0.0f;
@@ -287,14 +340,27 @@ inline void compute_fwht_groups(const std::span<const float> activation,
 
 EMEL_KERNEL_CQ_DETAIL_AVX2_TARGET inline void compute_fwht128_groups_avx2(
     const std::span<const float> activation, const uint32_t in,
-    std::span<float> transformed) noexcept {
-  const uint32_t in_pad = (in + 127u) / 128u * 128u;
+    const uint32_t in_pad, std::span<float> transformed) noexcept {
   for (uint32_t begin = 0u; begin < in_pad; begin += 128u) {
     for (uint32_t i = 0u; i < 128u; ++i)
       transformed[begin + i] = begin + i < in ? activation[begin + i] : 0.0f;
     fwht128_avx2(transformed.data() + begin);
   }
 }
+EMEL_KERNEL_CQ_DETAIL_AVX2_TARGET inline void compute_fwht128_groups_avx2(
+    const std::span<const float> activation, const uint32_t in,
+    std::span<float> transformed) noexcept {
+  const uint64_t in_pad = (static_cast<uint64_t>(in) + 127u) / 128u * 128u;
+  if (in_pad <= UINT32_MAX)
+    compute_fwht128_groups_avx2(activation, in,
+                                static_cast<uint32_t>(in_pad), transformed);
+}
+
+
+
+
+
+
 
 #undef EMEL_KERNEL_CQ_DETAIL_AVX2_TARGET
 

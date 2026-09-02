@@ -45,12 +45,12 @@ uint64_t elapsed_ns(const steady_clock::time_point start,
           .count());
 }
 
-void noop_probe_done(const emel::gguf::loader::events::probe_done &) {}
-void noop_probe_error(const emel::gguf::loader::events::probe_error &) {}
-void noop_bind_done(const emel::gguf::loader::events::bind_done &) {}
-void noop_bind_error(const emel::gguf::loader::events::bind_error &) {}
-void noop_parse_done(const emel::gguf::loader::events::parse_done &) {}
-void noop_parse_error(const emel::gguf::loader::events::parse_error &) {}
+void noop_probe_done(const emel::gguf::loader::events::probe_done &) noexcept {}
+void noop_probe_error(const emel::gguf::loader::events::probe_error &) noexcept {}
+void noop_bind_done(const emel::gguf::loader::events::bind_done &) noexcept {}
+void noop_bind_error(const emel::gguf::loader::events::bind_error &) noexcept {}
+void noop_parse_done(const emel::gguf::loader::events::parse_done &) noexcept {}
+void noop_parse_error(const emel::gguf::loader::events::parse_error &) noexcept {}
 
 struct options {
   std::filesystem::path model = {};

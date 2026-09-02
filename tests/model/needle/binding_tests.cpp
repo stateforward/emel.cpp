@@ -9,9 +9,9 @@
 
 #include "emel/cact/loader/any.hpp"
 #include "emel/cact/loader/sm.hpp"
+#include "emel/machines.hpp"
 #include "emel/model/needle/detail.hpp"
 #include "emel/model/needle/guards.hpp"
-#include "emel/model/needle/sm.hpp"
 
 namespace {
 
@@ -44,13 +44,13 @@ struct binder_scope {
   ~binder_scope() { g_binder_state = nullptr; }
 };
 
-void on_bind_done(const emel::model::needle::events::bind_done &) {
+void on_bind_done(const emel::model::needle::events::bind_done &) noexcept {
   if (g_binder_state != nullptr) {
     ++g_binder_state->done_count;
   }
 }
 
-void on_bind_error(const emel::model::needle::events::bind_error &ev) {
+void on_bind_error(const emel::model::needle::events::bind_error &ev) noexcept {
   if (g_binder_state == nullptr) {
     return;
   }
@@ -63,12 +63,12 @@ const emel::model::needle::event::bind_done_fn k_bind_done_cb =
 const emel::model::needle::event::bind_error_fn k_bind_error_cb =
     emel::model::needle::event::bind_error_fn::from<&on_bind_error>();
 
-void on_loader_probe_done(const emel::cact::loader::events::probe_done &) {}
-void on_loader_probe_error(const emel::cact::loader::events::probe_error &) {}
-void on_loader_bind_done(const emel::cact::loader::events::bind_done &) {}
-void on_loader_bind_error(const emel::cact::loader::events::bind_error &) {}
-void on_loader_parse_done(const emel::cact::loader::events::parse_done &) {}
-void on_loader_parse_error(const emel::cact::loader::events::parse_error &) {}
+void on_loader_probe_done(const emel::cact::loader::events::probe_done &) noexcept {}
+void on_loader_probe_error(const emel::cact::loader::events::probe_error &) noexcept {}
+void on_loader_bind_done(const emel::cact::loader::events::bind_done &) noexcept {}
+void on_loader_bind_error(const emel::cact::loader::events::bind_error &) noexcept {}
+void on_loader_parse_done(const emel::cact::loader::events::parse_done &) noexcept {}
+void on_loader_parse_error(const emel::cact::loader::events::parse_error &) noexcept {}
 
 const emel::cact::loader::event::probe_done_fn k_loader_probe_done_cb =
     emel::cact::loader::event::probe_done_fn::from<&on_loader_probe_done>();
@@ -160,6 +160,16 @@ void check_needle_binder_state_bound(emel::model::needle::sm &machine) {
 }
 
 } // namespace
+
+TEST_CASE("machine aggregate exports maintained Needle aliases") {
+  static_assert(std::is_same_v<emel::CactLoader, emel::cact::loader::sm>);
+  static_assert(std::is_same_v<emel::NeedleBinder,
+                               emel::model::needle::sm>);
+  static_assert(std::is_same_v<emel::NeedleGraph,
+                               emel::model::needle::graph::sm>);
+  static_assert(std::is_same_v<emel::NeedleTokenizerLoader,
+                               emel::text::tokenizer::needle::sm>);
+}
 
 TEST_CASE("needle binder maps the pinned route-w4-qat fixture to named "
           "tensor roles") {

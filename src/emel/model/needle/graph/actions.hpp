@@ -75,7 +75,7 @@ inline auto time_component_excluding_cq(context &ctx, uint64_t &accumulator,
 }
 
 inline std::span<const float> codebook_span(const context &ctx) noexcept {
-  return {ctx.bound->geo.codebook.data(), emel::cact::loader::k_codebook_len};
+  return {ctx.bound.geo.codebook.data(), emel::cact::loader::k_codebook_len};
 }
 
 inline std::span<const uint8_t> payload_span(const tensor_view &view,
@@ -360,7 +360,7 @@ inline bool prepare_view(context &ctx, const tensor_view &view,
 }
 
 inline bool prepare_graph_weights(context &ctx) noexcept {
-  const auto &bound = *ctx.bound;
+  const auto &bound = ctx.bound;
   emel::kernel::cq::event::dispatch_result codebook_result{};
   const emel::kernel::cq::event::prepare_codebook_q4_request codebook_request{
       codebook_span(ctx), ctx.prepared_codebook};
@@ -408,7 +408,7 @@ inline bool prepare_graph_weights(context &ctx) noexcept {
 
 inline bool compute_init(context &ctx) noexcept {
   namespace quant = emel::kernel::detail::quant;
-  const auto &bound = *ctx.bound;
+  const auto &bound = ctx.bound;
   const auto &geo = bound.geo;
   const uint32_t d_model = geo.d_model;
   for (uint32_t i = 0u; i < bound.layer_count; ++i) {
@@ -473,13 +473,13 @@ inline bool compute_init(context &ctx) noexcept {
 // row scaled by sqrt(d_model), and broadcast it across the mHC lanes.
 template <route_kind route>
 inline bool compute_step_begin(context &ctx, event::step_ctx &step) noexcept {
-  const auto &geo = ctx.bound->geo;
+  const auto &geo = ctx.bound.geo;
   const uint32_t d_model = geo.d_model;
   ctx.history_tokens[ctx.position] = step.token;
   ctx.history_valid[ctx.position] = 1u;
   const float scale = std::sqrt(static_cast<float>(d_model));
   const bool embed_ok = compute_dequant_row<route>(
-      ctx, ctx.bound->embedding, ctx.prepared_embedding,
+      ctx, ctx.bound.embedding, ctx.prepared_embedding,
       static_cast<uint32_t>(step.token), scale, std::span<float>{ctx.mean});
   time_component(ctx, ctx.timing.lane_copy_mean_nanoseconds, [&]() noexcept {
     for (uint32_t lane = 0u; lane < geo.mhc_lanes; ++lane)
@@ -503,7 +503,7 @@ template <route_kind route, activation_route_kind activation_route>
 inline bool compute_engram(context &ctx) noexcept {
   return time_component_excluding_cq(
       ctx, ctx.timing.engram_nanoseconds, [&]() noexcept {
-    const auto &bound = *ctx.bound;
+    const auto &bound = ctx.bound;
     const auto &geo = bound.geo;
     const uint32_t d_model = geo.d_model;
     uint32_t window = 0u;
@@ -606,7 +606,7 @@ template <route_kind route, activation_route_kind activation_route,
           projection_route_kind projection_route, bool engram_site,
           bool window_full, bool attend_gqa2, bool vector_exp>
 inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
-  const auto &bound = *ctx.bound;
+  const auto &bound = ctx.bound;
   const auto &geo = bound.geo;
   const uint32_t layer_index = step.layer_index;
   const auto &layer = bound.layers[layer_index];
@@ -901,7 +901,7 @@ inline bool compute_layer(context &ctx, event::step_ctx &step) noexcept {
 // Final head: mean over lanes, final ZCRMSNorm, tied-embedding logits.
 template <route_kind route, activation_route_kind activation_route>
 inline bool compute_logits(context &ctx, event::step_ctx &step) noexcept {
-  const auto &geo = ctx.bound->geo;
+  const auto &geo = ctx.bound.geo;
   const emel::kernel::mhc::event::mean_lanes_request mean_request{
       .lanes = ctx.lanes,
       .lane_count = geo.mhc_lanes,
@@ -920,7 +920,7 @@ inline bool compute_logits(context &ctx, event::step_ctx &step) noexcept {
   const auto logits_input =
       prepare_activation<activation_route>(ctx, ctx.final_normed, ok);
   ok = ok &&
-       compute_gemv<route>(ctx, ctx.bound->embedding, ctx.prepared_embedding,
+       compute_gemv<route>(ctx, ctx.bound.embedding, ctx.prepared_embedding,
                            logits_input, step.logits_out);
   return ok;
 }

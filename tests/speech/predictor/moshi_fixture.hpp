@@ -59,12 +59,12 @@ read_binary_file(const std::filesystem::path &path) {
   return bytes;
 }
 
-inline void noop_probe_done(const emel::gguf::loader::events::probe_done &) {}
-inline void noop_probe_error(const emel::gguf::loader::events::probe_error &) {}
-inline void noop_bind_done(const emel::gguf::loader::events::bind_done &) {}
-inline void noop_bind_error(const emel::gguf::loader::events::bind_error &) {}
-inline void noop_parse_done(const emel::gguf::loader::events::parse_done &) {}
-inline void noop_parse_error(const emel::gguf::loader::events::parse_error &) {}
+inline void noop_probe_done(const emel::gguf::loader::events::probe_done &) noexcept {}
+inline void noop_probe_error(const emel::gguf::loader::events::probe_error &) noexcept {}
+inline void noop_bind_done(const emel::gguf::loader::events::bind_done &) noexcept {}
+inline void noop_bind_error(const emel::gguf::loader::events::bind_error &) noexcept {}
+inline void noop_parse_done(const emel::gguf::loader::events::parse_done &) noexcept {}
+inline void noop_parse_error(const emel::gguf::loader::events::parse_error &) noexcept {}
 
 inline void
 materialize_tensor_names_from_file(emel::model::data &model,

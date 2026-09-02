@@ -364,6 +364,9 @@ struct basic_sm
     } catch (const std::system_error &) {
       return {.machine = {},
               .err = emel::error::cast(error::internal_error)};
+    } catch (...) {
+      return {.machine = {},
+              .err = emel::error::cast(error::internal_error)};
     }
   }
   explicit basic_sm(const needle::contract &contract_in)
@@ -371,8 +374,26 @@ struct basic_sm
                   projection_route == action::projection_route_kind::parallel4) {}
   basic_sm(const basic_sm &) = delete;
   basic_sm &operator=(const basic_sm &) = delete;
+  class dispatch_scope {
+  public:
+    explicit dispatch_scope(std::atomic_flag &gate) noexcept
+        : gate_(gate), acquired_(!gate_.test_and_set(std::memory_order_acquire)) {}
+    ~dispatch_scope() {
+      if (acquired_)
+        gate_.clear(std::memory_order_release);
+    }
+    explicit operator bool() const noexcept { return acquired_; }
+
+  private:
+    std::atomic_flag &gate_;
+    bool acquired_ = false;
+  };
+
 
   bool process_event(const event::init &ev) {
+    dispatch_scope dispatch{dispatch_gate_};
+    if (!dispatch)
+      return false;
     event::init_ctx ctx{};
     ctx.activation_quant = ev.activation_quant;
     const event::init_run runtime{ev, ctx};
@@ -383,6 +404,9 @@ struct basic_sm
   }
 
   bool process_event(const event::prefill &ev) {
+    dispatch_scope dispatch{dispatch_gate_};
+    if (!dispatch)
+      return false;
     bool ok = !ev.tokens.empty();
     for (size_t i = 0u; ok && i < ev.tokens.size(); ++i) {
       event::step_ctx ctx{};
@@ -398,6 +422,9 @@ struct basic_sm
   }
 
   bool process_event(const event::decode &ev) {
+    dispatch_scope dispatch{dispatch_gate_};
+    if (!dispatch)
+      return false;
     event::step_ctx ctx{};
     ctx.token = ev.token;
     ctx.want_logits = true;
@@ -409,6 +436,9 @@ struct basic_sm
   }
 
   bool process_event(const event::capture_cq_diagnostics &ev) {
+    dispatch_scope dispatch{dispatch_gate_};
+    if (!dispatch)
+      return false;
     uint64_t owner_prepare = 0u;
     uint64_t owner_prepared = 0u;
     bool handled = this->context_.cq.process_event(
@@ -437,6 +467,9 @@ struct basic_sm
   }
 
   bool process_event(const event::capture_projection_diagnostics &ev) {
+    dispatch_scope dispatch{dispatch_gate_};
+    if (!dispatch)
+      return false;
     ev.worker_calls = this->context_.worker_projection_calls;
     ev.submitted = this->context_.projection_submitted;
     ev.joined = this->context_.projection_joined;
@@ -445,13 +478,16 @@ struct basic_sm
   }
 
   bool process_event(const event::capture_swa_diagnostics &ev) {
+    dispatch_scope dispatch{dispatch_gate_};
+    if (!dispatch)
+      return false;
     ev.gqa2_calls = this->context_.swa_gqa2_calls;
     return true;
   }
 
-
   bool process_event(const event::configure_cq_timing &ev) {
-    if (ev.enabled && ev.now == nullptr)
+    dispatch_scope dispatch{dispatch_gate_};
+    if (!dispatch || (ev.enabled && ev.now == nullptr))
       return false;
     if (ev.enabled && !this->context_.cq_timing_enabled)
       this->context_.projection_cq_extra_nanoseconds = 0u;
@@ -462,6 +498,9 @@ struct basic_sm
   }
 
   bool process_event(const event::capture_cq_timing &ev) {
+    dispatch_scope dispatch{dispatch_gate_};
+    if (!dispatch)
+      return false;
     const bool handled = this->context_.cq.process_event(
         emel::kernel::cq::event::capture_timing{ev.breakdown});
     ev.breakdown.dot_batch_nanoseconds +=
@@ -470,7 +509,8 @@ struct basic_sm
   }
 
   bool process_event(const event::configure_timing &ev) {
-    if (ev.enabled && ev.now == nullptr)
+    dispatch_scope dispatch{dispatch_gate_};
+    if (!dispatch || (ev.enabled && ev.now == nullptr))
       return false;
     if (ev.enabled && !this->context_.timing_enabled)
       this->context_.timing = {};
@@ -481,6 +521,9 @@ struct basic_sm
   }
 
   bool process_event(const event::reset_timing &) {
+    dispatch_scope dispatch{dispatch_gate_};
+    if (!dispatch)
+      return false;
     this->context_.timing = {};
     if (!this->context_.timing_enabled)
       return true;
@@ -493,11 +536,17 @@ struct basic_sm
   }
 
   bool process_event(const event::capture_timing &ev) {
+    dispatch_scope dispatch{dispatch_gate_};
+    if (!dispatch)
+      return false;
     ev.breakdown = this->context_.timing;
     return true;
   }
 
   bool process_event(const event::capture_a8_diagnostics &ev) {
+    dispatch_scope dispatch{dispatch_gate_};
+    if (!dispatch)
+      return false;
     return this->context_.cq.process_event(
         emel::kernel::cq::event::capture_a8_diagnostics{ev.quantize_calls});
   }
@@ -508,6 +557,7 @@ private:
   }
 
   bool activation_quant_ = true;
+  std::atomic_flag dispatch_gate_ = ATOMIC_FLAG_INIT;
 };
 using serial_sm = basic_sm<true, action::projection_route_kind::serial>;
 using parallel4_sm = basic_sm<true, action::projection_route_kind::parallel4>;

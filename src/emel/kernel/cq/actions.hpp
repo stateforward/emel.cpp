@@ -9,8 +9,10 @@
 
 #include "emel/kernel/cq/detail.hpp"
 #include "emel/kernel/cq/events.hpp"
+#include "emel/kernel/x86_64/context.hpp"
 
 namespace emel::kernel::cq::action {
+
 
 struct context {
   uint64_t scalar_calls = 0u;
@@ -21,6 +23,9 @@ struct context {
   bool timing_enabled = false;
   event::timestamp_now_fn timing_now = nullptr;
   event::timing_breakdown timing = {};
+  bool avx2_fma_available =
+      emel::kernel::x86_64::detail::detect_avx2() &&
+      emel::kernel::x86_64::detail::detect_fma();
 };
 
 inline void quantize_a8(const event::quantize_a8_request &request) noexcept {
@@ -29,13 +34,21 @@ inline void quantize_a8(const event::quantize_a8_request &request) noexcept {
     const float magnitude = std::abs(value);
     absmax = magnitude > absmax ? magnitude : absmax;
   }
-  request.scale = absmax > 0.0f ? absmax / 127.0f : 1.0f;
+  const float candidate_scale = absmax / 127.0f;
+  request.scale = absmax == 0.0f
+                      ? 1.0f
+                      : (candidate_scale > 0.0f ? candidate_scale : absmax);
   for (size_t i = 0u; i < request.input.size(); ++i) {
     const float scaled = request.input[i] / request.scale;
-    const float rounded = std::nearbyint(scaled);
-    const float clamped =
-        rounded < -128.0f ? -128.0f : (rounded > 127.0f ? 127.0f : rounded);
-    const int8_t quantized = static_cast<int8_t>(clamped);
+    const float finite_scaled = std::isfinite(scaled)
+                                    ? scaled
+                                    : std::copysign(127.0f, request.input[i]);
+    const float bounded = finite_scaled < -128.0f
+                              ? -128.0f
+                              : (finite_scaled > 127.0f ? 127.0f
+                                                        : finite_scaled);
+    const float rounded = detail::round_ties_to_even(bounded);
+    const int8_t quantized = static_cast<int8_t>(rounded);
     request.quantized[i] = quantized;
     request.integer_values[i] = static_cast<float>(quantized);
   }
@@ -47,18 +60,20 @@ inline void execute_scalar_gemv(const event::gemv_request &request) noexcept {
   const uint32_t out = view.shape[0];
   const uint32_t in = view.shape[1];
   const uint32_t group = view.group;
-  const uint32_t in_pad = (in + group - 1u) / group * group;
-  detail::compute_fwht_groups(request.activation, in, group,
+  detail::layout layout{};
+  (void)detail::checked_layout<Bits>(out, in, group, layout);
+  const uint32_t in_pad = layout.in_pad;
+  detail::compute_fwht_groups(request.activation, in, group, in_pad,
                               request.workspace.first(in_pad));
   const uint8_t *base = static_cast<const uint8_t *>(view.data);
-  const size_t packed_row = detail::packed_row_bytes<Bits>(in_pad);
-  const size_t norm_row = static_cast<size_t>(in_pad / group) * 2u;
-  const uint8_t *norms = base + static_cast<size_t>(out) * packed_row;
+  const size_t packed_row = static_cast<size_t>(layout.packed_row_bytes);
+  const size_t norm_row = static_cast<size_t>(layout.norm_row_bytes);
+  const uint8_t *norms = base + static_cast<size_t>(layout.packed_bytes);
   for (uint32_t row = 0u; row < out; ++row)
     request.output[row] =
         detail::dequant_dot_row<Bits>(
             base + static_cast<size_t>(row) * packed_row,
-            norms + static_cast<size_t>(row) * norm_row, in, group,
+            norms + static_cast<size_t>(row) * norm_row, group, in_pad,
             request.codebook, request.workspace.first(in_pad)) *
         request.output_scale;
 }
@@ -69,18 +84,20 @@ execute_scalar_gemv_rows(const event::gemv_rows_request &request) noexcept {
   const auto &view = request.weights;
   const uint32_t in = view.shape[1];
   const uint32_t group = view.group;
-  const uint32_t in_pad = (in + group - 1u) / group * group;
-  detail::compute_fwht_groups(request.activation, in, group,
+  detail::layout layout{};
+  (void)detail::checked_layout<Bits>(view.shape[0], in, group, layout);
+  const uint32_t in_pad = layout.in_pad;
+  detail::compute_fwht_groups(request.activation, in, group, in_pad,
                               request.workspace.first(in_pad));
   const uint8_t *base = static_cast<const uint8_t *>(view.data);
-  const size_t packed_row = detail::packed_row_bytes<Bits>(in_pad);
-  const size_t norm_row = static_cast<size_t>(in_pad / group) * 2u;
-  const uint8_t *norms = base + static_cast<size_t>(view.shape[0]) * packed_row;
+  const size_t packed_row = static_cast<size_t>(layout.packed_row_bytes);
+  const size_t norm_row = static_cast<size_t>(layout.norm_row_bytes);
+  const uint8_t *norms = base + static_cast<size_t>(layout.packed_bytes);
   for (uint32_t row = 0u; row < request.row_count; ++row) {
     const size_t src = static_cast<size_t>(request.row_begin) + row;
     request.output[row] =
         detail::dequant_dot_row<Bits>(
-            base + src * packed_row, norms + src * norm_row, in, group,
+            base + src * packed_row, norms + src * norm_row, group, in_pad,
             request.codebook, request.workspace.first(in_pad)) *
         request.output_scale;
   }
@@ -92,15 +109,17 @@ inline void execute_scalar_dequant_rows(
   const auto &view = request.weights;
   const uint32_t in = view.shape[1];
   const uint32_t group = view.group;
-  const uint32_t in_pad = (in + group - 1u) / group * group;
+  detail::layout layout{};
+  (void)detail::checked_layout<Bits>(view.shape[0], in, group, layout);
+  const uint32_t in_pad = layout.in_pad;
   const uint8_t *base = static_cast<const uint8_t *>(view.data);
-  const size_t packed_row = detail::packed_row_bytes<Bits>(in_pad);
-  const size_t norm_row = static_cast<size_t>(in_pad / group) * 2u;
-  const uint8_t *norms = base + static_cast<size_t>(view.shape[0]) * packed_row;
+  const size_t packed_row = static_cast<size_t>(layout.packed_row_bytes);
+  const size_t norm_row = static_cast<size_t>(layout.norm_row_bytes);
+  const uint8_t *norms = base + static_cast<size_t>(layout.packed_bytes);
   for (uint32_t row = 0u; row < request.row_count; ++row) {
     const size_t src = static_cast<size_t>(request.row_begin) + row;
     detail::dequant_row_values<Bits>(
-        base + src * packed_row, norms + src * norm_row, in, group,
+        base + src * packed_row, norms + src * norm_row, in, group, in_pad,
         request.codebook, request.scale,
         request.output.data() + static_cast<size_t>(row) * in);
   }
@@ -134,7 +153,9 @@ inline void prepare_q4(const event::prepare_q4_request &request) noexcept {
   const uint32_t out = view.shape[0];
   const uint32_t in = view.shape[1];
   const uint32_t group = view.group;
-  const uint32_t in_pad = (in + group - 1u) / group * group;
+  detail::layout layout{};
+  (void)detail::checked_layout<4u>(out, in, group, layout);
+  const uint32_t in_pad = layout.in_pad;
   const size_t index_count = static_cast<size_t>(out) * in_pad;
   const size_t blocked_rows = out / 32u * 32u;
   const size_t blocked_count = blocked_rows * in_pad;
@@ -150,7 +171,7 @@ inline void prepare_q4(const event::prepare_q4_request &request) noexcept {
       for (size_t lane = 0u; lane < 32u; ++lane)
         request.indices_by_input32[row * in_pad + i * 32u + lane] =
             request.indices[(row + lane) * in_pad + i];
-  const uint8_t *norms = base + index_count / 2u;
+  const uint8_t *norms = base + static_cast<size_t>(layout.packed_bytes);
   for (size_t i = 0u; i < norm_count; ++i)
     request.norms[i] = detail::fp16_to_fp32(detail::load_u16(norms + i * 2u));
   constexpr std::array<size_t, 32u> lookup32_raw_rows{
@@ -780,14 +801,16 @@ execute_avx2_gemv(const event::gemv_request &request) noexcept {
   const uint32_t out = view.shape[0];
   const uint32_t in = view.shape[1];
   const uint32_t group = view.group;
-  const uint32_t in_pad = (in + group - 1u) / group * group;
-  detail::compute_fwht_groups(request.activation, in, group,
+  detail::layout layout{};
+  (void)detail::checked_layout<Bits>(out, in, group, layout);
+  const uint32_t in_pad = layout.in_pad;
+  detail::compute_fwht_groups(request.activation, in, group, in_pad,
                               request.workspace.first(in_pad));
-  const size_t packed_row = detail::packed_row_bytes<Bits>(in_pad);
+  const size_t packed_row = static_cast<size_t>(layout.packed_row_bytes);
   const size_t group_bytes = detail::packed_row_bytes<Bits>(group);
-  const size_t norm_row = static_cast<size_t>(in_pad / group) * 2u;
+  const size_t norm_row = static_cast<size_t>(layout.norm_row_bytes);
   const uint8_t *base = static_cast<const uint8_t *>(view.data);
-  const uint8_t *norms = base + static_cast<size_t>(out) * packed_row;
+  const uint8_t *norms = base + static_cast<size_t>(layout.packed_bytes);
   const float *codebook = detail::codebook_for<Bits>(request.codebook);
   __m256 q4_codebook_low{};
   __m256 q4_codebook_high{};
@@ -986,6 +1009,7 @@ struct effect_execute_prepared_avx2_q4 {
     const uint64_t fwht_begin = timing_now(ctx);
     detail::compute_fwht128_groups_avx2(
         ev.request.activation, ev.request.weights.in,
+        ev.request.weights.in_pad,
         ev.request.workspace.first(ev.request.weights.in_pad));
     if (ctx.timing_enabled)
       ctx.timing.fwht_nanoseconds += timing_now(ctx) - fwht_begin;
@@ -1027,7 +1051,8 @@ struct effect_execute_prepared_avx2_batch4_q4 {
     const auto &first = *request.targets[0].weights;
     const uint64_t fwht_begin = timing_now(ctx);
     detail::compute_fwht128_groups_avx2(
-        request.activation, first.in, request.workspace.first(first.in_pad));
+        request.activation, first.in, first.in_pad,
+        request.workspace.first(first.in_pad));
     if (ctx.timing_enabled)
       ctx.timing.fwht_nanoseconds += timing_now(ctx) - fwht_begin;
     const uint64_t dot_begin = timing_now(ctx);
@@ -1056,10 +1081,10 @@ struct effect_execute_prepared_avx2_rows_q4 {
   void operator()(const event::execute_prepared_avx2_rows_q4 &ev,
                   context &ctx) const noexcept {
     const uint64_t fwht_begin = timing_now(ctx);
-    if constexpr (true)
-      detail::compute_fwht128_groups_avx2(
-          ev.request.activation, ev.request.weights.in,
-          ev.request.workspace.first(ev.request.weights.in_pad));
+    detail::compute_fwht128_groups_avx2(
+        ev.request.activation, ev.request.weights.in,
+        ev.request.weights.in_pad,
+        ev.request.workspace.first(ev.request.weights.in_pad));
     if (ctx.timing_enabled)
       ctx.timing.fwht_nanoseconds += timing_now(ctx) - fwht_begin;
     const uint64_t dot_begin = timing_now(ctx);

@@ -31,12 +31,12 @@ namespace {
 
 namespace decoder = emel::speech::decoder::whisper;
 
-void noop_probe_done(const emel::gguf::loader::events::probe_done &) {}
-void noop_probe_error(const emel::gguf::loader::events::probe_error &) {}
-void noop_bind_done(const emel::gguf::loader::events::bind_done &) {}
-void noop_bind_error(const emel::gguf::loader::events::bind_error &) {}
-void noop_parse_done(const emel::gguf::loader::events::parse_done &) {}
-void noop_parse_error(const emel::gguf::loader::events::parse_error &) {}
+void noop_probe_done(const emel::gguf::loader::events::probe_done &) noexcept {}
+void noop_probe_error(const emel::gguf::loader::events::probe_error &) noexcept {}
+void noop_bind_done(const emel::gguf::loader::events::bind_done &) noexcept {}
+void noop_bind_error(const emel::gguf::loader::events::bind_error &) noexcept {}
+void noop_parse_done(const emel::gguf::loader::events::parse_done &) noexcept {}
+void noop_parse_error(const emel::gguf::loader::events::parse_error &) noexcept {}
 
 struct decoder_done_capture {
   int32_t calls = 0;

@@ -20,11 +20,11 @@ using emel::text::jinja::formatter::unexpected;
 using done_cb = emel::callback<bool(const emel::text::jinja::events::rendering_done &)>;
 using error_cb = emel::callback<bool(const emel::text::jinja::events::rendering_error &)>;
 
-bool ignore_done_callback(const emel::text::jinja::events::rendering_done &) {
+bool ignore_done_callback(const emel::text::jinja::events::rendering_done &) noexcept {
   return true;
 }
 
-bool ignore_error_callback(const emel::text::jinja::events::rendering_error &) {
+bool ignore_error_callback(const emel::text::jinja::events::rendering_error &) noexcept {
   return true;
 }
 
@@ -39,14 +39,14 @@ struct callback_tracker {
   int32_t error_code = static_cast<int32_t>(error::none);
   size_t error_pos = 0;
 
-  bool on_done(const emel::text::jinja::events::rendering_done & ev) {
+  bool on_done(const emel::text::jinja::events::rendering_done & ev) noexcept {
     done_called = true;
     done_length = ev.output_length;
     done_truncated = ev.output_truncated;
     return ev.request.output_capacity > 0;
   }
 
-  bool on_error(const emel::text::jinja::events::rendering_error & ev) {
+  bool on_error(const emel::text::jinja::events::rendering_error & ev) noexcept {
     error_called = true;
     error_code = ev.err;
     error_pos = ev.error_pos;

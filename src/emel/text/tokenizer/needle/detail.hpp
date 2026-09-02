@@ -2,6 +2,7 @@
 
 #include <array>
 #include <bit>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -124,25 +125,17 @@ parse_tokenizer_blob(const std::span<const uint8_t> blob,
     const uint16_t surface_len = read_u16_le(blob.data() + offset + 5u);
     offset += constants::record_bytes;
 
+    if (!std::isfinite(score) || compute_vocab_type(piece_type) < 0) {
+      return cast_tokenizer_error(error::model_invalid);
+    }
     if (blob.size() - offset < surface_len) {
       return cast_tokenizer_error(error::parse_failed);
-    }
-    const int32_t vocab_type = compute_vocab_type(piece_type);
-    if (vocab_type < 0) {
-      return cast_tokenizer_error(error::model_invalid);
     }
     if (surface_len >
         static_cast<uint32_t>(emel::model::data::k_max_vocab_bytes) -
             bytes_used) {
       return cast_tokenizer_error(error::capacity);
     }
-
-    std::memcpy(vocab_out.token_storage.data() + bytes_used,
-                blob.data() + offset, surface_len);
-    vocab_out.entries[piece].text_offset = bytes_used;
-    vocab_out.entries[piece].text_length = surface_len;
-    vocab_out.entries[piece].score = score;
-    vocab_out.entries[piece].type = vocab_type;
     bytes_used += surface_len;
     offset += surface_len;
   }
@@ -151,8 +144,27 @@ parse_tokenizer_blob(const std::span<const uint8_t> blob,
     return cast_tokenizer_error(error::parse_failed);
   }
 
+  offset = constants::header_bytes;
+  uint32_t published_bytes = 0u;
+  for (uint32_t piece = 0u; piece < n_pieces; ++piece) {
+    const float score = read_f32_le(blob.data() + offset);
+    const uint8_t piece_type = blob[offset + 4u];
+    const uint16_t surface_len = read_u16_le(blob.data() + offset + 5u);
+    offset += constants::record_bytes;
+
+    std::memcpy(vocab_out.token_storage.data() + published_bytes,
+                blob.data() + offset, surface_len);
+    vocab_out.entries[piece].text_offset = published_bytes;
+    vocab_out.entries[piece].text_length = surface_len;
+    vocab_out.entries[piece].score = score;
+    vocab_out.entries[piece].type = compute_vocab_type(piece_type);
+    published_bytes += surface_len;
+    offset += surface_len;
+  }
+
   vocab_out.n_tokens = n_pieces;
-  vocab_out.token_bytes_used = bytes_used;
+
+  vocab_out.token_bytes_used = published_bytes;
   vocab_out.tokenizer_model_id = emel::model::data::tokenizer_model::SPM;
   vocab_out.tokenizer_pre_id = emel::model::data::tokenizer_pre::NEEDLE;
   vocab_out.pad_id = static_cast<int32_t>(pad_id);

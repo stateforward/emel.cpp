@@ -35,19 +35,19 @@ struct callback_tracker {
 };
 
 void on_initialize_done(
-    void *owner, const emel::text::generator::events::initialize_done &) {
+    void *owner, const emel::text::generator::events::initialize_done &) noexcept {
   static_cast<callback_tracker *>(owner)->initialize_done_called = true;
 }
 
 void on_initialize_error(
-    void *owner, const emel::text::generator::events::initialize_error &ev) {
+    void *owner, const emel::text::generator::events::initialize_error &ev) noexcept {
   auto *tracker = static_cast<callback_tracker *>(owner);
   tracker->initialize_error_called = true;
   tracker->err = ev.err;
 }
 
 void on_generate_done(
-    void *owner, const emel::text::generator::events::generation_done &ev) {
+    void *owner, const emel::text::generator::events::generation_done &ev) noexcept {
   auto *tracker = static_cast<callback_tracker *>(owner);
   tracker->generate_done_called = true;
   tracker->tokens_generated = ev.tokens_generated;
@@ -55,7 +55,7 @@ void on_generate_done(
 }
 
 void on_generate_error(
-    void *owner, const emel::text::generator::events::generation_error &ev) {
+    void *owner, const emel::text::generator::events::generation_error &ev) noexcept {
   auto *tracker = static_cast<callback_tracker *>(owner);
   tracker->generate_error_called = true;
   tracker->err = ev.err;
@@ -74,7 +74,7 @@ bool tokenizer_tokenize_dispatch(
 }
 
 emel::error::type sampler_passthrough(int32_t &, float &, int32_t &,
-                                      int32_t &) {
+                                      int32_t &) noexcept {
   return emel::error::cast(emel::logits::sampler::error::none);
 }
 

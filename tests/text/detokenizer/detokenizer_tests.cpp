@@ -52,7 +52,7 @@ struct detokenizer_callback_recorder {
 
 bool on_detok_bind_done(
     void * owner,
-    const emel::text::detokenizer::events::binding_done &) {
+    const emel::text::detokenizer::events::binding_done &) noexcept {
   if (owner == nullptr) {
     return false;
   }
@@ -62,7 +62,7 @@ bool on_detok_bind_done(
 
 bool on_detok_bind_error(
     void * owner,
-    const emel::text::detokenizer::events::binding_error & ev) {
+    const emel::text::detokenizer::events::binding_error & ev) noexcept {
   if (owner == nullptr) {
     return false;
   }
@@ -74,7 +74,7 @@ bool on_detok_bind_error(
 
 bool on_detok_detokenize_done(
     void * owner,
-    const emel::text::detokenizer::events::detokenize_done & ev) {
+    const emel::text::detokenizer::events::detokenize_done & ev) noexcept {
   if (owner == nullptr) {
     return false;
   }
@@ -87,7 +87,7 @@ bool on_detok_detokenize_done(
 
 bool on_detok_detokenize_error(
     void * owner,
-    const emel::text::detokenizer::events::detokenize_error & ev) {
+    const emel::text::detokenizer::events::detokenize_error & ev) noexcept {
   if (owner == nullptr) {
     return false;
   }
