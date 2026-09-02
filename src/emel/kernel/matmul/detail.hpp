@@ -10,7 +10,7 @@
 
 namespace emel::kernel::matmul {
 
-using lane_pool = emel::policy::fork_join_lane_pool<7u, 128u, 1048576u>;
+using lane_pool = emel::policy::fork_join_lane_pool<7u, 128u>;
 
 enum class lane_mode : uint8_t {
   serial = 0,

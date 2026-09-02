@@ -58,8 +58,7 @@ enum class activation_route_kind : uint8_t {
 };
 enum class projection_route_kind : uint8_t { serial = 0, parallel4 = 3 };
 
-using projection_lane_pool =
-    emel::policy::fork_join_lane_pool<3u, 256u, 1048576u>;
+using projection_lane_pool = emel::policy::fork_join_lane_pool<3u, 256u>;
 
 struct activation_payload {
   std::span<const float> values = {};

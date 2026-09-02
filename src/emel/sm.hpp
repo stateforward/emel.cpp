@@ -121,8 +121,7 @@ using thread_pool_scheduler =
 
 using stateforward::sml::utility::policy::cpu_relax;
 
-template <std::size_t worker_count, std::size_t inline_task_bytes = 128,
-          std::size_t idle_spin_budget = 1048576>
+template <std::size_t worker_count, std::size_t inline_task_bytes = 128>
 class fork_join_lane_pool {
  public:
   static_assert(worker_count > 0, "fork_join_lane_pool needs workers");
@@ -407,20 +406,7 @@ class fork_join_lane_pool {
 
     worker_slot &worker = workers_[index];
     for (;;) {
-      bool claimed = false;
-      for (std::size_t spin = 0u; spin < idle_spin_budget; ++spin) {
-        if (worker.ready.try_acquire()) {
-          claimed = true;
-          break;
-        }
-        if (worker.stopping.load(std::memory_order_acquire)) {
-          return;
-        }
-        cpu_relax();
-      }
-      if (!claimed) {
-        worker.ready.acquire();
-      }
+      worker.ready.acquire();
       if (worker.stopping.load(std::memory_order_acquire) &&
           worker.task.invoke == nullptr) {
         return;

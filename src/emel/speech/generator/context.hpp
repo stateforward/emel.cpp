@@ -91,8 +91,7 @@ concept synthesis_dependencies = requires(dependencies_type deps) {
   deps.postprocessor_initialize;
 };
 
-using wavefront_stage_pool =
-    emel::policy::fork_join_lane_pool<2u, 256u, 1048576u>;
+using wavefront_stage_pool = emel::policy::fork_join_lane_pool<2u, 256u>;
 
 enum class wavefront_stage_mode : uint8_t { serial, parallel };
 

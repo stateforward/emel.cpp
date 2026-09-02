@@ -6,7 +6,7 @@
 namespace emel::text::generator::decode_wavefront::action {
 
 using lane_pool =
-    emel::policy::fork_join_lane_pool<event::k_max_lanes, 128u, 1048576u>;
+    emel::policy::fork_join_lane_pool<event::k_max_lanes, 128u>;
 
 struct context {
   lane_pool *pool = nullptr;
