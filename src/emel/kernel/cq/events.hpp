@@ -6,22 +6,52 @@
 
 #include "emel/cact/loader/events.hpp"
 
+namespace emel::kernel::cq {
+struct model;
+}
+
+namespace emel::kernel::cq::action {
+struct effect_prepare_codebook_q4;
+struct effect_prepare_q4;
+} // namespace emel::kernel::cq::action
+
 namespace emel::kernel::cq::event {
 
 struct dispatch_result {
   bool accepted = false;
 };
 
-// Construction/init-owned exact CQ4 lookup representation. prepare_codebook_q4
-// validates the borrowed source codebook once and materializes byte_planes.
-// `values` and byte_planes must remain immutable and `values` must outlive every
-// prepared dispatch; execution validates only O(1) metadata and span structure.
-inline constexpr uint32_t k_prepared_q4_construction_tag = 0x43513450u;
+// Construction/init-owned exact CQ4 lookup representation. Only the
+// preparation action may publish an execution-ready instance. Borrowed values
+// must remain immutable and alive for every prepared dispatch; execution
+// validates only O(1) metadata and span structure.
+class alignas(32) prepared_codebook_q4 {
+public:
+  using byte_planes_type = std::array<std::array<uint8_t, 32u>, 4u>;
 
-struct alignas(32) prepared_codebook_q4 {
-  std::span<const float> values = {};
-  std::array<std::array<uint8_t, 32u>, 4u> byte_planes = {};
-  uint32_t construction_tag = 0u;
+  prepared_codebook_q4() noexcept = default;
+
+  [[nodiscard]] bool published() const noexcept { return published_; }
+  [[nodiscard]] const std::span<const float> &values() const noexcept {
+    return values_;
+  }
+  [[nodiscard]] const byte_planes_type &byte_planes() const noexcept {
+    return byte_planes_;
+  }
+
+private:
+  friend struct action::effect_prepare_codebook_q4;
+
+  void publish(const std::span<const float> values,
+               const byte_planes_type &byte_planes) noexcept {
+    values_ = values;
+    byte_planes_ = byte_planes;
+    published_ = true;
+  }
+
+  std::span<const float> values_ = {};
+  byte_planes_type byte_planes_ = {};
+  bool published_ = false;
 };
 
 struct prepare_codebook_q4_request {
@@ -67,29 +97,74 @@ struct gemv_request {
   std::span<float> workspace;
   float output_scale = 1.0f;
 };
-// Construction/init-owned CQ4 representation, published only by prepare_q4
-// after the complete source payload has been validated and materialized.
-// Selectors remain exact codebook indices and norms are exact fp16 payloads
-// decoded once to f32. All four borrowed storage spans and the source storage
-// must remain immutable and alive for every prepared dispatch. Execution relies
-// on that invariant and performs only O(1) metadata/span structural validation.
-struct prepared_q4_view {
-  const uint8_t *source = nullptr;
-  uint32_t out = 0u;
-  uint32_t in = 0u;
-  uint32_t group = 0u;
-  uint32_t in_pad = 0u;
-  std::span<const uint8_t> indices = {};
+// Construction/init-owned CQ4 representation, published only by the
+// preparation action after the complete source payload has been validated and
+// materialized. Selectors remain exact codebook indices and norms are exact
+// fp16 payloads decoded once to f32. Borrowed storage must remain immutable and
+// alive for every prepared dispatch. Execution relies on that invariant and
+// performs only O(1) publication, metadata, and span structural validation.
+class prepared_q4_view {
+public:
+  prepared_q4_view() noexcept = default;
+
+  [[nodiscard]] bool published() const noexcept { return published_; }
+  [[nodiscard]] const uint8_t *source() const noexcept { return source_; }
+  [[nodiscard]] uint32_t out() const noexcept { return out_; }
+  [[nodiscard]] uint32_t in() const noexcept { return in_; }
+  [[nodiscard]] uint32_t group() const noexcept { return group_; }
+  [[nodiscard]] uint32_t in_pad() const noexcept { return in_pad_; }
+  [[nodiscard]] const std::span<const uint8_t> &indices() const noexcept {
+    return indices_;
+  }
   // 32-row output blocks, input-major within each block. Tail rows remain in
-  // row-major `indices`; the blocked layout exists only for hot full GEMV.
-  std::span<const uint8_t> indices_by_input32 = {};
-  std::span<const float> norms = {};
+  // row-major indices(); the blocked layout exists only for hot full GEMV.
+  [[nodiscard]] const std::span<const uint8_t> &
+  indices_by_input32() const noexcept {
+    return indices_by_input32_;
+  }
+  [[nodiscard]] const std::span<const float> &norms() const noexcept {
+    return norms_;
+  }
   // Complete 32-row output blocks, group-major within each block and ordered
   // like lookup_codebook32_raw: 0..3,16..19; 4..7,20..23; 8..11,24..27;
   // 12..15,28..31. Values are copied from exact decoded row-major norms;
-  // tail rows continue to use `norms`.
-  std::span<const float> norms_by_group32 = {};
-  uint32_t construction_tag = 0u;
+  // tail rows continue to use norms().
+  [[nodiscard]] const std::span<const float> &
+  norms_by_group32() const noexcept {
+    return norms_by_group32_;
+  }
+
+private:
+  friend struct action::effect_prepare_q4;
+
+  void publish(const uint8_t *source, const uint32_t out, const uint32_t in,
+               const uint32_t group, const uint32_t in_pad,
+               const std::span<const uint8_t> indices,
+               const std::span<const uint8_t> indices_by_input32,
+               const std::span<const float> norms,
+               const std::span<const float> norms_by_group32) noexcept {
+    source_ = source;
+    out_ = out;
+    in_ = in;
+    group_ = group;
+    in_pad_ = in_pad;
+    indices_ = indices;
+    indices_by_input32_ = indices_by_input32;
+    norms_ = norms;
+    norms_by_group32_ = norms_by_group32;
+    published_ = true;
+  }
+
+  const uint8_t *source_ = nullptr;
+  uint32_t out_ = 0u;
+  uint32_t in_ = 0u;
+  uint32_t group_ = 0u;
+  uint32_t in_pad_ = 0u;
+  std::span<const uint8_t> indices_ = {};
+  std::span<const uint8_t> indices_by_input32_ = {};
+  std::span<const float> norms_ = {};
+  std::span<const float> norms_by_group32_ = {};
+  bool published_ = false;
 };
 struct prepare_q4_request {
   const emel::cact::loader::tensor_view &weights;

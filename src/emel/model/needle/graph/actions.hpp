@@ -259,9 +259,9 @@ inline bool compute_gemv_projection_wave(
     const uint64_t wave_begin = measure_cq ? now() : 0u;
     const uint64_t owner_cq_begin =
         measure_cq ? captured_owner_cq_nanoseconds(ctx) : 0u;
-    auto transformed = std::span<float>{ctx.cq_workspace}.first(q.in_pad);
+    auto transformed = std::span<float>{ctx.cq_workspace}.first(q.in_pad());
     emel::kernel::cq::detail::compute_fwht128_groups_avx2(
-        activation.values, q.in, transformed);
+        activation.values, q.in(), transformed);
     projection_lane_pool::join_group group{};
     std::array<bool, 3u> worker_ok = {false, false, false};
     const auto run_worker = [&](const size_t lane,

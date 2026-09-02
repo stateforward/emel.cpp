@@ -103,25 +103,25 @@ inline bool prepared_read_ranges_disjoint(
   size_t norms_bytes = 0u;
   size_t blocked_norms_bytes = 0u;
   size_t codebook_bytes = 0u;
-  if (!checked_bytes(view.indices.size(), sizeof(uint8_t), indices_bytes) ||
-      !checked_bytes(view.indices_by_input32.size(), sizeof(uint8_t),
+  if (!checked_bytes(view.indices().size(), sizeof(uint8_t), indices_bytes) ||
+      !checked_bytes(view.indices_by_input32().size(), sizeof(uint8_t),
                      blocked_indices_bytes) ||
-      !checked_bytes(view.norms.size(), sizeof(float), norms_bytes) ||
-      !checked_bytes(view.norms_by_group32.size(), sizeof(float),
+      !checked_bytes(view.norms().size(), sizeof(float), norms_bytes) ||
+      !checked_bytes(view.norms_by_group32().size(), sizeof(float),
                      blocked_norms_bytes) ||
-      !checked_bytes(codebook.values.size(), sizeof(float), codebook_bytes))
+      !checked_bytes(codebook.values().size(), sizeof(float), codebook_bytes))
     return false;
-  return ranges_disjoint(write, write_bytes, view.indices.data(),
+  return ranges_disjoint(write, write_bytes, view.indices().data(),
                          indices_bytes) &&
-         ranges_disjoint(write, write_bytes, view.indices_by_input32.data(),
+         ranges_disjoint(write, write_bytes, view.indices_by_input32().data(),
                          blocked_indices_bytes) &&
-         ranges_disjoint(write, write_bytes, view.norms.data(), norms_bytes) &&
-         ranges_disjoint(write, write_bytes, view.norms_by_group32.data(),
+         ranges_disjoint(write, write_bytes, view.norms().data(), norms_bytes) &&
+         ranges_disjoint(write, write_bytes, view.norms_by_group32().data(),
                          blocked_norms_bytes) &&
-         ranges_disjoint(write, write_bytes, codebook.values.data(),
+         ranges_disjoint(write, write_bytes, codebook.values().data(),
                          codebook_bytes) &&
-         ranges_disjoint(write, write_bytes, codebook.byte_planes.data(),
-                         sizeof(codebook.byte_planes));
+         ranges_disjoint(write, write_bytes, codebook.byte_planes().data(),
+                         sizeof(event::prepared_codebook_q4::byte_planes_type));
 }
 
 inline bool a8_supported(const event::quantize_a8_request &request) noexcept {
@@ -354,9 +354,8 @@ prepare_supported(const event::prepare_q4_request &request) noexcept {
 }
 inline bool prepared_codebook_structure_supported(
     const event::prepared_codebook_q4 &codebook) noexcept {
-  return codebook.construction_tag == event::k_prepared_q4_construction_tag &&
-         span_has_data(codebook.values) &&
-         codebook.values.size() >= emel::cact::loader::k_codebook_len;
+  return codebook.published() && span_has_data(codebook.values()) &&
+         codebook.values().size() >= emel::cact::loader::k_codebook_len;
 }
 struct guard_prepare_codebook_q4 {
   bool operator()(const event::prepare_codebook_q4 &ev,
@@ -370,36 +369,36 @@ struct guard_prepare_codebook_q4 {
 inline bool prepared_structure_supported(
     const event::prepared_q4_view &view) noexcept {
   detail::layout layout{};
-  if (view.construction_tag != event::k_prepared_q4_construction_tag ||
-      view.source == nullptr || view.group > detail::k_max_group ||
-      !detail::is_power_of_two(view.group) ||
-      !detail::checked_layout<4u>(view.out, view.in, view.group, layout) ||
-      view.in_pad != layout.in_pad)
+  if (!view.published() || view.source() == nullptr ||
+      view.group() > detail::k_max_group ||
+      !detail::is_power_of_two(view.group()) ||
+      !detail::checked_layout<4u>(view.out(), view.in(), view.group(), layout) ||
+      view.in_pad() != layout.in_pad)
     return false;
   uint64_t index_count = 0u;
   uint64_t blocked_count = 0u;
   uint64_t blocked_norm_count = 0u;
   const uint64_t blocked_rows =
-      static_cast<uint64_t>(view.out / 32u * 32u);
-  if (!detail::checked_multiply_u64(view.out, view.in_pad, index_count) ||
-      !detail::checked_multiply_u64(blocked_rows, view.in_pad,
+      static_cast<uint64_t>(view.out() / 32u * 32u);
+  if (!detail::checked_multiply_u64(view.out(), view.in_pad(), index_count) ||
+      !detail::checked_multiply_u64(blocked_rows, view.in_pad(),
                                     blocked_count) ||
       !detail::checked_multiply_u64(blocked_rows,
-                                    view.in_pad / view.group,
+                                    view.in_pad() / view.group(),
                                     blocked_norm_count))
     return false;
-  const uint64_t norm_count = index_count / view.group;
+  const uint64_t norm_count = index_count / view.group();
   return index_count <= std::numeric_limits<size_t>::max() &&
          norm_count <= std::numeric_limits<size_t>::max() &&
          blocked_count <= std::numeric_limits<size_t>::max() &&
          blocked_norm_count <= std::numeric_limits<size_t>::max() &&
-         span_has_data(view.indices) &&
-         span_has_data(view.indices_by_input32) && span_has_data(view.norms) &&
-         span_has_data(view.norms_by_group32) &&
-         view.indices.size() >= index_count &&
-         view.indices_by_input32.size() >= blocked_count &&
-         view.norms.size() >= norm_count &&
-         view.norms_by_group32.size() >= blocked_norm_count;
+         span_has_data(view.indices()) &&
+         span_has_data(view.indices_by_input32()) && span_has_data(view.norms()) &&
+         span_has_data(view.norms_by_group32()) &&
+         view.indices().size() >= index_count &&
+         view.indices_by_input32().size() >= blocked_count &&
+         view.norms().size() >= norm_count &&
+         view.norms_by_group32().size() >= blocked_norm_count;
 }
 
 struct guard_prepare_q4 {
@@ -418,16 +417,16 @@ struct guard_execute_prepared_avx2_q4 {
     size_t activation_bytes = 0u;
     size_t output_bytes = 0u;
     size_t workspace_bytes = 0u;
-    if (!ctx.avx2_fma_available || request.weights.group != 128u ||
+    if (!ctx.avx2_fma_available || request.weights.group() != 128u ||
         !prepared_structure_supported(request.weights) ||
         !prepared_codebook_structure_supported(request.codebook) ||
-        request.activation.size() < request.weights.in ||
-        request.output.size() < request.weights.out ||
-        request.workspace.size() < request.weights.in_pad ||
+        request.activation.size() < request.weights.in() ||
+        request.output.size() < request.weights.out() ||
+        request.workspace.size() < request.weights.in_pad() ||
         !std::isfinite(request.output_scale) ||
-        !checked_bytes(request.weights.in, sizeof(float), activation_bytes) ||
-        !checked_bytes(request.weights.out, sizeof(float), output_bytes) ||
-        !checked_bytes(request.weights.in_pad, sizeof(float), workspace_bytes))
+        !checked_bytes(request.weights.in(), sizeof(float), activation_bytes) ||
+        !checked_bytes(request.weights.out(), sizeof(float), output_bytes) ||
+        !checked_bytes(request.weights.in_pad(), sizeof(float), workspace_bytes))
       return false;
     return prepared_read_ranges_disjoint(request.weights, request.codebook,
                                           request.output.data(), output_bytes) &&
@@ -456,15 +455,15 @@ struct guard_execute_prepared_avx2_dot_q4 {
     const auto &request = ev.request;
     size_t activation_bytes = 0u;
     size_t output_bytes = 0u;
-    if (!ctx.avx2_fma_available || request.weights.group != 128u ||
+    if (!ctx.avx2_fma_available || request.weights.group() != 128u ||
         !prepared_structure_supported(request.weights) ||
         !prepared_codebook_structure_supported(request.codebook) ||
-        request.activation_fwht.size() < request.weights.in_pad ||
-        request.output.size() < request.weights.out ||
+        request.activation_fwht.size() < request.weights.in_pad() ||
+        request.output.size() < request.weights.out() ||
         !std::isfinite(request.output_scale) ||
-        !checked_bytes(request.weights.in_pad, sizeof(float),
+        !checked_bytes(request.weights.in_pad(), sizeof(float),
                        activation_bytes) ||
-        !checked_bytes(request.weights.out, sizeof(float), output_bytes))
+        !checked_bytes(request.weights.out(), sizeof(float), output_bytes))
       return false;
     return prepared_read_ranges_disjoint(request.weights, request.codebook,
                                           request.output.data(), output_bytes) &&
@@ -487,12 +486,12 @@ struct guard_execute_prepared_avx2_batch4_q4 {
     const auto *first = request.targets[0].weights;
     size_t activation_bytes = 0u;
     size_t workspace_bytes = 0u;
-    if (!ctx.avx2_fma_available || first == nullptr || first->group != 128u ||
-        request.activation.size() < first->in ||
-        request.workspace.size() < first->in_pad ||
+    if (!ctx.avx2_fma_available || first == nullptr || first->group() != 128u ||
+        request.activation.size() < first->in() ||
+        request.workspace.size() < first->in_pad() ||
         !std::isfinite(request.output_scale) ||
-        !checked_bytes(first->in, sizeof(float), activation_bytes) ||
-        !checked_bytes(first->in_pad, sizeof(float), workspace_bytes) ||
+        !checked_bytes(first->in(), sizeof(float), activation_bytes) ||
+        !checked_bytes(first->in_pad(), sizeof(float), workspace_bytes) ||
         !ranges_disjoint(request.workspace.data(), workspace_bytes,
                          request.activation.data(), activation_bytes))
       return false;
@@ -502,11 +501,11 @@ struct guard_execute_prepared_avx2_batch4_q4 {
       if (target.weights == nullptr ||
           !prepared_structure_supported(*target.weights) ||
           !prepared_codebook_structure_supported(request.codebook) ||
-          target.weights->in != first->in ||
-          target.weights->group != first->group ||
-          target.weights->in_pad != first->in_pad ||
-          target.output.size() < target.weights->out ||
-          !checked_bytes(target.weights->out, sizeof(float), output_bytes) ||
+          target.weights->in() != first->in() ||
+          target.weights->group() != first->group() ||
+          target.weights->in_pad() != first->in_pad() ||
+          target.output.size() < target.weights->out() ||
+          !checked_bytes(target.weights->out(), sizeof(float), output_bytes) ||
           !prepared_read_ranges_disjoint(*target.weights, request.codebook,
                                          target.output.data(), output_bytes) ||
           !prepared_read_ranges_disjoint(*target.weights, request.codebook,
@@ -519,7 +518,7 @@ struct guard_execute_prepared_avx2_batch4_q4 {
         return false;
       for (size_t j = 0u; j < i; ++j) {
         size_t other_bytes = 0u;
-        if (!checked_bytes(request.targets[j].weights->out, sizeof(float),
+        if (!checked_bytes(request.targets[j].weights->out(), sizeof(float),
                            other_bytes) ||
             !ranges_disjoint(target.output.data(), output_bytes,
                              request.targets[j].output.data(), other_bytes))
@@ -544,19 +543,19 @@ struct guard_execute_prepared_avx2_rows_q4 {
     size_t activation_bytes = 0u;
     size_t output_bytes = 0u;
     size_t workspace_bytes = 0u;
-    if (!ctx.avx2_fma_available || request.weights.group != 128u ||
+    if (!ctx.avx2_fma_available || request.weights.group() != 128u ||
         !prepared_structure_supported(request.weights) ||
         !prepared_codebook_structure_supported(request.codebook) ||
         request.row_count == 0u ||
         static_cast<uint64_t>(request.row_begin) + request.row_count >
-            request.weights.out ||
-        request.activation.size() < request.weights.in ||
+            request.weights.out() ||
+        request.activation.size() < request.weights.in() ||
         request.output.size() < request.row_count ||
-        request.workspace.size() < request.weights.in_pad ||
+        request.workspace.size() < request.weights.in_pad() ||
         !std::isfinite(request.output_scale) ||
-        !checked_bytes(request.weights.in, sizeof(float), activation_bytes) ||
+        !checked_bytes(request.weights.in(), sizeof(float), activation_bytes) ||
         !checked_bytes(request.row_count, sizeof(float), output_bytes) ||
-        !checked_bytes(request.weights.in_pad, sizeof(float), workspace_bytes))
+        !checked_bytes(request.weights.in_pad(), sizeof(float), workspace_bytes))
       return false;
     return prepared_read_ranges_disjoint(request.weights, request.codebook,
                                           request.output.data(), output_bytes) &&
@@ -587,8 +586,8 @@ struct guard_execute_prepared_dequant_q4 {
            prepared_codebook_structure_supported(request.codebook) &&
            request.row_count > 0u &&
            static_cast<uint64_t>(request.row_begin) + request.row_count <=
-               request.weights.out &&
-           detail::checked_multiply_u64(request.row_count, request.weights.in,
+               request.weights.out() &&
+           detail::checked_multiply_u64(request.row_count, request.weights.in(),
                                         output_count) &&
            request.output.size() >= output_count &&
            checked_bytes(output_count, sizeof(float), output_bytes) &&

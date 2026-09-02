@@ -135,18 +135,18 @@ inline void execute_scalar_dequant_rows(
 #define EMEL_KERNEL_CQ_AVX2_TARGET
 #endif
 
-inline void
-prepare_codebook_q4(const event::prepare_codebook_q4_request &request) noexcept {
-  request.prepared.values = request.codebook;
+inline event::prepared_codebook_q4::byte_planes_type
+materialize_codebook_q4(const std::span<const float> codebook) noexcept {
+  event::prepared_codebook_q4::byte_planes_type byte_planes{};
   const auto *codebook_bytes = reinterpret_cast<const uint8_t *>(
-      detail::codebook_for<4u>(request.codebook));
+      detail::codebook_for<4u>(codebook));
   for (uint32_t index = 0u; index < 16u; ++index)
     for (uint32_t byte = 0u; byte < 4u; ++byte) {
       const uint8_t value = codebook_bytes[index * sizeof(float) + byte];
-      request.prepared.byte_planes[byte][index] = value;
-      request.prepared.byte_planes[byte][16u + index] = value;
+      byte_planes[byte][index] = value;
+      byte_planes[byte][16u + index] = value;
     }
-  request.prepared.construction_tag = event::k_prepared_q4_construction_tag;
+  return byte_planes;
 }
 
 inline void prepare_q4(const event::prepare_q4_request &request) noexcept {
@@ -159,10 +159,8 @@ inline void prepare_q4(const event::prepare_q4_request &request) noexcept {
   const uint32_t in_pad = layout.in_pad;
   const size_t index_count = static_cast<size_t>(out) * in_pad;
   const size_t blocked_rows = out / 32u * 32u;
-  const size_t blocked_count = blocked_rows * in_pad;
   const size_t norm_count = index_count / group;
   const size_t groups_per_row = in_pad / group;
-  const size_t blocked_norm_count = blocked_rows * groups_per_row;
   const uint8_t *base = static_cast<const uint8_t *>(view.data);
   for (size_t i = 0u; i < index_count; ++i)
     request.indices[i] =
@@ -188,18 +186,6 @@ inline void prepare_q4(const event::prepare_q4_request &request) noexcept {
                                  lane] =
             request.norms[(row + lookup32_raw_rows[lane]) * groups_per_row +
                           group_index];
-  request.prepared = event::prepared_q4_view{
-      .source = static_cast<const uint8_t *>(view.data),
-      .out = out,
-      .in = in,
-      .group = group,
-      .in_pad = in_pad,
-      .indices = request.indices.first(index_count),
-      .indices_by_input32 = request.indices_by_input32.first(blocked_count),
-      .norms = request.norms.first(norm_count),
-      .norms_by_group32 =
-          request.norms_by_group32.first(blocked_norm_count),
-      .construction_tag = event::k_prepared_q4_construction_tag};
 }
 
 #if defined(__x86_64__) || defined(_M_X64)
@@ -252,16 +238,16 @@ lookup_codebook32_raw_reload(
     const event::prepared_codebook_q4 &codebook) noexcept {
   const __m256i bytes0 = _mm256_shuffle_epi8(
       _mm256_loadu_si256(reinterpret_cast<const __m256i *>(
-          codebook.byte_planes[0].data())), index_bytes);
+          codebook.byte_planes()[0].data())), index_bytes);
   const __m256i bytes1 = _mm256_shuffle_epi8(
       _mm256_loadu_si256(reinterpret_cast<const __m256i *>(
-          codebook.byte_planes[1].data())), index_bytes);
+          codebook.byte_planes()[1].data())), index_bytes);
   const __m256i bytes2 = _mm256_shuffle_epi8(
       _mm256_loadu_si256(reinterpret_cast<const __m256i *>(
-          codebook.byte_planes[2].data())), index_bytes);
+          codebook.byte_planes()[2].data())), index_bytes);
   const __m256i bytes3 = _mm256_shuffle_epi8(
       _mm256_loadu_si256(reinterpret_cast<const __m256i *>(
-          codebook.byte_planes[3].data())), index_bytes);
+          codebook.byte_planes()[3].data())), index_bytes);
   const __m256i low_words01 = _mm256_unpacklo_epi8(bytes0, bytes1);
   const __m256i low_words23 = _mm256_unpacklo_epi8(bytes2, bytes3);
   const __m256i high_words01 = _mm256_unpackhi_epi8(bytes0, bytes1);
@@ -332,13 +318,13 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void q4_codebook_byte_tables(
     const event::prepared_codebook_q4 &codebook, __m256i &byte0,
     __m256i &byte1, __m256i &byte2, __m256i &byte3) noexcept {
   byte0 = _mm256_loadu_si256(
-      reinterpret_cast<const __m256i *>(codebook.byte_planes[0].data()));
+      reinterpret_cast<const __m256i *>(codebook.byte_planes()[0].data()));
   byte1 = _mm256_loadu_si256(
-      reinterpret_cast<const __m256i *>(codebook.byte_planes[1].data()));
+      reinterpret_cast<const __m256i *>(codebook.byte_planes()[1].data()));
   byte2 = _mm256_loadu_si256(
-      reinterpret_cast<const __m256i *>(codebook.byte_planes[2].data()));
+      reinterpret_cast<const __m256i *>(codebook.byte_planes()[2].data()));
   byte3 = _mm256_loadu_si256(
-      reinterpret_cast<const __m256i *>(codebook.byte_planes[3].data()));
+      reinterpret_cast<const __m256i *>(codebook.byte_planes()[3].data()));
 }
 
 EMEL_KERNEL_CQ_AVX2_TARGET inline __m256i
@@ -363,26 +349,26 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_loaded(
     const __m256i codebook_byte0, const __m256i codebook_byte1,
     const __m256i codebook_byte2, const __m256i codebook_byte3) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
-  const uint32_t groups_per_row = view.in_pad / view.group;
+  const uint32_t groups_per_row = view.in_pad() / view.group();
   for (uint32_t row = 0u; row < row_count; ++row) {
     const uint32_t source_row = row_begin + row;
     const uint8_t *indices =
-        view.indices.data() + static_cast<size_t>(source_row) * view.in_pad;
+        view.indices().data() + static_cast<size_t>(source_row) * view.in_pad();
     const float *norms =
-        view.norms.data() + static_cast<size_t>(source_row) * groups_per_row;
+        view.norms().data() + static_cast<size_t>(source_row) * groups_per_row;
     // Four independent accumulation chains keep the shuffle/FMA pipeline full.
     // Each group is reduced before its exact decoded fp16 norm is applied, so
     // the hot selector loop performs lookup * activation only.
     float row_result = 0.0f;
-    for (uint32_t begin = 0u, group_index = 0u; begin < view.in_pad;
-         begin += view.group, ++group_index) {
+    for (uint32_t begin = 0u, group_index = 0u; begin < view.in_pad();
+         begin += view.group(), ++group_index) {
       __m256 group_accum0 = _mm256_setzero_ps();
       __m256 group_accum1 = _mm256_setzero_ps();
       __m256 group_accum2 = _mm256_setzero_ps();
       __m256 group_accum3 = _mm256_setzero_ps();
       float scalar_tail = 0.0f;
       uint32_t i = 0u;
-      for (; i + 64u <= view.group; i += 64u) {
+      for (; i + 64u <= view.group(); i += 64u) {
         const uint8_t *chunk = indices + begin + i;
         const float *activation = activation_fwht.data() + begin + i;
         const q4_lookup32_result values0 = lookup_codebook32_pshufb(
@@ -416,7 +402,7 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_loaded(
                                        _mm256_loadu_ps(activation + 56u),
                                        group_accum3);
       }
-      for (; i + 32u <= view.group; i += 32u) {
+      for (; i + 32u <= view.group(); i += 32u) {
         const q4_lookup32_result values = lookup_codebook32_pshufb(
             load_selector32(indices + begin + i), codebook_byte0,
             codebook_byte1, codebook_byte2, codebook_byte3);
@@ -430,7 +416,7 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_loaded(
         group_accum3 = _mm256_fmadd_ps(
             values.values3, _mm256_loadu_ps(activation + 24u), group_accum3);
       }
-      if (i + 16u <= view.group) {
+      if (i + 16u <= view.group()) {
         const q4_lookup16_result values = lookup_codebook16_pshufb(
             load_selector16(indices + begin + i), codebook_byte0,
             codebook_byte1, codebook_byte2, codebook_byte3);
@@ -443,7 +429,7 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_loaded(
             group_accum1);
         i += 16u;
       }
-      if (i + 8u <= view.group) {
+      if (i + 8u <= view.group()) {
         const __m128i selectors = _mm_loadl_epi64(
             reinterpret_cast<const __m128i *>(indices + begin + i));
         const __m256 values = lookup_codebook8_pshufb(
@@ -456,9 +442,9 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_loaded(
             group_accum0);
         i += 8u;
       }
-      for (; i < view.group; ++i)
+      for (; i < view.group(); ++i)
         scalar_tail += detail::code_value<4u>(
-                           indices[begin + i], view.group, codebook.values) *
+                           indices[begin + i], view.group(), codebook.values()) *
                        activation_fwht[begin + i];
       const __m256 group_accum = _mm256_add_ps(
           _mm256_add_ps(group_accum0, group_accum1),
@@ -536,22 +522,22 @@ execute_prepared_avx2_dot_one_block32_loaded(
     const __m256i codebook_byte1, const __m256i codebook_byte2,
     const __m256i codebook_byte3) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
-  const uint32_t groups_per_row = view.in_pad / view.group;
+  const uint32_t groups_per_row = view.in_pad() / view.group();
   const uint8_t *selectors =
-      view.indices_by_input32.data() + static_cast<size_t>(row) * view.in_pad;
-  const float *group_norms = view.norms_by_group32.data() +
+      view.indices_by_input32().data() + static_cast<size_t>(row) * view.in_pad();
+  const float *group_norms = view.norms_by_group32().data() +
                              static_cast<size_t>(row) * groups_per_row;
   __m256 row_total0 = _mm256_setzero_ps();
   __m256 row_total1 = _mm256_setzero_ps();
   __m256 row_total2 = _mm256_setzero_ps();
   __m256 row_total3 = _mm256_setzero_ps();
-  for (uint32_t begin = 0u, group_index = 0u; begin < view.in_pad;
-       begin += view.group, ++group_index) {
+  for (uint32_t begin = 0u, group_index = 0u; begin < view.in_pad();
+       begin += view.group(), ++group_index) {
     __m256 group_accum0 = _mm256_setzero_ps();
     __m256 group_accum1 = _mm256_setzero_ps();
     __m256 group_accum2 = _mm256_setzero_ps();
     __m256 group_accum3 = _mm256_setzero_ps();
-    for (uint32_t i = 0u; i < view.group; ++i) {
+    for (uint32_t i = 0u; i < view.group(); ++i) {
       const q4_lookup32_result values = lookup_codebook32_raw(
           load_selector32(selectors + static_cast<size_t>(begin + i) * 32u),
           codebook_byte0, codebook_byte1, codebook_byte2, codebook_byte3);
@@ -598,15 +584,15 @@ execute_prepared_avx2_dot_block32_loaded(
     const __m256i codebook_byte1, const __m256i codebook_byte2,
     const __m256i codebook_byte3) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
-  const uint32_t blocked_rows = view.out / 32u * 32u;
+  const uint32_t blocked_rows = view.out() / 32u * 32u;
   for (uint32_t row = 0u; row < blocked_rows; row += 32u)
     execute_prepared_avx2_dot_one_block32_loaded(
         view, activation_fwht, row, output, codebook_byte0, codebook_byte1,
         codebook_byte2, codebook_byte3);
-  if (blocked_rows < view.out)
+  if (blocked_rows < view.out())
     execute_prepared_avx2_dot_loaded(
         view, codebook, activation_fwht, blocked_rows,
-        view.out - blocked_rows, output.subspan(blocked_rows), codebook_byte0,
+        view.out() - blocked_rows, output.subspan(blocked_rows), codebook_byte0,
         codebook_byte1, codebook_byte2, codebook_byte3);
 #else
   (void)view;
@@ -629,20 +615,20 @@ execute_prepared_avx2_dot_block64_loaded(
     const __m256i codebook_byte1, const __m256i codebook_byte2,
     const __m256i codebook_byte3) noexcept {
 #if defined(__x86_64__) || defined(_M_X64)
-  const uint32_t blocked_rows64 = view.out / 64u * 64u;
-  const uint32_t groups_per_row = view.in_pad / view.group;
+  const uint32_t blocked_rows64 = view.out() / 64u * 64u;
+  const uint32_t groups_per_row = view.in_pad() / view.group();
   for (uint32_t row = 0u; row < blocked_rows64; row += 64u) {
     const uint8_t *selectors_a =
-        view.indices_by_input32.data() + static_cast<size_t>(row) * view.in_pad;
+        view.indices_by_input32().data() + static_cast<size_t>(row) * view.in_pad();
     const uint8_t *selectors_b =
-        selectors_a + static_cast<size_t>(32u) * view.in_pad;
-    const float *group_norms_a = view.norms_by_group32.data() +
+        selectors_a + static_cast<size_t>(32u) * view.in_pad();
+    const float *group_norms_a = view.norms_by_group32().data() +
                                  static_cast<size_t>(row) * groups_per_row;
     const float *group_norms_b =
         group_norms_a + static_cast<size_t>(32u) * groups_per_row;
     alignas(32) float row_totals[64u]{};
-    for (uint32_t begin = 0u, group_index = 0u; begin < view.in_pad;
-         begin += view.group, ++group_index) {
+    for (uint32_t begin = 0u, group_index = 0u; begin < view.in_pad();
+         begin += view.group(), ++group_index) {
       __m256 group_accum_a0 = _mm256_setzero_ps();
       __m256 group_accum_a1 = _mm256_setzero_ps();
       __m256 group_accum_a2 = _mm256_setzero_ps();
@@ -651,7 +637,7 @@ execute_prepared_avx2_dot_block64_loaded(
       __m256 group_accum_b1 = _mm256_setzero_ps();
       __m256 group_accum_b2 = _mm256_setzero_ps();
       __m256 group_accum_b3 = _mm256_setzero_ps();
-      for (uint32_t i = 0u; i < view.group; ++i) {
+      for (uint32_t i = 0u; i < view.group(); ++i) {
         const size_t selector_offset = static_cast<size_t>(begin + i) * 32u;
         const __m256 activation = _mm256_set1_ps(activation_fwht[begin + i]);
         const q4_lookup32_result values_a = lookup_codebook32_raw_reload(
@@ -723,15 +709,15 @@ execute_prepared_avx2_dot_block64_loaded(
                                 _mm256_load_ps(row_totals + 48u),
                                 _mm256_load_ps(row_totals + 56u));
   }
-  const uint32_t blocked_rows32 = view.out / 32u * 32u;
+  const uint32_t blocked_rows32 = view.out() / 32u * 32u;
   if (blocked_rows64 < blocked_rows32)
     execute_prepared_avx2_dot_one_block32_loaded(
         view, activation_fwht, blocked_rows64, output, codebook_byte0,
         codebook_byte1, codebook_byte2, codebook_byte3);
-  if (blocked_rows32 < view.out)
+  if (blocked_rows32 < view.out())
     execute_prepared_avx2_dot_loaded(
         view, codebook, activation_fwht, blocked_rows32,
-        view.out - blocked_rows32, output.subspan(blocked_rows32),
+        view.out() - blocked_rows32, output.subspan(blocked_rows32),
         codebook_byte0, codebook_byte1, codebook_byte2, codebook_byte3);
 #else
   (void)view;
@@ -771,24 +757,24 @@ EMEL_KERNEL_CQ_AVX2_TARGET inline void execute_prepared_avx2_dot_block64(
 inline void execute_prepared_dequant_rows(
     const event::prepared_dequant_rows_request &request) noexcept {
   const auto &view = request.weights;
-  const float *codebook = detail::codebook_for<4u>(request.codebook.values);
-  const uint32_t groups_per_row = view.in_pad / view.group;
+  const float *codebook = detail::codebook_for<4u>(request.codebook.values());
+  const uint32_t groups_per_row = view.in_pad() / view.group();
   alignas(32) float values[detail::k_max_group];
   for (uint32_t row = 0u; row < request.row_count; ++row) {
     const uint32_t source_row = request.row_begin + row;
     const uint8_t *indices =
-        view.indices.data() + static_cast<size_t>(source_row) * view.in_pad;
+        view.indices().data() + static_cast<size_t>(source_row) * view.in_pad();
     const float *norms =
-        view.norms.data() + static_cast<size_t>(source_row) * groups_per_row;
-    float *row_out = request.output.data() + static_cast<size_t>(row) * view.in;
-    for (uint32_t begin = 0u, group_index = 0u; begin < view.in_pad;
-         begin += view.group, ++group_index) {
-      for (uint32_t i = 0u; i < view.group; ++i)
+        view.norms().data() + static_cast<size_t>(source_row) * groups_per_row;
+    float *row_out = request.output.data() + static_cast<size_t>(row) * view.in();
+    for (uint32_t begin = 0u, group_index = 0u; begin < view.in_pad();
+         begin += view.group(), ++group_index) {
+      for (uint32_t i = 0u; i < view.group(); ++i)
         values[i] = codebook[indices[begin + i]] * norms[group_index];
-      detail::fwht(values, view.group);
-      const uint32_t keep = begin + view.group <= view.in
-                                ? view.group
-                                : (view.in > begin ? view.in - begin : 0u);
+      detail::fwht(values, view.group());
+      const uint32_t keep = begin + view.group() <= view.in()
+                                ? view.group()
+                                : (view.in() > begin ? view.in() - begin : 0u);
       for (uint32_t i = 0u; i < keep; ++i)
         row_out[begin + i] = values[i] * request.scale;
     }
@@ -990,16 +976,46 @@ struct effect_execute_fwht_avx2 {
 };
 
 struct effect_prepare_codebook_q4 {
+private:
+  friend struct emel::kernel::cq::model;
+  effect_prepare_codebook_q4() noexcept = default;
+
+public:
+  effect_prepare_codebook_q4(const effect_prepare_codebook_q4 &) noexcept =
+      default;
   void operator()(const event::prepare_codebook_q4 &ev,
                   context &) const noexcept {
-    prepare_codebook_q4(ev.request);
+    const auto byte_planes = materialize_codebook_q4(ev.request.codebook);
+    ev.request.prepared.publish(ev.request.codebook, byte_planes);
     ev.result.accepted = true;
   }
 };
 
 struct effect_prepare_q4 {
+private:
+  friend struct emel::kernel::cq::model;
+  effect_prepare_q4() noexcept = default;
+
+public:
+  effect_prepare_q4(const effect_prepare_q4 &) noexcept = default;
   void operator()(const event::prepare_q4 &ev, context &ctx) const noexcept {
     prepare_q4(ev.request);
+    const auto &view = ev.request.weights;
+    detail::layout layout{};
+    (void)detail::checked_layout<4u>(view.shape[0], view.shape[1], view.group,
+                                     layout);
+    const size_t index_count =
+        static_cast<size_t>(view.shape[0]) * layout.in_pad;
+    const size_t blocked_rows = view.shape[0] / 32u * 32u;
+    const size_t blocked_count = blocked_rows * layout.in_pad;
+    const size_t norm_count = index_count / view.group;
+    const size_t blocked_norm_count = blocked_count / view.group;
+    ev.request.prepared.publish(
+        static_cast<const uint8_t *>(view.data), view.shape[0], view.shape[1],
+        view.group, layout.in_pad, ev.request.indices.first(index_count),
+        ev.request.indices_by_input32.first(blocked_count),
+        ev.request.norms.first(norm_count),
+        ev.request.norms_by_group32.first(blocked_norm_count));
     ev.result.accepted = true;
     ++ctx.prepare_calls;
   }
@@ -1010,17 +1026,17 @@ struct effect_execute_prepared_avx2_q4 {
                   context &ctx) const noexcept {
     const uint64_t fwht_begin = timing_now(ctx);
     detail::compute_fwht128_groups_avx2(
-        ev.request.activation, ev.request.weights.in,
-        ev.request.weights.in_pad,
-        ev.request.workspace.first(ev.request.weights.in_pad));
+        ev.request.activation, ev.request.weights.in(),
+        ev.request.weights.in_pad(),
+        ev.request.workspace.first(ev.request.weights.in_pad()));
     if (ctx.timing_enabled)
       ctx.timing.fwht_nanoseconds += timing_now(ctx) - fwht_begin;
     const uint64_t dot_begin = timing_now(ctx);
     execute_prepared_avx2_dot_block64(
         ev.request.weights, ev.request.codebook,
-        ev.request.workspace.first(ev.request.weights.in_pad),
+        ev.request.workspace.first(ev.request.weights.in_pad()),
         ev.request.output);
-    scale_output(ev.request.output.first(ev.request.weights.out),
+    scale_output(ev.request.output.first(ev.request.weights.out()),
                  ev.request.output_scale);
     if (ctx.timing_enabled)
       ctx.timing.dot_full_nanoseconds += timing_now(ctx) - dot_begin;
@@ -1037,7 +1053,7 @@ struct effect_execute_prepared_avx2_dot_q4 {
                                       ev.request.codebook,
                                       ev.request.activation_fwht,
                                       ev.request.output);
-    scale_output(ev.request.output.first(ev.request.weights.out),
+    scale_output(ev.request.output.first(ev.request.weights.out()),
                  ev.request.output_scale);
     if (ctx.timing_enabled)
       ctx.timing.dot_full_nanoseconds += timing_now(ctx) - dot_begin;
@@ -1053,8 +1069,8 @@ struct effect_execute_prepared_avx2_batch4_q4 {
     const auto &first = *request.targets[0].weights;
     const uint64_t fwht_begin = timing_now(ctx);
     detail::compute_fwht128_groups_avx2(
-        request.activation, first.in, first.in_pad,
-        request.workspace.first(first.in_pad));
+        request.activation, first.in(), first.in_pad(),
+        request.workspace.first(first.in_pad()));
     if (ctx.timing_enabled)
       ctx.timing.fwht_nanoseconds += timing_now(ctx) - fwht_begin;
     const uint64_t dot_begin = timing_now(ctx);
@@ -1067,9 +1083,9 @@ struct effect_execute_prepared_avx2_batch4_q4 {
     for (const auto &target : request.targets) {
       execute_prepared_avx2_dot_block64_loaded(
           *target.weights, request.codebook,
-          request.workspace.first(first.in_pad), target.output, codebook_byte0,
+          request.workspace.first(first.in_pad()), target.output, codebook_byte0,
           codebook_byte1, codebook_byte2, codebook_byte3);
-      scale_output(target.output.first(target.weights->out),
+      scale_output(target.output.first(target.weights->out()),
                    request.output_scale);
     }
     if (ctx.timing_enabled)
@@ -1084,15 +1100,15 @@ struct effect_execute_prepared_avx2_rows_q4 {
                   context &ctx) const noexcept {
     const uint64_t fwht_begin = timing_now(ctx);
     detail::compute_fwht128_groups_avx2(
-        ev.request.activation, ev.request.weights.in,
-        ev.request.weights.in_pad,
-        ev.request.workspace.first(ev.request.weights.in_pad));
+        ev.request.activation, ev.request.weights.in(),
+        ev.request.weights.in_pad(),
+        ev.request.workspace.first(ev.request.weights.in_pad()));
     if (ctx.timing_enabled)
       ctx.timing.fwht_nanoseconds += timing_now(ctx) - fwht_begin;
     const uint64_t dot_begin = timing_now(ctx);
     execute_prepared_avx2_dot(
         ev.request.weights, ev.request.codebook,
-        ev.request.workspace.first(ev.request.weights.in_pad),
+        ev.request.workspace.first(ev.request.weights.in_pad()),
         ev.request.row_begin, ev.request.row_count, ev.request.output);
     scale_output(ev.request.output.first(ev.request.row_count),
                  ev.request.output_scale);
