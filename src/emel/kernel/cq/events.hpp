@@ -12,12 +12,16 @@ struct dispatch_result {
   bool accepted = false;
 };
 
-// Graph/model-owned exact CQ4 lookup representation. `values` borrows the
-// source codebook while `byte_planes` owns the bitwise-identical float bytes,
-// duplicated across both 128-bit shuffle lanes.
+// Construction/init-owned exact CQ4 lookup representation. prepare_codebook_q4
+// validates the borrowed source codebook once and materializes byte_planes.
+// `values` and byte_planes must remain immutable and `values` must outlive every
+// prepared dispatch; execution validates only O(1) metadata and span structure.
+inline constexpr uint32_t k_prepared_q4_construction_tag = 0x43513450u;
+
 struct alignas(32) prepared_codebook_q4 {
   std::span<const float> values = {};
   std::array<std::array<uint8_t, 32u>, 4u> byte_planes = {};
+  uint32_t construction_tag = 0u;
 };
 
 struct prepare_codebook_q4_request {
@@ -63,9 +67,12 @@ struct gemv_request {
   std::span<float> workspace;
   float output_scale = 1.0f;
 };
-// Construction/init-owned CQ4 representation. Indices remain exact codebook
-// selectors and norms are the exact fp16 payload decoded once to f32. The
-// spans borrow caller-owned storage that must outlive every prepared dispatch.
+// Construction/init-owned CQ4 representation, published only by prepare_q4
+// after the complete source payload has been validated and materialized.
+// Selectors remain exact codebook indices and norms are exact fp16 payloads
+// decoded once to f32. All four borrowed storage spans and the source storage
+// must remain immutable and alive for every prepared dispatch. Execution relies
+// on that invariant and performs only O(1) metadata/span structural validation.
 struct prepared_q4_view {
   const uint8_t *source = nullptr;
   uint32_t out = 0u;
@@ -82,6 +89,7 @@ struct prepared_q4_view {
   // 12..15,28..31. Values are copied from exact decoded row-major norms;
   // tail rows continue to use `norms`.
   std::span<const float> norms_by_group32 = {};
+  uint32_t construction_tag = 0u;
 };
 struct prepare_q4_request {
   const emel::cact::loader::tensor_view &weights;

@@ -322,7 +322,14 @@ prepare_supported(const event::prepare_q4_request &request) noexcept {
       !checked_bytes(norm_count, sizeof(float), norms_bytes) ||
       !checked_bytes(blocked_norm_count, sizeof(float), blocked_norms_bytes))
     return false;
-  const void *source = view.data;
+  const auto *source_data = static_cast<const uint8_t *>(view.data);
+  const uint8_t *source_norms =
+      source_data + static_cast<size_t>(layout.packed_bytes);
+  for (size_t i = 0u; i < static_cast<size_t>(norm_count); ++i)
+    if (!std::isfinite(
+            detail::fp16_to_fp32(detail::load_u16(source_norms + i * 2u))))
+      return false;
+  const void *source = source_data;
   void *indices = request.indices.data();
   void *blocked_indices = request.indices_by_input32.data();
   void *norms = request.norms.data();
@@ -345,11 +352,11 @@ prepare_supported(const event::prepare_q4_request &request) noexcept {
          ranges_disjoint(norms, norms_bytes, blocked_norms,
                          blocked_norms_bytes);
 }
-inline bool prepared_codebook_supported(
+inline bool prepared_codebook_structure_supported(
     const event::prepared_codebook_q4 &codebook) noexcept {
-  return span_has_data(codebook.values) &&
-         codebook.values.size() >= emel::cact::loader::k_codebook_len &&
-         finite_values(codebook.values, emel::cact::loader::k_codebook_len);
+  return codebook.construction_tag == event::k_prepared_q4_construction_tag &&
+         span_has_data(codebook.values) &&
+         codebook.values.size() >= emel::cact::loader::k_codebook_len;
 }
 struct guard_prepare_codebook_q4 {
   bool operator()(const event::prepare_codebook_q4 &ev,
@@ -360,43 +367,39 @@ struct guard_prepare_codebook_q4 {
                          emel::cact::loader::k_codebook_len);
   }
 };
-inline bool prepared_supported(const event::prepared_q4_view &view,
-                               const std::span<const float> codebook) noexcept {
+inline bool prepared_structure_supported(
+    const event::prepared_q4_view &view) noexcept {
   detail::layout layout{};
-  if (view.source == nullptr || view.group > detail::k_max_group ||
+  if (view.construction_tag != event::k_prepared_q4_construction_tag ||
+      view.source == nullptr || view.group > detail::k_max_group ||
       !detail::is_power_of_two(view.group) ||
       !detail::checked_layout<4u>(view.out, view.in, view.group, layout) ||
       view.in_pad != layout.in_pad)
     return false;
   uint64_t index_count = 0u;
-  uint64_t norm_count = 0u;
   uint64_t blocked_count = 0u;
   uint64_t blocked_norm_count = 0u;
   const uint64_t blocked_rows =
       static_cast<uint64_t>(view.out / 32u * 32u);
-  return detail::checked_multiply_u64(view.out, view.in_pad, index_count) &&
-         (norm_count = index_count / view.group, true) &&
-         detail::checked_multiply_u64(blocked_rows, view.in_pad,
-                                      blocked_count) &&
-         detail::checked_multiply_u64(blocked_rows,
-                                      view.in_pad / view.group,
-                                      blocked_norm_count) &&
-         index_count <= std::numeric_limits<size_t>::max() &&
+  if (!detail::checked_multiply_u64(view.out, view.in_pad, index_count) ||
+      !detail::checked_multiply_u64(blocked_rows, view.in_pad,
+                                    blocked_count) ||
+      !detail::checked_multiply_u64(blocked_rows,
+                                    view.in_pad / view.group,
+                                    blocked_norm_count))
+    return false;
+  const uint64_t norm_count = index_count / view.group;
+  return index_count <= std::numeric_limits<size_t>::max() &&
          norm_count <= std::numeric_limits<size_t>::max() &&
          blocked_count <= std::numeric_limits<size_t>::max() &&
          blocked_norm_count <= std::numeric_limits<size_t>::max() &&
          span_has_data(view.indices) &&
          span_has_data(view.indices_by_input32) && span_has_data(view.norms) &&
-         span_has_data(view.norms_by_group32) && span_has_data(codebook) &&
-         selectors_supported(view.indices, static_cast<size_t>(index_count)) &&
-         selectors_supported(view.indices_by_input32,
-                             static_cast<size_t>(blocked_count)) &&
+         span_has_data(view.norms_by_group32) &&
+         view.indices.size() >= index_count &&
+         view.indices_by_input32.size() >= blocked_count &&
          view.norms.size() >= norm_count &&
-         view.norms_by_group32.size() >= blocked_norm_count &&
-         codebook.size() >= 28u && finite_values(codebook, 28u) &&
-         finite_values(view.norms, static_cast<size_t>(norm_count)) &&
-         finite_values(view.norms_by_group32,
-                       static_cast<size_t>(blocked_norm_count));
+         view.norms_by_group32.size() >= blocked_norm_count;
 }
 
 struct guard_prepare_q4 {
@@ -416,8 +419,8 @@ struct guard_execute_prepared_avx2_q4 {
     size_t output_bytes = 0u;
     size_t workspace_bytes = 0u;
     if (!ctx.avx2_fma_available || request.weights.group != 128u ||
-        !prepared_supported(request.weights, request.codebook.values) ||
-        !prepared_codebook_supported(request.codebook) ||
+        !prepared_structure_supported(request.weights) ||
+        !prepared_codebook_structure_supported(request.codebook) ||
         request.activation.size() < request.weights.in ||
         request.output.size() < request.weights.out ||
         request.workspace.size() < request.weights.in_pad ||
@@ -454,8 +457,8 @@ struct guard_execute_prepared_avx2_dot_q4 {
     size_t activation_bytes = 0u;
     size_t output_bytes = 0u;
     if (!ctx.avx2_fma_available || request.weights.group != 128u ||
-        !prepared_supported(request.weights, request.codebook.values) ||
-        !prepared_codebook_supported(request.codebook) ||
+        !prepared_structure_supported(request.weights) ||
+        !prepared_codebook_structure_supported(request.codebook) ||
         request.activation_fwht.size() < request.weights.in_pad ||
         request.output.size() < request.weights.out ||
         !std::isfinite(request.output_scale) ||
@@ -497,8 +500,8 @@ struct guard_execute_prepared_avx2_batch4_q4 {
       const auto &target = request.targets[i];
       size_t output_bytes = 0u;
       if (target.weights == nullptr ||
-          !prepared_supported(*target.weights, request.codebook.values) ||
-          !prepared_codebook_supported(request.codebook) ||
+          !prepared_structure_supported(*target.weights) ||
+          !prepared_codebook_structure_supported(request.codebook) ||
           target.weights->in != first->in ||
           target.weights->group != first->group ||
           target.weights->in_pad != first->in_pad ||
@@ -542,8 +545,8 @@ struct guard_execute_prepared_avx2_rows_q4 {
     size_t output_bytes = 0u;
     size_t workspace_bytes = 0u;
     if (!ctx.avx2_fma_available || request.weights.group != 128u ||
-        !prepared_supported(request.weights, request.codebook.values) ||
-        !prepared_codebook_supported(request.codebook) ||
+        !prepared_structure_supported(request.weights) ||
+        !prepared_codebook_structure_supported(request.codebook) ||
         request.row_count == 0u ||
         static_cast<uint64_t>(request.row_begin) + request.row_count >
             request.weights.out ||
@@ -580,8 +583,8 @@ struct guard_execute_prepared_dequant_q4 {
     const auto &request = ev.request;
     uint64_t output_count = 0u;
     size_t output_bytes = 0u;
-    return prepared_supported(request.weights, request.codebook.values) &&
-           prepared_codebook_supported(request.codebook) &&
+    return prepared_structure_supported(request.weights) &&
+           prepared_codebook_structure_supported(request.codebook) &&
            request.row_count > 0u &&
            static_cast<uint64_t>(request.row_begin) + request.row_count <=
                request.weights.out &&

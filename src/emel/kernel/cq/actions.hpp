@@ -146,6 +146,7 @@ prepare_codebook_q4(const event::prepare_codebook_q4_request &request) noexcept 
       request.prepared.byte_planes[byte][index] = value;
       request.prepared.byte_planes[byte][16u + index] = value;
     }
+  request.prepared.construction_tag = event::k_prepared_q4_construction_tag;
 }
 
 inline void prepare_q4(const event::prepare_q4_request &request) noexcept {
@@ -197,7 +198,8 @@ inline void prepare_q4(const event::prepare_q4_request &request) noexcept {
       .indices_by_input32 = request.indices_by_input32.first(blocked_count),
       .norms = request.norms.first(norm_count),
       .norms_by_group32 =
-          request.norms_by_group32.first(blocked_norm_count)};
+          request.norms_by_group32.first(blocked_norm_count),
+      .construction_tag = event::k_prepared_q4_construction_tag};
 }
 
 #if defined(__x86_64__) || defined(_M_X64)

@@ -9,6 +9,11 @@
 #include <limits>
 #include <doctest/doctest.h>
 #include <vector>
+#if defined(__linux__)
+#include <sys/mman.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 namespace {
 using emel::cact::loader::tensor_view;
 using emel::kernel::cq::event::gemv_request;
@@ -56,6 +61,42 @@ size_t blocked_norm_count(const tensor_view &view) {
       (view.shape[1] + view.group - 1u) / view.group * view.group;
   return static_cast<size_t>(view.shape[0] / 32u * 32u) * in_pad / view.group;
 }
+#if defined(__linux__)
+class protected_tail_mapping {
+public:
+  explicit protected_tail_mapping(const size_t bytes) noexcept
+      : page_bytes_(static_cast<size_t>(::sysconf(_SC_PAGESIZE))),
+        mapped_bytes_((bytes + page_bytes_ - 1u) / page_bytes_ * page_bytes_),
+        data_(::mmap(nullptr, mapped_bytes_, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)) {}
+
+  protected_tail_mapping(const protected_tail_mapping &) = delete;
+  protected_tail_mapping &operator=(const protected_tail_mapping &) = delete;
+
+  ~protected_tail_mapping() {
+    if (data_ != MAP_FAILED)
+      (void)::munmap(data_, mapped_bytes_);
+  }
+
+  template <typename T> std::span<T> span(const size_t count) noexcept {
+    return {static_cast<T *>(data_), count};
+  }
+
+  bool valid() const noexcept { return data_ != MAP_FAILED; }
+
+  bool protect_tail() noexcept {
+    if (mapped_bytes_ <= page_bytes_)
+      return true;
+    return ::mprotect(static_cast<uint8_t *>(data_) + page_bytes_,
+                      mapped_bytes_ - page_bytes_, PROT_NONE) == 0;
+  }
+
+private:
+  size_t page_bytes_ = 0u;
+  size_t mapped_bytes_ = 0u;
+  void *data_ = MAP_FAILED;
+};
+#endif
 #if defined(__AVX2__) && defined(__FMA__)
 void execute_block32_canonical_reference(
     const emel::kernel::cq::event::prepared_q4_view &prepared,
@@ -951,7 +992,71 @@ TEST_CASE("CQ public prepared routes reject non-finite scales without writes") {
     }
   }
 }
-TEST_CASE("CQ public prepared routes reject invalid selectors without writes") {
+#if defined(__linux__)
+TEST_CASE("CQ4 prepared row execution reads only the requested row") {
+  constexpr uint32_t group = 128u, in = 128u, out = 32768u;
+  const auto packed = blob<4u>(std::vector<uint32_t>(
+                                    static_cast<size_t>(out) * in, 3u),
+                                out, in, group,
+                                std::vector<uint16_t>(out, 0x3c00u));
+  const auto weights = view(packed, out, in, group, 4u);
+  const size_t index_count = static_cast<size_t>(out) * in;
+  const size_t norm_count = out;
+  protected_tail_mapping indices_storage(index_count);
+  protected_tail_mapping blocked_indices_storage(index_count);
+  protected_tail_mapping norms_storage(norm_count * sizeof(float));
+  protected_tail_mapping blocked_norms_storage(norm_count * sizeof(float));
+  REQUIRE(indices_storage.valid());
+  REQUIRE(blocked_indices_storage.valid());
+  REQUIRE(norms_storage.valid());
+  REQUIRE(blocked_norms_storage.valid());
+  auto indices = indices_storage.span<uint8_t>(index_count);
+  auto blocked_indices = blocked_indices_storage.span<uint8_t>(index_count);
+  auto norms = norms_storage.span<float>(norm_count);
+  auto blocked_norms = blocked_norms_storage.span<float>(norm_count);
+  emel::kernel::cq::event::prepared_q4_view prepared{};
+  emel::kernel::cq::event::dispatch_result prepare_result{};
+  const emel::kernel::cq::event::prepare_q4_request prepare_request{
+      weights, indices, blocked_indices, norms, blocked_norms, prepared};
+  emel::kernel::cq::sm machine;
+  REQUIRE(machine.process_event(
+      emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
+  std::array<float, emel::cact::loader::k_codebook_len> codebook{};
+  codebook[15u] = 0.25f;
+  emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
+  emel::kernel::cq::event::dispatch_result codebook_result{};
+  const emel::kernel::cq::event::prepare_codebook_q4_request codebook_request{
+      codebook, prepared_codebook};
+  REQUIRE(machine.process_event(emel::kernel::cq::event::prepare_codebook_q4{
+      codebook_request, codebook_result}));
+  REQUIRE(indices_storage.protect_tail());
+  REQUIRE(blocked_indices_storage.protect_tail());
+  REQUIRE(norms_storage.protect_tail());
+  REQUIRE(blocked_norms_storage.protect_tail());
+
+  const pid_t child = ::fork();
+  REQUIRE(child >= 0);
+  if (child == 0) {
+    std::array<float, in> output{};
+    const emel::kernel::cq::event::prepared_dequant_rows_request request{
+        prepared, prepared_codebook, 0u, 1u, 1.0f, output};
+    emel::kernel::cq::event::dispatch_result result{};
+    emel::kernel::cq::sm child_machine;
+    const bool accepted = child_machine.process_event(
+        emel::kernel::cq::event::execute_prepared_dequant_q4{request, result});
+    const bool numerics_match =
+        output[0] == doctest::Approx(2.82842712f) &&
+        output[1] == doctest::Approx(0.0f);
+    ::_exit(accepted && result.accepted && numerics_match ? 0 : 1);
+  }
+  int status = 0;
+  REQUIRE(::waitpid(child, &status, 0) == child);
+  CHECK(WIFEXITED(status));
+  CHECK((WIFEXITED(status) && WEXITSTATUS(status) == 0));
+}
+#endif
+
+TEST_CASE("CQ prepared execution rejects undersized prepared spans without writes") {
   constexpr uint32_t group = 128u, in = 128u, out = 32u;
   const auto packed = blob<4u>(std::vector<uint32_t>(out * in, 3u), out, in,
                                 group, std::vector<uint16_t>(out, 0x3c00u));
@@ -960,10 +1065,10 @@ TEST_CASE("CQ public prepared routes reject invalid selectors without writes") {
   std::vector<uint8_t> blocked_indices(indices.size());
   std::vector<float> norms(out);
   std::vector<float> blocked_norms(blocked_norm_count(weights));
-  emel::kernel::cq::event::prepared_q4_view prepared{};
+  emel::kernel::cq::event::prepared_q4_view valid{};
   emel::kernel::cq::event::dispatch_result prepare_result{};
   const emel::kernel::cq::event::prepare_q4_request prepare_request{
-      weights, indices, blocked_indices, norms, blocked_norms, prepared};
+      weights, indices, blocked_indices, norms, blocked_norms, valid};
   emel::kernel::cq::sm machine;
   REQUIRE(machine.process_event(
       emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
@@ -975,29 +1080,87 @@ TEST_CASE("CQ public prepared routes reject invalid selectors without writes") {
   REQUIRE(machine.process_event(emel::kernel::cq::event::prepare_codebook_q4{
       codebook_request, codebook_result}));
 
-  for (const uint8_t invalid : {uint8_t{16u}, uint8_t{255u}}) {
-    for (const bool blocked_layout : {false, true}) {
-      auto prepared_with_invalid_selector = prepared;
-      auto selectors = blocked_layout ? blocked_indices : indices;
-      selectors[0] = invalid;
-      if (blocked_layout)
-        prepared_with_invalid_selector.indices_by_input32 = selectors;
-      else
-        prepared_with_invalid_selector.indices = selectors;
-      std::array<float, in> output{};
-      output.fill(-31.0f);
-      const auto before = output;
-      const emel::kernel::cq::event::prepared_dequant_rows_request request{
-          prepared_with_invalid_selector, prepared_codebook, 0u, 1u, 1.0f,
-          output};
-      emel::kernel::cq::event::dispatch_result result{};
+  for (uint32_t short_span = 0u; short_span < 5u; ++short_span) {
+    auto prepared = valid;
+    auto candidate_codebook = prepared_codebook;
+    if (short_span == 0u)
+      prepared.indices = prepared.indices.first(prepared.indices.size() - 1u);
+    else if (short_span == 1u)
+      prepared.indices_by_input32 = prepared.indices_by_input32.first(
+          prepared.indices_by_input32.size() - 1u);
+    else if (short_span == 2u)
+      prepared.norms = prepared.norms.first(prepared.norms.size() - 1u);
+    else if (short_span == 3u)
+      prepared.norms_by_group32 = prepared.norms_by_group32.first(
+          prepared.norms_by_group32.size() - 1u);
+    else
+      candidate_codebook.values = candidate_codebook.values.first(
+          emel::cact::loader::k_codebook_len - 1u);
+    std::array<float, in> output{};
+    output.fill(-41.0f);
+    const auto before = output;
+    const emel::kernel::cq::event::prepared_dequant_rows_request request{
+        prepared, candidate_codebook, 0u, 1u, 1.0f, output};
+    emel::kernel::cq::event::dispatch_result result{};
 
-      CHECK_FALSE(machine.process_event(
-          emel::kernel::cq::event::execute_prepared_dequant_q4{request,
-                                                               result}));
-      CHECK_FALSE(result.accepted);
-      CHECK(output == before);
-    }
+    CHECK_FALSE(machine.process_event(
+        emel::kernel::cq::event::execute_prepared_dequant_q4{request, result}));
+    CHECK_FALSE(result.accepted);
+    CHECK(output == before);
+  }
+}
+
+TEST_CASE("CQ4 prepare accepts only selectors materialized from packed source") {
+  constexpr uint32_t group = 128u, in = 128u, out = 32u;
+  const auto packed = blob<4u>(std::vector<uint32_t>(out * in, 15u), out, in,
+                                group, std::vector<uint16_t>(out, 0x3c00u));
+  const auto weights = view(packed, out, in, group, 4u);
+  std::vector<uint8_t> indices(static_cast<size_t>(out) * in);
+  std::vector<uint8_t> blocked_indices(indices.size());
+  std::vector<float> norms(out);
+  std::vector<float> blocked_norms(blocked_norm_count(weights));
+  emel::kernel::cq::event::prepared_q4_view prepared{};
+  emel::kernel::cq::event::dispatch_result prepare_result{};
+  const emel::kernel::cq::event::prepare_q4_request prepare_request{
+      weights, indices, blocked_indices, norms, blocked_norms, prepared};
+  emel::kernel::cq::sm machine;
+
+  REQUIRE(machine.process_event(
+      emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
+  CHECK(prepare_result.accepted);
+  for (const uint8_t selector : prepared.indices)
+    CHECK(selector == 15u);
+  for (const uint8_t selector : prepared.indices_by_input32)
+    CHECK(selector == 15u);
+}
+
+TEST_CASE("CQ4 prepare rejects non-finite source norms without publication") {
+  constexpr uint32_t group = 128u, in = 128u, out = 32u;
+  for (const uint16_t nonfinite : {uint16_t{0x7c00u}, uint16_t{0x7e00u}}) {
+    const auto packed = blob<4u>(std::vector<uint32_t>(out * in, 3u), out, in,
+                                  group,
+                                  std::vector<uint16_t>(out, nonfinite));
+    const auto weights = view(packed, out, in, group, 4u);
+    std::vector<uint8_t> indices(static_cast<size_t>(out) * in, 17u);
+    std::vector<uint8_t> blocked_indices(indices.size(), 19u);
+    std::vector<float> norms(out, 23.0f);
+    std::vector<float> blocked_norms(blocked_norm_count(weights), 29.0f);
+    emel::kernel::cq::event::prepared_q4_view prepared{
+        .source = reinterpret_cast<const uint8_t *>(uintptr_t{7u}), .out = 17u};
+    const emel::kernel::cq::event::prepare_q4_request prepare_request{
+        weights, indices, blocked_indices, norms, blocked_norms, prepared};
+    emel::kernel::cq::event::dispatch_result prepare_result{};
+    emel::kernel::cq::sm machine;
+
+    CHECK_FALSE(machine.process_event(
+        emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
+    CHECK_FALSE(prepare_result.accepted);
+    CHECK(prepared.source == reinterpret_cast<const uint8_t *>(uintptr_t{7u}));
+    CHECK(prepared.out == 17u);
+    CHECK(indices.front() == 17u);
+    CHECK(blocked_indices.front() == 19u);
+    CHECK(norms.front() == 23.0f);
+    CHECK(blocked_norms.front() == 29.0f);
   }
 }
 
