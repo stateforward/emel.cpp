@@ -427,8 +427,6 @@ void print_snapshot(const std::vector<bench::result> &results,
                   entry.lane.c_str(), entry.name.c_str(), entry.note.c_str());
     }
     if (is_needle_graph_case_name(entry.name)) {
-      // Marker line precedes the row so the snapshot/compare gates skip it
-      // (proof_status=measurement_only) until baselines are approved.
       std::printf("# needle_graph: lane=%s case=%s model_id=%s workload_id=%s "
                   "%s\n",
                   entry.lane.c_str(), entry.name.c_str(),
@@ -1152,22 +1150,11 @@ void print_compare(const std::vector<bench::result> &emel_results,
       continue;
     }
     if (is_needle_graph_case_name(emel_entry.name)) {
-      // libneedle cannot be linked; the reference lane is a documented
-      // recorded constant. Marker keeps the row measurement_only for the
-      // snapshot/compare gates until baselines are approved.
-      std::printf("# needle_graph: lane=%s case=%s model_id=%s workload_id=%s "
-                  "%s\n",
-                  emel_entry.lane.c_str(), emel_entry.name.c_str(),
-                  emel_entry.model_id.c_str(), emel_entry.workload_id.c_str(),
-                  emel_entry.note.c_str());
-      const double ratio = emel_entry.ns_per_op / ref_entry.ns_per_op;
-      std::printf("%s emel.cpp %.3f ns/op (%.3f tokens/s), "
-                  "libneedle-recorded %.3f ns/op (%.3f tokens/s), "
-                  "ratio=%.3fx\n",
-                  emel_entry.name.c_str(), emel_entry.ns_per_op,
-                  emel_entry.tokens_per_second, ref_entry.ns_per_op,
-                  ref_entry.tokens_per_second, ratio);
-      continue;
+      std::fprintf(stderr,
+                   "error: needle_graph in-process compare is unsupported; "
+                   "use scripts/bench.sh --compare --suite=needle_graph for "
+                   "the isolated live Cactus request lane\n");
+      std::exit(1);
     }
     const double ratio = emel_entry.ns_per_op / ref_entry.ns_per_op;
     std::printf("%s emel.cpp %.3f ns/op, llama.cpp %.3f ns/op, ratio=%.3fx\n",

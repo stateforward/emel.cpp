@@ -11,6 +11,10 @@ endif()
 set(EMEL_BENCH_SUITE_FILTER "" CACHE STRING "Build only one bench_runner suite")
 set(REF_IMPL_REPOSITORY "https://github.com/ggml-org/llama.cpp.git" CACHE STRING "")
 set(REF_IMPL_REF "" CACHE STRING "")
+set(EMEL_BENCH_NEEDLE_PYTHON "" CACHE FILEPATH
+    "Python executable for the live Cactus/libneedle needle_graph reference")
+set(EMEL_BENCH_NEEDLE_ROOT "" CACHE PATH
+    "Needle Python package root for the live Cactus/libneedle reference")
 set(EMEL_BENCH_NEEDS_LLAMA ON)
 if(NOT EMEL_BENCH_SUITE_FILTER STREQUAL "")
   set(EMEL_BENCH_NEEDS_LLAMA OFF)
@@ -434,6 +438,16 @@ add_bench_runner_suite(weight_streaming model/tensor/window_streaming_bench.cpp
                        EMEL_BENCH_ENABLE_WEIGHT_STREAMING)
 add_bench_runner_suite(needle_graph model/needle/graph_bench.cpp
                        EMEL_BENCH_ENABLE_NEEDLE_GRAPH)
+if(EMEL_BENCH_SUITE_FILTER STREQUAL "needle_graph")
+  if(EMEL_BENCH_NEEDLE_PYTHON STREQUAL "" AND
+     DEFINED ENV{EMEL_BENCH_NEEDLE_PYTHON})
+    set(EMEL_BENCH_NEEDLE_PYTHON "$ENV{EMEL_BENCH_NEEDLE_PYTHON}" CACHE FILEPATH "" FORCE)
+  endif()
+  if(EMEL_BENCH_NEEDLE_ROOT STREQUAL "" AND
+     DEFINED ENV{EMEL_BENCH_NEEDLE_ROOT})
+    set(EMEL_BENCH_NEEDLE_ROOT "$ENV{EMEL_BENCH_NEEDLE_ROOT}" CACHE PATH "" FORCE)
+  endif()
+endif()
 add_bench_runner_suite(tokenizer_preprocessor_bpe text/tokenizer/preprocessor/bpe_bench.cpp
                        EMEL_BENCH_ENABLE_TOKENIZER_PREPROCESSOR_BPE)
 add_bench_runner_suite(tokenizer_preprocessor_spm text/tokenizer/preprocessor/spm_bench.cpp

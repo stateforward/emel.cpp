@@ -71,6 +71,9 @@ record runner=weight_streaming kind=source path=src/emel/model/tensor/window rea
 record runner=weight_streaming kind=source path=src/emel/io/mmap reason=mmap_actor
 record runner=weight_streaming kind=source path=scripts/bench.sh reason=memory_max_wrapper
 record runner=needle_graph kind=source path=tools/bench/model/needle/graph_bench.cpp reason=suite_source
+record runner=needle_graph kind=script path=tools/bench/model/needle/cactus_reference.py reason=live_cactus_reference_lane
+record runner=needle_graph kind=script path=scripts/bench.sh reason=live_compare_orchestration
+record runner=needle_graph kind=fixture path=tests/fixtures/cact/needle-heldout-prompts.tsv reason=canonical_request_workload
 record runner=needle_graph kind=source path=src/emel/model/needle reason=needle_binder_and_graph
 record runner=needle_graph kind=source path=src/emel/cact/loader reason=cact_loader
 record runner=needle_graph kind=source path=src/emel/kernel/cq reason=cq_gemv_routes
