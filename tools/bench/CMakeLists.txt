@@ -448,6 +448,27 @@ if(EMEL_BENCH_SUITE_FILTER STREQUAL "needle_graph")
     set(EMEL_BENCH_NEEDLE_ROOT "$ENV{EMEL_BENCH_NEEDLE_ROOT}" CACHE PATH "" FORCE)
   endif()
 endif()
+
+add_executable(needle_authenticated_exec
+  ${CMAKE_CURRENT_SOURCE_DIR}/needle_authenticated_exec.cpp
+)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_compile_definitions(needle_authenticated_exec
+    PRIVATE
+      _GNU_SOURCE
+  )
+endif()
+
+add_executable(needle_authenticated_exec_tests
+  ${CMAKE_CURRENT_SOURCE_DIR}/needle_authenticated_exec.cpp
+)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_compile_definitions(needle_authenticated_exec_tests
+    PRIVATE
+      _GNU_SOURCE
+      EMEL_AUTHENTICATED_EXEC_TESTING=1
+  )
+endif()
 add_bench_runner_suite(tokenizer_preprocessor_bpe text/tokenizer/preprocessor/bpe_bench.cpp
                        EMEL_BENCH_ENABLE_TOKENIZER_PREPROCESSOR_BPE)
 add_bench_runner_suite(tokenizer_preprocessor_spm text/tokenizer/preprocessor/spm_bench.cpp
@@ -588,7 +609,7 @@ add_executable(bench_runner_tests
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_runner_registry.cpp
 )
 
-add_dependencies(bench_runner_tests bench_runner)
+add_dependencies(bench_runner_tests bench_runner needle_authenticated_exec_tests)
 
 target_include_directories(bench_runner_tests
   PRIVATE
@@ -599,6 +620,7 @@ target_compile_definitions(bench_runner_tests
   PRIVATE
     BENCH_REPO_ROOT=\"${EMEL_ROOT}\"
     BENCH_RUNNER_BINARY_PATH=\"$<TARGET_FILE:bench_runner>\"
+    BENCH_NEEDLE_AUTHENTICATED_EXEC_TEST_PATH="$<TARGET_FILE:needle_authenticated_exec_tests>"
 )
 
 enable_testing()

@@ -32,7 +32,7 @@ NEEDLE_REQUEST_MAX_ITERATIONS=32
 NEEDLE_REQUEST_MAX_RUNS=25
 NEEDLE_PYTHON_SHA256="1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"
 NEEDLE_PYTHON_EXECUTABLE=""
-NEEDLE_PYTHON_STAGE_DIR=""
+NEEDLE_AUTHENTICATED_EXEC=""
 resolve_needle_python() {
   local python_executable="$1"
   local resolved_python=""
@@ -73,10 +73,7 @@ resolve_needle_python() {
 
 validate_needle_python() {
   local python_executable="$1"
-  local output_variable="$2"
   local resolved_python
-  local staged_python
-  local actual_sha256
   local platform
   resolved_python="$(resolve_needle_python "$python_executable")" || true
   if [[ -z "$resolved_python" || "$resolved_python" != /* ||
@@ -86,49 +83,14 @@ validate_needle_python() {
     exit 1
   fi
   platform="$(uname -s)"
-  if [[ "$platform" != "Linux" && "$platform" != "Darwin" ]]; then
-    echo "error: authenticated Needle Python staging is unsupported on platform: $platform" >&2
+  if [[ "$platform" != "Linux" ]]; then
+    echo "error: authenticated Needle Python execution is unsupported on platform: $platform" >&2
     exit 1
   fi
-  NEEDLE_PYTHON_STAGE_DIR="$(mktemp -d)"
-  staged_python="$NEEDLE_PYTHON_STAGE_DIR/python"
-  if ! cp "$resolved_python" "$staged_python"; then
-    rm -rf "$NEEDLE_PYTHON_STAGE_DIR"
-    NEEDLE_PYTHON_STAGE_DIR=""
-    echo "error: cannot stage canonical Needle Python executable" >&2
-    exit 1
-  fi
-  if ! chmod 500 "$staged_python"; then
-    rm -rf "$NEEDLE_PYTHON_STAGE_DIR"
-    NEEDLE_PYTHON_STAGE_DIR=""
-    echo "error: cannot protect staged canonical Needle Python executable" >&2
-    exit 1
-  fi
-  if command -v sha256sum >/dev/null 2>&1; then
-    actual_sha256="$(sha256sum "$staged_python")"
-  elif command -v shasum >/dev/null 2>&1; then
-    actual_sha256="$(shasum -a 256 "$staged_python")"
-  else
-    rm -rf "$NEEDLE_PYTHON_STAGE_DIR"
-    NEEDLE_PYTHON_STAGE_DIR=""
-    echo "error: sha256sum or shasum is required to authenticate canonical Needle Python" >&2
-    exit 1
-  fi
-  actual_sha256="${actual_sha256%% *}"
-  if [[ "$actual_sha256" != "$NEEDLE_PYTHON_SHA256" ]]; then
-    rm -rf "$NEEDLE_PYTHON_STAGE_DIR"
-    NEEDLE_PYTHON_STAGE_DIR=""
-    echo "error: configured Needle Python SHA-256 mismatch" >&2
-    exit 1
-  fi
-  printf -v "$output_variable" '%s' "$staged_python"
+  NEEDLE_PYTHON_EXECUTABLE="$resolved_python"
 }
 cleanup_needle_python() {
-  if [[ -n "$NEEDLE_PYTHON_STAGE_DIR" ]]; then
-    rm -rf "$NEEDLE_PYTHON_STAGE_DIR"
-    NEEDLE_PYTHON_STAGE_DIR=""
-    NEEDLE_PYTHON_EXECUTABLE=""
-  fi
+  NEEDLE_PYTHON_EXECUTABLE=""
 }
 trap cleanup_needle_python EXIT
 NEEDLE_INJECTION_VARIABLES=(
@@ -149,7 +111,7 @@ validate_needle_process_environment() {
   local platform
   local variable
   platform="$(uname -s)"
-  if [[ "$platform" != "Linux" && "$platform" != "Darwin" ]]; then
+  if [[ "$platform" != "Linux" ]]; then
     echo "error: canonical Needle Python loader contract is unsupported on platform: $platform" >&2
     exit 1
   fi
@@ -163,13 +125,8 @@ validate_needle_process_environment() {
 run_clean_needle_python() {
   local python_executable="$1"
   shift
-  local -a clean_environment=(env)
-  local variable
-  for variable in "${NEEDLE_INJECTION_VARIABLES[@]}"; do
-    clean_environment+=(-u "$variable")
-  done
-  "${clean_environment[@]}" PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
-    "$python_executable" "$@"
+  "$NEEDLE_AUTHENTICATED_EXEC" "$python_executable" \
+    "$NEEDLE_PYTHON_SHA256" -- "$python_executable" "$@"
 }
 
 validate_needle_request_count() {
@@ -491,8 +448,7 @@ if $COMPARE && [[ "$SUITE_FILTER" == "needle_graph" ]]; then
     echo "error: EMEL_BENCH_NEEDLE_PYTHON is required for --compare --suite=needle_graph" >&2
     exit 1
   fi
-  validate_needle_python "${EMEL_BENCH_NEEDLE_PYTHON}" \
-    NEEDLE_PYTHON_EXECUTABLE
+  validate_needle_python "${EMEL_BENCH_NEEDLE_PYTHON}"
   if [[ -z "${EMEL_BENCH_NEEDLE_ROOT:-}" || ! -d "${EMEL_BENCH_NEEDLE_ROOT}" ]]; then
     echo "error: EMEL_BENCH_NEEDLE_ROOT must name the installed Needle package root" >&2
     exit 1
@@ -634,7 +590,17 @@ configure_bench_build() {
   fi
 
   cmake "${cmake_args[@]}" >&2
-  cmake --build "$build_dir" --parallel "$EMEL_BUILD_JOBS" --target bench_runner >&2
+  if [[ "$build_suite_filter" == "needle_graph" ]]; then
+    cmake --build "$build_dir" --parallel "$EMEL_BUILD_JOBS" --target \
+      bench_runner needle_authenticated_exec >&2
+    NEEDLE_AUTHENTICATED_EXEC="$build_dir/needle_authenticated_exec"
+    if [[ ! -x "$NEEDLE_AUTHENTICATED_EXEC" ]]; then
+      echo "error: maintained authenticated Needle Python exec helper is unavailable" >&2
+      exit 1
+    fi
+  else
+    cmake --build "$build_dir" --parallel "$EMEL_BUILD_JOBS" --target bench_runner >&2
+  fi
 }
 
 update_snapshot_baseline() {
@@ -1043,7 +1009,17 @@ if $COMPARE; then
   fi
 
   cmake "${cmake_args[@]}" >&2
-  cmake --build "$compare_build_dir" --parallel "$EMEL_BUILD_JOBS" --target bench_runner >&2
+  if [[ "$SUITE_FILTER" == "needle_graph" ]]; then
+    cmake --build "$compare_build_dir" --parallel "$EMEL_BUILD_JOBS" --target \
+      bench_runner needle_authenticated_exec >&2
+    NEEDLE_AUTHENTICATED_EXEC="$compare_build_dir/needle_authenticated_exec"
+    if [[ ! -x "$NEEDLE_AUTHENTICATED_EXEC" ]]; then
+      echo "error: maintained authenticated Needle Python exec helper is unavailable" >&2
+      exit 1
+    fi
+  else
+    cmake --build "$compare_build_dir" --parallel "$EMEL_BUILD_JOBS" --target bench_runner >&2
+  fi
   if [[ "$SUITE_FILTER" == "needle_graph" ]]; then
     if $COMPARE_UPDATE; then
       echo "error: needle_graph live Cactus comparison has no snapshot update path" >&2
