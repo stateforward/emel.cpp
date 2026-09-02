@@ -1,34 +1,35 @@
-// Needle graph serial/parallel4 decode and prefill benchmarks on the pinned
-// tests/models/route-w4-qat.cact fixture. Every measured route drives its own
-// graph machine ONLY through public events (init/prefill/decode) via the
-// maintained loader chain (cact loader probe/bind/parse -> needle binder ->
-// graph machine).
-//
-// Reference lane: the closed-source libneedle 2.0.3 engine cannot be linked;
-// its rows are documented constants recorded from the user-supplied
-// single-core measurement on this same host class (task contract
-// cact-bench-closeout-impl pins 145 decode / 180 prefill tokens/s; the
-// training REPORT.md 2026-08-30 measured 132 decode / 180 prefill tps at
-// ~700-token context with NEEDLE_THREADS=1). Rows in both lanes carry
-// proof_status=measurement_only until snapshot baselines are approved.
+// Native Needle graph microbenchmarks and the EMEL lane of the canonical
+// Cactus request comparison. The request lane consumes the first four rows of
+// the committed heldout TSV, whose rendered prompt bytes and token IDs are
+// generated from the pinned tests/models/route-w4-qat.cact tokenizer. It runs
+// greedy generation for at most 80 new tokens and stops at the model EOS ID.
+// The live Cactus/libneedle lane is intentionally isolated in
+// cactus_reference.py because libneedle exposes only its complete(text) API,
+// not direct token-step graph calls. Fixed-context graph rows therefore remain
+// EMEL-only microbenchmarks and are never paired with request telemetry.
 #include "bench_cases.hpp"
 
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
-#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <span>
-#include <chrono>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "emel/cact/loader/sm.hpp"
+#include "emel/model/data.hpp"
 #include "emel/model/needle/graph/sm.hpp"
 #include "emel/model/needle/sm.hpp"
+#include "emel/text/tokenizer/sm.hpp"
+#include "emel/text/tokenizer/needle/sm.hpp"
 
 namespace {
 
@@ -43,6 +44,12 @@ constexpr char k_serial_prefill_case_name[] =
     "needle/graph/prefill_512_route_w4_qat_serial";
 constexpr char k_parallel4_prefill_case_name[] =
     "needle/graph/prefill_512_route_w4_qat_parallel4";
+constexpr char k_request_wall_case_name[] =
+    "needle/graph/request_heldout_first4_greedy80/wall";
+constexpr char k_request_prefill_case_name[] =
+    "needle/graph/request_heldout_first4_greedy80/prefill";
+constexpr char k_request_decode_case_name[] =
+    "needle/graph/request_heldout_first4_greedy80/decode";
 constexpr char k_swa_scalar_exp_128_case_name[] =
     "needle/swa/attend_gqa2_scalar_exp_span128";
 constexpr char k_swa_vector_exp_128_case_name[] =
@@ -61,35 +68,36 @@ constexpr char k_hadamard_scalar_case_name[] =
 constexpr char k_hadamard_avx2_case_name[] = "needle/hadamard/mlp512_avx2";
 constexpr char k_hadamard_iters_env[] = "EMEL_BENCH_NEEDLE_HADAMARD_ITERS";
 constexpr char k_fwht_iters_env[] = "EMEL_BENCH_NEEDLE_FWHT_ITERS";
-constexpr char k_model_env[] = "EMEL_BENCH_NEEDLE_MODEL";
 constexpr char k_model_relative_path[] = "tests/models/route-w4-qat.cact";
+constexpr char k_request_fixture_relative_path[] =
+    "tests/fixtures/cact/needle-heldout-prompts.tsv";
 constexpr char k_model_id[] = "route_w4_qat_cact";
-constexpr char k_workload_id[] = "needle_graph_serial_parallel_same_binary_v1";
+constexpr char k_graph_workload_id[] =
+    "needle_graph_serial_parallel_same_binary_v1";
+constexpr char k_request_workload_id[] =
+    "needle_heldout_first4_greedy80_eos_v1";
 constexpr char k_decode_iters_env[] = "EMEL_BENCH_NEEDLE_GRAPH_DECODE_ITERS";
 constexpr char k_prefill_iters_env[] = "EMEL_BENCH_NEEDLE_GRAPH_PREFILL_ITERS";
 constexpr char k_swa_iters_env[] = "EMEL_BENCH_NEEDLE_SWA_ITERS";
 constexpr char k_instrument_cq_env[] = "EMEL_BENCH_NEEDLE_GRAPH_INSTRUMENT_CQ";
 constexpr char k_instrument_graph_env[] =
     "EMEL_BENCH_NEEDLE_GRAPH_INSTRUMENT_COMPONENTS";
+constexpr char k_request_compare_env[] = "EMEL_BENCH_NEEDLE_REQUEST_COMPARE";
+constexpr std::uint32_t k_request_rows = 4u;
+constexpr std::uint32_t k_request_max_new_tokens = 80u;
 
-// Steady-state decode is measured after a 128-token prefill; the prefill case
-// runs a 512-token prompt (max_seq_len 2048 bounded).
+// Steady-state graph decode is measured after a 128-token prefill; its
+// separate prefill microbenchmark runs a 512-token prompt.
 constexpr uint32_t k_decode_context_tokens = 128u;
 constexpr uint32_t k_prefill_case_tokens = 512u;
 
-// Documented libneedle reference lane constants (see file header note).
-constexpr double k_libneedle_decode_tokens_per_second = 145.0;
-constexpr double k_libneedle_prefill_tokens_per_second = 180.0;
-
-constexpr char k_measurement_note[] =
-    "proof_status=measurement_only "
-    "reference=libneedle_2.0.3_recorded "
-    "source=user_supplied_single_core_same_host_class "
-    "target_decode_tps=435";
+constexpr char k_graph_note[] =
+    "comparison_mode=emel_graph_microbenchmark reference=none "
+    "proof_status=measurement_only";
 
 constexpr char k_internal_microbenchmark_note[] =
-    "proof_status=measurement_only "
-    "comparison_mode=emel_internal_microbenchmark";
+    "comparison_mode=emel_internal_microbenchmark reference=none "
+    "proof_status=measurement_only";
 
 std::uint64_t read_env_u64_or(const char *name,
                               const std::uint64_t fallback) noexcept {
@@ -114,13 +122,17 @@ bool instrument_graph() noexcept {
   const char *value = std::getenv(k_instrument_graph_env);
   return value != nullptr && value[0] == '1' && value[1] == '\0';
 }
+bool request_compare_enabled() noexcept {
+  const char *value = std::getenv(k_request_compare_env);
+  return value != nullptr && value[0] == '1' && value[1] == '\0';
+}
 
 [[noreturn]] void fail_needle_setup(const char *stage);
-emel::bench::result with_needle_metadata(emel::bench::result out,
-                                         const char *lane,
-                                         const char *backend_id,
-                                         const char *backend_language,
-                                         std::uint64_t output_tokens);
+emel::bench::result with_graph_metadata(emel::bench::result out,
+                                        const char *lane,
+                                        const char *backend_id,
+                                        const char *backend_language,
+                                        std::uint64_t output_tokens);
 std::uint64_t benchmark_timestamp_now_ns() noexcept;
 emel::bench::result with_internal_microbenchmark_metadata(
     emel::bench::result out, const char *backend_id);
@@ -297,6 +309,10 @@ void on_loader_parse_done(const cact_loader::events::parse_done &) noexcept {}
 void on_loader_parse_error(const cact_loader::events::parse_error &) noexcept {}
 void on_needle_bind_done(const needle::events::bind_done &) noexcept {}
 void on_needle_bind_error(const needle::events::bind_error &) noexcept {}
+void on_tokenizer_load_done(
+    const emel::text::tokenizer::needle::events::load_done &) noexcept {}
+void on_tokenizer_load_error(
+    const emel::text::tokenizer::needle::events::load_error &) noexcept {}
 
 const cact_loader::event::probe_done_fn k_probe_done =
     cact_loader::event::probe_done_fn::from<&on_loader_probe_done>();
@@ -316,15 +332,92 @@ const needle::event::bind_error_fn k_needle_error =
     needle::event::bind_error_fn::from<&on_needle_bind_error>();
 
 std::filesystem::path resolve_model_path() {
-  const char *override_path = std::getenv(k_model_env);
-  if (override_path != nullptr && override_path[0] != '\0') {
-    return std::filesystem::path{override_path};
-  }
 #ifdef EMEL_BENCH_REPO_ROOT
   return std::filesystem::path{EMEL_BENCH_REPO_ROOT} / k_model_relative_path;
 #else
   return std::filesystem::path{k_model_relative_path};
 #endif
+}
+std::filesystem::path resolve_request_fixture_path() {
+#ifdef EMEL_BENCH_REPO_ROOT
+  return std::filesystem::path{EMEL_BENCH_REPO_ROOT} /
+         k_request_fixture_relative_path;
+#else
+  return std::filesystem::path{k_request_fixture_relative_path};
+#endif
+}
+
+int hex_digit(const char value) noexcept {
+  if (value >= '0' && value <= '9') return value - '0';
+  if (value >= 'a' && value <= 'f') return 10 + value - 'a';
+  if (value >= 'A' && value <= 'F') return 10 + value - 'A';
+  return -1;
+}
+
+std::vector<int32_t> parse_token_ids(const std::string_view text) {
+  std::vector<int32_t> ids;
+  const char *cursor = text.data();
+  const char *const end = cursor + text.size();
+  while (cursor < end) {
+    while (cursor < end && *cursor == ' ') ++cursor;
+    if (cursor == end) break;
+    char *parsed_end = nullptr;
+    const long value = std::strtol(cursor, &parsed_end, 10);
+    if (parsed_end == cursor || parsed_end > end || value < 0 ||
+        static_cast<unsigned long>(value) >
+            static_cast<unsigned long>(std::numeric_limits<int32_t>::max()) ||
+        (parsed_end != end && *parsed_end != ' '))
+      fail_needle_setup("request_fixture_token_ids");
+    ids.push_back(static_cast<int32_t>(value));
+    cursor = parsed_end;
+  }
+  return ids;
+}
+
+struct request_row {
+  std::vector<int32_t> token_ids;
+  std::string prompt;
+};
+
+std::vector<request_row> read_request_rows() {
+  std::ifstream input(resolve_request_fixture_path());
+  if (!input.good()) fail_needle_setup("open_request_fixture");
+  std::vector<request_row> rows;
+  std::string line;
+  while (rows.size() < k_request_rows && std::getline(input, line)) {
+    if (line.empty()) continue;
+    const size_t first = line.find('\t');
+    const size_t second = line.find('\t', first + 1u);
+    const size_t third = line.find('\t', second + 1u);
+    if (first == std::string::npos || second == std::string::npos ||
+        third == std::string::npos ||
+        line.find('\t', third + 1u) != std::string::npos)
+      fail_needle_setup("malformed_request_fixture");
+    request_row row;
+    row.token_ids = parse_token_ids(
+        std::string_view{line}.substr(second + 1u, third - second - 1u));
+    const std::string_view hex = std::string_view{line}.substr(third + 1u);
+    if (row.token_ids.empty() || hex.size() % 2u != 0u)
+      fail_needle_setup("invalid_request_fixture");
+    row.prompt.reserve(hex.size() / 2u);
+    for (size_t i = 0u; i < hex.size(); i += 2u) {
+      const int high = hex_digit(hex[i]);
+      const int low = hex_digit(hex[i + 1u]);
+      if (high < 0 || low < 0) fail_needle_setup("request_fixture_prompt_hex");
+      row.prompt.push_back(static_cast<char>((high << 4) | low));
+    }
+    rows.push_back(std::move(row));
+  }
+  if (rows.size() != k_request_rows)
+    fail_needle_setup("request_fixture_row_count");
+  return rows;
+}
+
+uint32_t argmax(const std::span<const float> logits) noexcept {
+  uint32_t best = 0u;
+  for (uint32_t index = 1u; index < logits.size(); ++index)
+    best = logits[index] > logits[best] ? index : best;
+  return best;
 }
 
 std::vector<uint8_t> read_file_bytes(const std::filesystem::path &path) {
@@ -353,6 +446,8 @@ struct graph_fixture {
   std::vector<uint8_t> file_bytes;
   std::vector<cact_loader::tensor_view> tensors;
   needle::contract contract = {};
+  std::unique_ptr<emel::model::data::vocab> vocab;
+  std::unique_ptr<emel::text::tokenizer::sm> tokenizer;
   std::unique_ptr<needle::graph::sm> vector_graph;
   std::unique_ptr<needle::graph::scalar_exp_sm> scalar_graph;
   std::vector<float> logits;
@@ -391,6 +486,36 @@ struct graph_fixture {
       fail_needle_setup("needle_bind");
     }
 
+    if (!contract.has_tokenizer) fail_needle_setup("request_tokenizer_missing");
+    vocab = std::make_unique<emel::model::data::vocab>();
+    emel::text::tokenizer::needle::sm tokenizer_loader{};
+    if (!tokenizer_loader.process_event(
+            emel::text::tokenizer::needle::event::load{
+                std::span<const uint8_t>{
+                    contract.tokenizer_blob.data,
+                    static_cast<size_t>(contract.tokenizer_blob.nbytes)},
+                *vocab,
+                emel::text::tokenizer::needle::event::load_done_fn::from<
+                    &on_tokenizer_load_done>(),
+                emel::text::tokenizer::needle::event::load_error_fn::from<
+                    &on_tokenizer_load_error>()}))
+      fail_needle_setup("request_tokenizer_load");
+    if (vocab->bos_id < 0 || vocab->eos_id < 0)
+      fail_needle_setup("request_tokenizer_special_ids");
+    tokenizer = std::make_unique<emel::text::tokenizer::sm>();
+    int32_t tokenizer_error =
+        emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
+    emel::text::tokenizer::event::bind bind{};
+    bind.vocab = vocab.get();
+    bind.preprocessor_variant =
+        emel::text::tokenizer::preprocessor::preprocessor_kind::spm;
+    bind.encoder_variant = emel::text::encoders::encoder_kind::spm;
+    bind.error_out = &tokenizer_error;
+    if (!tokenizer->process_event(bind) ||
+        tokenizer_error !=
+            emel::text::tokenizer::error_code(
+                emel::text::tokenizer::error::none))
+      fail_needle_setup("request_tokenizer_bind");
     vector_graph = std::make_unique<needle::graph::sm>(contract);
     scalar_graph = std::make_unique<needle::graph::scalar_exp_sm>(contract);
     logits.resize(contract.geo.vocab_size);
@@ -405,6 +530,32 @@ struct graph_fixture {
     for (size_t i = 0; i < prompt_ids.size(); ++i) {
       prompt_ids[i] =
           static_cast<int32_t>((1000033u * i + 13u) % contract.geo.vocab_size);
+    }
+  }
+
+  void verify_request_rows(const std::vector<request_row> &rows) {
+    for (const request_row &row : rows) {
+      std::vector<int32_t> actual(row.prompt.size() * 4u + 8u);
+      int32_t count = 0;
+      int32_t error =
+          emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
+      emel::text::tokenizer::event::tokenize request{};
+      request.vocab = vocab.get();
+      request.text = row.prompt;
+      request.add_special = false;
+      request.parse_special = true;
+      request.token_ids_out = actual.data();
+      request.token_capacity = static_cast<int32_t>(actual.size());
+      request.token_count_out = &count;
+      request.error_out = &error;
+      if (!tokenizer->process_event(request) ||
+          error != emel::text::tokenizer::error_code(
+                       emel::text::tokenizer::error::none) ||
+          count < 0)
+        fail_needle_setup("request_fixture_retokenize");
+      actual.resize(static_cast<size_t>(count));
+      if (actual != row.token_ids)
+        fail_needle_setup("request_fixture_token_id_mismatch");
     }
   }
 
@@ -502,7 +653,7 @@ void append_graph_route_cases(std::vector<emel::bench::result> &results,
       }
       fixture.decoded_steps += 1u;
     };
-    auto row = with_needle_metadata(
+    auto row = with_graph_metadata(
         emel::bench::measure_case_with_run_setup(
             decode_name, decode_cfg, reset_decode_run, decode_fn),
         "emel", backend_id, "cpp", 1u);
@@ -529,7 +680,7 @@ void append_graph_route_cases(std::vector<emel::bench::result> &results,
         fail_needle_setup("graph_prefill");
       }
     };
-    auto row = with_needle_metadata(
+    auto row = with_graph_metadata(
         emel::bench::measure_case(prefill_name, prefill_cfg, prefill_fn),
         "emel", backend_id, "cpp", k_prefill_case_tokens);
     row.thread_count = thread_count;
@@ -539,53 +690,193 @@ void append_graph_route_cases(std::vector<emel::bench::result> &results,
   }
 }
 
-emel::bench::result with_needle_metadata(emel::bench::result out,
-                                         const char *lane,
-                                         const char *backend_id,
-                                         const char *backend_language,
-                                         const std::uint64_t output_tokens) {
+emel::bench::result with_graph_metadata(emel::bench::result out,
+                                        const char *lane,
+                                        const char *backend_id,
+                                        const char *backend_language,
+                                        const std::uint64_t output_tokens) {
   out.compare_group = out.name;
   out.lane = lane;
   out.backend_id = backend_id;
   out.backend_language = backend_language;
   out.thread_count = 1;
   out.thread_contract = "single_thread";
-  out.comparison_mode = "measurement";
+  out.comparison_mode = "emel_graph_microbenchmark";
   out.model_id = k_model_id;
   out.fixture_id = k_model_relative_path;
-  out.workload_id = k_workload_id;
+  out.workload_id = k_graph_workload_id;
   out.comparable = false;
   out.output_tokens = output_tokens;
   out.tokens_per_second =
       emel::bench::compute_tokens_per_second(output_tokens, out.ns_per_op);
-  out.note = k_measurement_note;
+  out.note = k_graph_note;
   return out;
 }
 
 emel::bench::result with_internal_microbenchmark_metadata(
     emel::bench::result out, const char *backend_id) {
-  out = with_needle_metadata(std::move(out), "emel", backend_id, "cpp", 1u);
+  out = with_graph_metadata(std::move(out), "emel", backend_id, "cpp", 1u);
   out.comparison_mode = "emel_internal_microbenchmark";
   out.note = k_internal_microbenchmark_note;
   return out;
 }
 
-emel::bench::result make_reference_row(const char *name,
-                                       const std::uint64_t tokens,
-                                       const double tokens_per_second) {
+struct request_measurement {
+  double wall_ns = 0.0;
+  double prefill_ns = 0.0;
+  double decode_ns = 0.0;
+  std::uint64_t prompt_tokens = 0u;
+  std::uint64_t decode_tokens = 0u;
+};
+template <class graph_type>
+request_measurement run_request_batch(const graph_fixture &base,
+                                      const std::vector<request_row> &rows) {
+  graph_type graph{base.contract};
+  std::vector<float> logits(base.contract.geo.vocab_size);
+  request_measurement measured;
+  for (const request_row &row : rows) {
+    if (row.token_ids.size() + 1u + k_request_max_new_tokens >
+        base.contract.geo.max_seq_len)
+      fail_needle_setup("request_context_limit");
+    std::vector<int32_t> prompt_ids;
+    prompt_ids.reserve(row.token_ids.size() + 1u);
+    prompt_ids.push_back(base.vocab->bos_id);
+    prompt_ids.insert(prompt_ids.end(), row.token_ids.begin(),
+                      row.token_ids.end());
+    if (!graph.process_event(needle::graph::event::init{}))
+      fail_needle_setup("request_graph_init");
+    const auto request_begin = std::chrono::steady_clock::now();
+    if (!graph.process_event(needle::graph::event::prefill{
+            std::span<const int32_t>{prompt_ids}, std::span<float>{logits}}))
+      fail_needle_setup("request_graph_prefill");
+    const auto prefill_end = std::chrono::steady_clock::now();
+    measured.prefill_ns += static_cast<double>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(prefill_end -
+                                                             request_begin)
+            .count());
+    measured.prompt_tokens += prompt_ids.size();
+    for (uint32_t step = 0u; step < k_request_max_new_tokens; ++step) {
+      const int32_t next = static_cast<int32_t>(
+          argmax(std::span<const float>{logits.data(), logits.size()}));
+      if (next == base.vocab->eos_id) break;
+      if (!graph.process_event(needle::graph::event::decode{
+              next, std::span<float>{logits}}))
+        fail_needle_setup("request_graph_decode");
+      ++measured.decode_tokens;
+    }
+    const auto request_end = std::chrono::steady_clock::now();
+    measured.decode_ns += static_cast<double>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(request_end -
+                                                             prefill_end)
+            .count());
+    measured.wall_ns += static_cast<double>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(request_end -
+                                                             request_begin)
+            .count());
+  }
+  return measured;
+}
+request_measurement measure_request_workload(const graph_fixture &fixture,
+                                             const std::vector<request_row> &rows,
+                                             const emel::bench::config &cfg) {
+  for (std::size_t run = 0u; run < cfg.warmup_runs; ++run)
+    for (std::uint64_t iteration = 0u; iteration < cfg.warmup_iterations;
+         ++iteration)
+      (void)run_request_batch<needle::graph::serial_sm>(fixture, rows);
+  const std::size_t run_count = std::max<std::size_t>(cfg.runs, 1u);
+  const std::uint64_t iteration_count =
+      std::max<std::uint64_t>(cfg.iterations, 1u);
+  std::vector<request_measurement> samples;
+  samples.reserve(run_count);
+  for (std::size_t run = 0u; run < run_count; ++run) {
+    request_measurement total;
+    for (std::uint64_t iteration = 0u; iteration < iteration_count; ++iteration) {
+      const request_measurement sample =
+          run_request_batch<needle::graph::serial_sm>(fixture, rows);
+      total.wall_ns += sample.wall_ns;
+      total.prefill_ns += sample.prefill_ns;
+      total.decode_ns += sample.decode_ns;
+      total.prompt_tokens += sample.prompt_tokens;
+      total.decode_tokens += sample.decode_tokens;
+    }
+    total.wall_ns /= static_cast<double>(iteration_count);
+    total.prefill_ns /= static_cast<double>(iteration_count);
+    total.decode_ns /= static_cast<double>(iteration_count);
+    total.prompt_tokens =
+        (total.prompt_tokens + iteration_count / 2u) / iteration_count;
+    total.decode_tokens =
+        (total.decode_tokens + iteration_count / 2u) / iteration_count;
+    samples.push_back(total);
+  }
+  std::sort(samples.begin(), samples.end(),
+            [](const request_measurement &left,
+               const request_measurement &right) {
+              return left.wall_ns < right.wall_ns;
+            });
+  return samples[samples.size() / 2u];
+}
+
+emel::bench::result make_request_row(const char *name, const char *phase,
+                                     const emel::bench::config &cfg,
+                                     const double ns_per_batch,
+                                     const std::uint64_t tokens_per_batch) {
   emel::bench::result out;
   out.name = name;
-  out.ns_per_op =
-      static_cast<double>(tokens) * 1000000000.0 / tokens_per_second;
+  out.compare_group = k_request_workload_id;
+  out.lane = "emel";
+  out.backend_id = "emel_needle_request_serial";
+  out.backend_language = "cpp";
+  out.thread_count = 1;
+  out.thread_contract = "single_thread";
+  out.workload_id = k_request_workload_id;
+  out.comparison_mode = "live_cactus_request";
+  out.model_id = k_model_id;
+  out.fixture_id = k_request_fixture_relative_path;
+  out.sampling_id = "greedy_argmax_v1";
+  out.stop_id = "eos_v1";
+  out.max_output_tokens = k_request_max_new_tokens;
+  out.comparable = false;
+  out.ns_per_op = ns_per_batch / static_cast<double>(k_request_rows);
   out.ns_min_per_op = out.ns_per_op;
   out.ns_mean_per_op = out.ns_per_op;
   out.ns_max_per_op = out.ns_per_op;
-  out.iterations = 1u;
-  out.runs = 1u;
-  return with_needle_metadata(std::move(out), "reference",
-                              "libneedle_2_0_3_recorded", "recorded", tokens);
+  out.iterations = std::max<std::uint64_t>(cfg.iterations, 1u);
+  out.runs = std::max<std::size_t>(cfg.runs, 1u);
+  out.output_tokens =
+      (tokens_per_batch + static_cast<std::uint64_t>(k_request_rows) / 2u) /
+      static_cast<std::uint64_t>(k_request_rows);
+  out.tokens_per_second = emel::bench::compute_tokens_per_second(
+      tokens_per_batch, ns_per_batch);
+  out.note = std::string{"reference=live_cactus_native phase="} + phase +
+             " backend_id=emel_needle_request_serial route=serial"
+             " fixture_id=" + k_request_fixture_relative_path +
+             " thread_count=1"
+             " thread_contract=single_thread"
+             " prompt_rows=4 max_new_tokens=80"
+             " sampling_id=greedy_argmax_v1 stop_id=eos_v1"
+             " phase_tokens_per_batch=" + std::to_string(tokens_per_batch) +
+             " warmup_iterations=" +
+             std::to_string(cfg.warmup_iterations) + " warmup_runs=" +
+             std::to_string(cfg.warmup_runs) +
+             " phase_rate_semantics=token_weighted_native_graph_noncomparable";
+  return out;
 }
-
+void append_request_cases(std::vector<emel::bench::result> &results,
+                          const emel::bench::config &cfg,
+                          graph_fixture &fixture) {
+  const std::vector<request_row> rows = read_request_rows();
+  fixture.verify_request_rows(rows);
+  const request_measurement measured =
+      measure_request_workload(fixture, rows, cfg);
+  results.push_back(make_request_row(k_request_wall_case_name, "wall", cfg,
+                                     measured.wall_ns, 0u));
+  results.push_back(make_request_row(k_request_prefill_case_name, "prefill", cfg,
+                                     measured.prefill_ns,
+                                     measured.prompt_tokens));
+  results.push_back(make_request_row(k_request_decode_case_name, "decode", cfg,
+                                     measured.decode_ns,
+                                     measured.decode_tokens));
+}
 
 } // namespace
 
@@ -593,8 +884,13 @@ namespace emel::bench {
 
 void append_emel_needle_graph_cases(std::vector<result> &results,
                                     const config &cfg) {
+  if (cfg.mode == case_mode::compare) return;
   graph_fixture fixture;
-  const bool include_internal_microbenchmarks = cfg.mode != case_mode::compare;
+  if (request_compare_enabled()) {
+    append_request_cases(results, cfg, fixture);
+    return;
+  }
+  const bool include_internal_microbenchmarks = true;
   if (include_internal_microbenchmarks) {
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
     defined(__FMA__) && defined(__F16C__)
@@ -788,18 +1084,9 @@ void append_emel_needle_graph_cases(std::vector<result> &results,
   }
 }
 
-void append_reference_needle_graph_cases(std::vector<result> &results,
-                                         const config &) {
-  results.push_back(make_reference_row(k_serial_decode_case_name, 1u,
-                                       k_libneedle_decode_tokens_per_second));
-  results.push_back(make_reference_row(k_parallel4_decode_case_name, 1u,
-                                       k_libneedle_decode_tokens_per_second));
-  results.push_back(make_reference_row(k_serial_prefill_case_name,
-                                       k_prefill_case_tokens,
-                                       k_libneedle_prefill_tokens_per_second));
-  results.push_back(make_reference_row(k_parallel4_prefill_case_name,
-                                       k_prefill_case_tokens,
-                                       k_libneedle_prefill_tokens_per_second));
+void append_reference_needle_graph_cases(std::vector<result> &, const config &) {
+  // The live Cactus lane is run by cactus_reference.py. libneedle exposes no
+  // public token-step API, so it must not be paired with graph microbench rows.
 }
 
 } // namespace emel::bench
