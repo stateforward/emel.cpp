@@ -819,8 +819,10 @@ TEST_CASE("bench combined gate snapshots EMEL before paired comparison") {
                       "\"$snapshot_output\"") != std::string::npos);
   CHECK(combined.find("run_bench_runner \"$build_dir\" --mode=compare > "
                       "\"$compare_output\"") != std::string::npos);
-  CHECK(combined.find("' \"$snapshot_output\" > \"$current_snapshot\"") !=
-        std::string::npos);
+  CHECK(combined.find("filter_snapshot_regression_rows \"$snapshot_output\" "
+                      "\"$current_snapshot\"") != std::string::npos);
+  CHECK(combined.find("snapshot_gate_has_only_live_needle_diagnostics "
+                      "\"$snapshot_output\"") != std::string::npos);
   CHECK(combined.find("snapshot_measurement_rows=\"$(awk '") !=
         std::string::npos);
   CHECK(combined.find("elif [[ -z \"$SUITE_FILTER\" || "

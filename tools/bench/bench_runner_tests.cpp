@@ -2015,13 +2015,83 @@ TEST_CASE(
   CHECK(manifest::records_for("missing_runner").empty());
 }
 
-TEST_CASE("needle combined snapshot compare uses live Cactus route") {
+TEST_CASE("needle combined snapshot compare filters only live diagnostics") {
   const std::string wrapper = read_file(repo_root() / "scripts" / "bench.sh");
   CHECK(wrapper.find(
             "if [[ \"$SUITE_FILTER\" == \"needle_graph\" ]]; then\n"
             "    EMEL_BENCH_NEEDLE_REQUEST_COMPARE=1 run_bench_runner \"$build_dir\" --mode=emel > \"$snapshot_output\"\n"
             "    run_needle_graph_compare \"$build_dir\" > \"$compare_output\"") !=
         std::string::npos);
+
+#if !defined(_WIN32)
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-snapshot-filter";
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path snapshot_path = tmp_dir / "snapshot.txt";
+  const std::filesystem::path current_path = tmp_dir / "current.txt";
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::string wrapper_command =
+      "EMEL_BENCH_TEST_SNAPSHOT_OUTPUT=" +
+      quote_arg_posix(snapshot_path.string()) +
+      " EMEL_BENCH_TEST_CURRENT_SNAPSHOT=" +
+      quote_arg_posix(current_path.string()) +
+      " EMEL_BENCH_TEST_SUITE_FILTER=needle_graph "
+      "EMEL_BENCH_TEST_SNAPSHOT_FILTER=1 " +
+      quote_arg_posix((repo_root() / "scripts" / "bench.sh").string()) +
+      " > " + quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+
+  write_file(snapshot_path,
+             "# needle_graph: lane=emel case=needle/graph/request "
+             "reference=live_cactus_native comparable=false\n"
+             "needle/graph/request ns_per_op=100 tokens_per_second=10\n");
+  process_capture capture = run_command_capture(
+      wrapper_command, stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stdout_text == "live-diagnostics-only\n");
+  CHECK(read_file(current_path).empty());
+
+  write_file(snapshot_path,
+             "# needle_graph: lane=emel case=needle/graph/request "
+             "reference=live_cactus_native comparable=false\n"
+             "needle/graph/request ns_per_op=100 tokens_per_second=10\n"
+             "# ordinary_suite: lane=emel case=ordinary/new_case\n"
+             "ordinary/new_case ns_per_op=200\n");
+  capture = run_command_capture(wrapper_command, stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stdout_text == "baseline-required\n");
+  CHECK(read_file(current_path) == "ordinary/new_case ns_per_op=200\n");
+
+  const std::string global_wrapper_command =
+      "EMEL_BENCH_TEST_SNAPSHOT_OUTPUT=" +
+      quote_arg_posix(snapshot_path.string()) +
+      " EMEL_BENCH_TEST_CURRENT_SNAPSHOT=" +
+      quote_arg_posix(current_path.string()) +
+      " EMEL_BENCH_TEST_SNAPSHOT_FILTER=1 " +
+      quote_arg_posix((repo_root() / "scripts" / "bench.sh").string()) +
+      " > " + quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+  capture = run_command_capture(global_wrapper_command, stdout_path,
+                                stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stdout_text == "baseline-required\n");
+  CHECK(read_file(current_path).find("needle/graph/request ns_per_op=100") !=
+        std::string::npos);
+  CHECK(read_file(current_path).find("ordinary/new_case ns_per_op=200") !=
+        std::string::npos);
+
+  const std::string compare_gate =
+      read_file(repo_root() / "scripts" / "bench_compare_gate.awk");
+  CHECK(compare_gate.find("new benchmark entry without baseline") !=
+        std::string::npos);
+  CHECK(compare_gate.find("live_cactus_native") == std::string::npos);
+
+  std::error_code ec;
+  std::filesystem::remove_all(tmp_dir, ec);
+  CHECK_FALSE(ec);
+#endif
 }
 
 TEST_CASE(

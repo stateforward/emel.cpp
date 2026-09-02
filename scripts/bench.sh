@@ -247,6 +247,91 @@ resolve_bench_host_arch() {
   printf "%s\n" "$arch"
 }
 
+filter_snapshot_regression_rows() {
+  local snapshot_output="$1"
+  local current_snapshot="$2"
+  local suite_filter="$3"
+  local exclude_live_needle_diagnostics=0
+
+  if [[ "$suite_filter" == "needle_graph" ]]; then
+    exclude_live_needle_diagnostics=1
+  fi
+  awk -v exclude_live_needle_diagnostics="$exclude_live_needle_diagnostics" '
+    /^#/ {
+      measurement_only = ($0 ~ /proof_status=measurement_only/);
+      live_needle_diagnostic = (exclude_live_needle_diagnostics &&
+                                $0 ~ /reference=live_cactus_native/);
+      skip_next = measurement_only || live_needle_diagnostic;
+      next;
+    }
+    /^[^#]/ {
+      if (skip_next) {
+        skip_next = 0;
+        next;
+      }
+      name = $1;
+      for (i = 2; i <= NF; ++i) {
+        if ($i ~ /^ns_per_op=/) {
+          ns_per_op = $i;
+        } else if ($i ~ /^tokens_per_second=/) {
+          tokens_per_second = $i;
+        }
+      }
+      if (name != "" && ns_per_op != "") {
+        if (tokens_per_second != "") {
+          printf("%s %s tokens_per_second=%s\n", name, ns_per_op,
+                 substr(tokens_per_second, 19));
+        } else {
+          printf("%s %s\n", name, ns_per_op);
+        }
+      }
+      skip_next = 0;
+      ns_per_op = "";
+      tokens_per_second = "";
+    }
+  ' "$snapshot_output" > "$current_snapshot"
+}
+
+snapshot_gate_has_only_live_needle_diagnostics() {
+  local snapshot_output="$1"
+  local suite_filter="$2"
+
+  [[ "$suite_filter" == "needle_graph" ]] || return 1
+  awk '
+    /^#/ {
+      live_needle_diagnostic = ($0 ~ /reference=live_cactus_native/);
+      next;
+    }
+    /^[^#]/ {
+      row_count += 1;
+      if (live_needle_diagnostic) {
+        diagnostic_count += 1;
+      }
+      live_needle_diagnostic = 0;
+    }
+    END {
+      exit !(row_count > 0 && diagnostic_count == row_count);
+    }
+  ' "$snapshot_output"
+}
+
+if [[ "${EMEL_BENCH_TEST_SNAPSHOT_FILTER:-0}" == "1" ]]; then
+  if [[ -z "${EMEL_BENCH_TEST_SNAPSHOT_OUTPUT:-}" ||
+        -z "${EMEL_BENCH_TEST_CURRENT_SNAPSHOT:-}" ]]; then
+    echo "error: snapshot filter test requires snapshot and output fixture paths" >&2
+    exit 1
+  fi
+  filter_snapshot_regression_rows "$EMEL_BENCH_TEST_SNAPSHOT_OUTPUT" \
+    "$EMEL_BENCH_TEST_CURRENT_SNAPSHOT" "${EMEL_BENCH_TEST_SUITE_FILTER:-}"
+  if snapshot_gate_has_only_live_needle_diagnostics \
+    "$EMEL_BENCH_TEST_SNAPSHOT_OUTPUT" "${EMEL_BENCH_TEST_SUITE_FILTER:-}"; then
+    printf 'live-diagnostics-only\n'
+  else
+    printf 'baseline-required\n'
+  fi
+  exit 0
+fi
+
 if [[ -n "$MEMORY_MAX_RAW" && "$SUITE_FILTER" != "weight_streaming" ]]; then
   echo "error: --memory-max requires --suite=weight_streaming" >&2
   exit 1
@@ -645,37 +730,8 @@ if $COMBINED; then
     run_bench_runner "$build_dir" --mode=compare > "$compare_output"
   fi
 
-  awk '
-    /^#/ {
-      skip_next = ($0 ~ /proof_status=measurement_only/);
-      next;
-    }
-    /^[^#]/ {
-      if (skip_next) {
-        skip_next = 0;
-        next;
-      }
-      name = $1;
-      for (i = 2; i <= NF; ++i) {
-        if ($i ~ /^ns_per_op=/) {
-          ns_per_op = $i;
-        } else if ($i ~ /^tokens_per_second=/) {
-          tokens_per_second = $i;
-        }
-      }
-      if (name != "" && ns_per_op != "") {
-        if (tokens_per_second != "") {
-          printf("%s %s tokens_per_second=%s\n", name, ns_per_op,
-                 substr(tokens_per_second, 19));
-        } else {
-          printf("%s %s\n", name, ns_per_op);
-        }
-      }
-      skip_next = 0;
-      ns_per_op = "";
-      tokens_per_second = "";
-    }
-  ' "$snapshot_output" > "$current_snapshot"
+  filter_snapshot_regression_rows "$snapshot_output" "$current_snapshot" \
+    "$SUITE_FILTER"
 
   snapshot_measurement_rows="$(awk '
     /^#/ {
@@ -691,10 +747,11 @@ if $COMBINED; then
     END { print count + 0 }
   ' "$snapshot_output")"
 
+
   TOLERANCE="${BENCH_TOLERANCE:-0.30}"
   ABS_TOLERANCE_NS="${BENCH_ABS_TOLERANCE_NS:-5000}"
   BASELINE="$ROOT_DIR/snapshots/bench/benchmarks.txt"
-  host_arch="$(resolve_bench_host_arch "$compare_output")"
+  host_arch="$(resolve_bench_host_arch "$snapshot_output")"
 
   new_sms=()
   base_ref="${BENCH_BASE_REF:-origin/main}"
@@ -750,6 +807,9 @@ if $COMBINED; then
         -v host_arch="$host_arch" \
         -f "$ROOT_DIR/scripts/bench_compare_gate.awk" \
         "$BASELINE" "$current_snapshot"
+    elif snapshot_gate_has_only_live_needle_diagnostics "$snapshot_output" \
+      "$SUITE_FILTER"; then
+      : # Live request diagnostics are compared only by run_needle_graph_compare.
     elif [[ -z "$SUITE_FILTER" || "$snapshot_measurement_rows" == "0" ]]; then
       echo "error: no benchmark entries matched selected suite" >&2
       exit 1
