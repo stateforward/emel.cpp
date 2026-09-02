@@ -12,9 +12,9 @@ import importlib.util
 import os
 from pathlib import Path
 import shutil
+import signal
 import stat
 import statistics
-import subprocess
 import sys
 import time
 import tempfile
@@ -801,6 +801,67 @@ def worker_environment(extra: dict[str, str] | None = None) -> dict[str, str]:
     return environment
 
 
+def write_reference_output(record: dict[str, Any], output: Path) -> None:
+    temporary = output.with_name(output.name + ".tmp")
+    try:
+        temporary.write_text(
+            json.dumps(record, sort_keys=True) + "\n", encoding="utf-8")
+        temporary.replace(output)
+    except OSError as exc:
+        fail(f"cannot write reference JSON: {exc}")
+
+
+def run_forked_reference(
+        args: argparse.Namespace, staged_model: Path, staged_fixture: Path,
+        staged_needle_root: Path, staged_library: Path,
+        timeout_seconds: int, environment: dict[str, str]) -> None:
+    try:
+        child = os.fork()
+    except OSError as exc:
+        fail(f"cannot fork authenticated Needle worker: {exc}")
+    if child == 0:
+        exit_code = 1
+        try:
+            os.environ.clear()
+            os.environ.update(environment)
+            record = run_reference(argparse.Namespace(
+                model=str(staged_model), fixture=str(staged_fixture),
+                needle_root=str(staged_needle_root),
+                warmup_iterations=args.warmup_iterations,
+                warmup_runs=args.warmup_runs,
+                iterations=args.iterations, runs=args.runs,
+                output=args.output, staged=True))
+            write_reference_output(record, Path(args.output))
+            exit_code = 0
+        except SystemExit as exc:
+            exit_code = exc.code if type(exc.code) is int else 1
+        except BaseException as exc:
+            print(f"error: needle cactus reference: worker failed: {exc}",
+                  file=sys.stderr)
+        finally:
+            os._exit(exit_code)
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        try:
+            waited, status = os.waitpid(child, os.WNOHANG)
+        except OSError as exc:
+            fail(f"cannot wait for authenticated Needle worker: {exc}")
+        if waited == child:
+            if os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0:
+                return
+            raise SystemExit(os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1)
+        if time.monotonic() >= deadline:
+            try:
+                os.kill(child, signal.SIGKILL)
+                os.waitpid(child, 0)
+            except OSError:
+                pass
+            Path(args.output).with_name(Path(args.output).name + ".tmp").unlink(
+                missing_ok=True)
+            fail(f"Needle reference process exceeded {timeout_seconds}s timeout")
+        time.sleep(0.01)
+
+
 
 def run_reference_subprocess(args: argparse.Namespace) -> None:
     if os.name != "posix":
@@ -810,55 +871,37 @@ def run_reference_subprocess(args: argparse.Namespace) -> None:
         maximum=MAX_TIMEOUT_SECONDS)
     output = Path(args.output)
     temporary = output.with_name(output.name + ".tmp")
-    try:
-        with tempfile.TemporaryDirectory(prefix="emel-needle-auth-") as staging_name:
-            staging_root = Path(staging_name)
-            staged_model = staging_root / "model.cact"
-            repo_root = Path(__file__).resolve().parents[4]
-            validate_canonical_path(
-                Path(args.model), repo_root / MODEL_RELATIVE_PATH, "model")
-            validate_canonical_path(
-                Path(args.fixture), repo_root / FIXTURE_ID, "fixture")
-            staged_fixture = staging_root / "fixture.tsv"
-            staged_needle_root = staging_root / "package"
-            staged_needle_root.mkdir(mode=stat.S_IRWXU)
-            copy_authenticated_file(Path(args.model), staged_model, "canonical model")
-            copy_authenticated_file(Path(args.fixture), staged_fixture, "canonical fixture")
-            staged_package = stage_needle_package(
-                Path(args.needle_root), staged_needle_root)
-            needle = import_needle(staged_needle_root, staged_package)
-            staged_library = stage_needle_native_library(needle, staged_package)
-            os.environ["NEEDLE_LIB_PATH"] = str(staged_library)
-            try:
-                validate_canonical_input(staged_model, MODEL_SHA256, "model")
-                validate_canonical_input(staged_fixture, FIXTURE_SHA256, "fixture")
-                validate_needle_package(
-                    staged_needle_root, allow_native_library=staged_library)
-                command = [
-                    sys.executable, "-I", "-S", "-B", str(Path(__file__).resolve()),
-                    "run-reference-worker", "--staged",
-                    "--model", str(staged_model),
-                    "--fixture", str(staged_fixture),
-                    "--needle-root", str(staged_needle_root),
-                    "--warmup-iterations", str(args.warmup_iterations),
-                    "--warmup-runs", str(args.warmup_runs),
-                    "--iterations", str(args.iterations), "--runs", str(args.runs),
-                    "--output", args.output,
-                ]
-                completed = subprocess.run(
-                    command, check=False, timeout=timeout_seconds,
-                    env=worker_environment({"NEEDLE_LIB_PATH": str(staged_library)}))
-            finally:
-                os.environ.pop("NEEDLE_LIB_PATH", None)
-                for name in tuple(sys.modules):
-                    if name == "needle" or name.startswith("needle."):
-                        sys.modules.pop(name, None)
-    except subprocess.TimeoutExpired:
+    with tempfile.TemporaryDirectory(prefix="emel-needle-auth-") as staging_name:
+        staging_root = Path(staging_name)
+        staged_model = staging_root / "model.cact"
+        repo_root = Path(__file__).resolve().parents[4]
+        validate_canonical_path(
+            Path(args.model), repo_root / MODEL_RELATIVE_PATH, "model")
+        validate_canonical_path(
+            Path(args.fixture), repo_root / FIXTURE_ID, "fixture")
+        staged_fixture = staging_root / "fixture.tsv"
+        staged_needle_root = staging_root / "package"
+        staged_needle_root.mkdir(mode=stat.S_IRWXU)
+        copy_authenticated_file(Path(args.model), staged_model, "canonical model")
+        copy_authenticated_file(Path(args.fixture), staged_fixture, "canonical fixture")
+        staged_package = stage_needle_package(
+            Path(args.needle_root), staged_needle_root)
+        needle = import_needle(staged_needle_root, staged_package)
+        staged_library = stage_needle_native_library(needle, staged_package)
+        for name in tuple(sys.modules):
+            if name == "needle" or name.startswith("needle."):
+                sys.modules.pop(name, None)
+        validate_canonical_input(staged_model, MODEL_SHA256, "model")
+        validate_canonical_input(staged_fixture, FIXTURE_SHA256, "fixture")
+        validate_needle_package(
+            staged_needle_root, allow_native_library=staged_library)
+        run_forked_reference(
+            args, staged_model, staged_fixture, staged_needle_root,
+            staged_library, timeout_seconds,
+            worker_environment({"NEEDLE_LIB_PATH": str(staged_library)}))
+    if temporary.exists():
         temporary.unlink(missing_ok=True)
-        fail(f"Needle reference process exceeded {timeout_seconds}s timeout")
-    if completed.returncode != 0:
-        temporary.unlink(missing_ok=True)
-        raise SystemExit(completed.returncode)
+        fail("authenticated Needle worker left an incomplete output")
 
 
 def add_reference_arguments(parser: argparse.ArgumentParser) -> None:
@@ -878,28 +921,15 @@ def main() -> None:
     add_reference_arguments(run)
     run.add_argument("--timeout-seconds", type=bounded_timeout_int,
                      default=DEFAULT_TIMEOUT_SECONDS)
-    worker = subparsers.add_parser("run-reference-worker")
-    add_reference_arguments(worker)
-    worker.add_argument("--staged", action="store_true", help=argparse.SUPPRESS)
     compare_parser = subparsers.add_parser("compare")
     compare_parser.add_argument("--emel-input", required=True)
     compare_parser.add_argument("--reference-input", required=True)
     args = parser.parse_args()
     validate_python_interpreter()
-    if args.command in ("run-reference", "run-reference-worker") and not args.needle_root:
+    if args.command == "run-reference" and not args.needle_root:
         fail("EMEL_BENCH_NEEDLE_ROOT or --needle-root is required")
     if args.command == "run-reference":
         run_reference_subprocess(args)
-    elif args.command == "run-reference-worker":
-        record = run_reference(args)
-        output = Path(args.output)
-        temporary = output.with_name(output.name + ".tmp")
-        try:
-            temporary.write_text(
-                json.dumps(record, sort_keys=True) + "\n", encoding="utf-8")
-            temporary.replace(output)
-        except OSError as exc:
-            fail(f"cannot write reference JSON: {exc}")
     else:
         compare(args)
 
