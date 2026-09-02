@@ -994,6 +994,138 @@ assert not captured["stage"].exists()
 #endif
 }
 
+TEST_CASE("needle cactus supervisor reaps live child on timeout exception and signal") {
+#if !defined(_WIN32)
+  const std::string program = R"PY(
+import argparse
+import importlib.util
+import os
+import pathlib
+import signal
+import sys
+import tempfile
+import time
+
+spec = importlib.util.spec_from_file_location("cactus_reference", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+root = pathlib.Path(tempfile.mkdtemp())
+args = argparse.Namespace(warmup_iterations=0, warmup_runs=0, iterations=1,
+                          runs=1, output=str(root / "output.json"))
+staged = root / "staged"
+staged.mkdir()
+model = staged / "model"
+fixture = staged / "fixture"
+package = staged / "package"
+library = staged / "library"
+for path in (model, fixture, library):
+    path.write_bytes(b"x")
+package.mkdir()
+
+def assert_reaped(pid, failure):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return
+    raise AssertionError(failure)
+
+original_handlers = {sig: signal.getsignal(sig)
+                     for sig in module.SUPERVISOR_SIGNALS}
+real_monotonic = time.monotonic
+real_sleep = time.sleep
+
+timeout_worker_path = root / "timeout-worker.pid"
+def timeout_worker(_args):
+    timeout_worker_path.write_text(str(os.getpid()))
+    real_sleep(60)
+module.run_reference = timeout_worker
+timeout_now = 0
+def timeout_monotonic():
+    global timeout_now
+    timeout_now += 1
+    if timeout_now == 2:
+        deadline = real_monotonic() + 5
+        while not timeout_worker_path.exists() and real_monotonic() < deadline:
+            real_sleep(0.001)
+    return timeout_now
+module.time.monotonic = timeout_monotonic
+module.time.sleep = lambda _seconds: None
+try:
+    module.run_forked_reference(args, model, fixture, package, library, 1, {})
+    raise AssertionError("timeout was swallowed")
+except SystemExit as exc:
+    assert "exceeded 1s timeout" in str(exc)
+finally:
+    module.time.monotonic = real_monotonic
+    module.time.sleep = real_sleep
+assert_reaped(int(timeout_worker_path.read_text()), "timeout left worker alive")
+assert {sig: signal.getsignal(sig) for sig in module.SUPERVISOR_SIGNALS} == original_handlers
+
+exception_worker_path = root / "exception-worker.pid"
+def exception_worker(_args):
+    exception_worker_path.write_text(str(os.getpid()))
+    real_sleep(60)
+module.run_reference = exception_worker
+calls = 0
+def parent_exception():
+    global calls
+    calls += 1
+    if calls == 1:
+        return real_monotonic()
+    deadline = real_monotonic() + 5
+    while not exception_worker_path.exists() and real_monotonic() < deadline:
+        real_sleep(0.001)
+    raise RuntimeError("parent wait failure")
+module.time.monotonic = parent_exception
+try:
+    module.run_forked_reference(args, model, fixture, package, library, 10, {})
+    raise AssertionError("parent exception was swallowed")
+except RuntimeError as exc:
+    assert str(exc) == "parent wait failure"
+finally:
+    module.time.monotonic = real_monotonic
+assert_reaped(int(exception_worker_path.read_text()), "exception left worker alive")
+assert {sig: signal.getsignal(sig) for sig in module.SUPERVISOR_SIGNALS} == original_handlers
+
+signal_worker_path = root / "signal-worker.pid"
+supervisor = os.fork()
+if supervisor == 0:
+    def signal_worker(_args):
+        signal_worker_path.write_text(str(os.getpid()))
+        real_sleep(60)
+    module.run_reference = signal_worker
+    module.run_forked_reference(args, model, fixture, package, library, 10, {})
+    os._exit(0)
+deadline = real_monotonic() + 5
+while not signal_worker_path.exists() and real_monotonic() < deadline:
+    real_sleep(0.001)
+assert signal_worker_path.exists(), "signal worker did not start"
+os.kill(supervisor, signal.SIGTERM)
+waited, status = os.waitpid(supervisor, 0)
+assert waited == supervisor
+assert os.WIFEXITED(status) and os.WEXITSTATUS(status) == 128 + signal.SIGTERM
+assert_reaped(int(signal_worker_path.read_text()), "signal left worker alive")
+)PY";
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-supervisor-lifecycle";
+  std::error_code ec;
+  std::filesystem::remove_all(tmp_dir, ec);
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::string command =
+      "python3 -I -S -B -c " + quote_arg_posix(program) + " " +
+      quote_arg_posix(cactus_reference_driver_path().string()) + " > " +
+      quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+  const process_capture capture =
+      run_command_capture(command, stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+#endif
+}
+
 TEST_CASE("needle cactus supervisor uses an explicit safe worker environment") {
 #if !defined(_WIN32)
   const std::string program = R"PY(
@@ -1118,6 +1250,10 @@ TEST_CASE("needle canonical compare has pinned model and retokenizes fixture") {
   CHECK(wrapper.find("NEEDLE_PYTHON_SHA256=") != std::string::npos);
   CHECK(wrapper.find("validate_needle_python \"${EMEL_BENCH_NEEDLE_PYTHON}\" \\\n"
                      "    NEEDLE_PYTHON_EXECUTABLE") != std::string::npos);
+  CHECK(wrapper.find("NEEDLE_PYTHON_STAGE_DIR=") != std::string::npos);
+  CHECK(wrapper.find("cp \"$resolved_python\" \"$staged_python\"") !=
+        std::string::npos);
+  CHECK(wrapper.find("sha256sum \"$staged_python\"") != std::string::npos);
   CHECK(wrapper.find("local python_executable=\"$NEEDLE_PYTHON_EXECUTABLE\"") !=
         std::string::npos);
   CHECK(wrapper.find("validate_needle_python \"$python_executable\"") ==
@@ -1149,7 +1285,7 @@ TEST_CASE("needle canonical compare has pinned model and retokenizes fixture") {
         std::string::npos);
 }
 
-TEST_CASE("needle Python validation binds execution to resolved target") {
+TEST_CASE("needle Python validation binds execution to authenticated bytes") {
 #if !defined(_WIN32)
   const std::string wrapper =
       read_file(repo_root() / "scripts" / "bench.sh");
@@ -1162,29 +1298,26 @@ TEST_CASE("needle Python validation binds execution to resolved target") {
 
   const std::filesystem::path tmp_dir =
       std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
-      "needle-python-path-binding";
+      "needle-python-byte-binding";
   std::error_code ec;
   std::filesystem::remove_all(tmp_dir, ec);
   std::filesystem::create_directories(tmp_dir);
-  const std::filesystem::path original_python = tmp_dir / "python-original";
-  const std::filesystem::path replacement_python =
-      tmp_dir / "python-replacement";
   const std::filesystem::path configured_python = tmp_dir / "python";
+  const std::filesystem::path replacement_python = tmp_dir / "replacement";
   const std::filesystem::path original_marker = tmp_dir / "original-ran";
   const std::filesystem::path replacement_marker = tmp_dir / "replacement-ran";
-  const std::filesystem::path harness = tmp_dir / "path-binding.sh";
+  const std::filesystem::path harness = tmp_dir / "byte-binding.sh";
   const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
   const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
 
-  write_file(original_python,
+  write_file(configured_python,
              "#!/bin/sh\nprintf original > " +
                  quote_arg_posix(original_marker.string()) + "\n");
   write_file(replacement_python,
              "#!/bin/sh\nprintf replacement > " +
                  quote_arg_posix(replacement_marker.string()) + "\n");
-  make_executable(original_python);
+  make_executable(configured_python);
   make_executable(replacement_python);
-  std::filesystem::create_symlink(original_python, configured_python);
 
   write_file(
       harness,
@@ -1192,25 +1325,24 @@ TEST_CASE("needle Python validation binds execution to resolved target") {
           wrapper.substr(functions_begin, functions_end - functions_begin) +
           R"SH(
 configured_python="$1"
-original_python="$2"
-replacement_python="$3"
+replacement_python="$2"
 if command -v sha256sum >/dev/null 2>&1; then
-  NEEDLE_PYTHON_SHA256="$(sha256sum "$original_python")"
+  NEEDLE_PYTHON_SHA256="$(sha256sum "$configured_python")"
 else
-  NEEDLE_PYTHON_SHA256="$(shasum -a 256 "$original_python")"
+  NEEDLE_PYTHON_SHA256="$(shasum -a 256 "$configured_python")"
 fi
 NEEDLE_PYTHON_SHA256="${NEEDLE_PYTHON_SHA256%% *}"
 authenticated_python="$configured_python"
 validate_needle_python "$configured_python" authenticated_python
-ln -sfn "$replacement_python" "$configured_python"
+mv -f "$replacement_python" "$configured_python"
 run_clean_needle_python "$authenticated_python"
+cleanup_needle_python
 )SH");
   make_executable(harness);
 
   const process_capture capture = run_command_capture(
       quote_arg_posix(harness.string()) + " " +
           quote_arg_posix(configured_python.string()) + " " +
-          quote_arg_posix(original_python.string()) + " " +
           quote_arg_posix(replacement_python.string()) + " > " +
           quote_arg_posix(stdout_path.string()) + " 2> " +
           quote_arg_posix(stderr_path.string()),

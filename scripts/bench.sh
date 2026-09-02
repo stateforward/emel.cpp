@@ -32,6 +32,7 @@ NEEDLE_REQUEST_MAX_ITERATIONS=32
 NEEDLE_REQUEST_MAX_RUNS=25
 NEEDLE_PYTHON_SHA256="1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"
 NEEDLE_PYTHON_EXECUTABLE=""
+NEEDLE_PYTHON_STAGE_DIR=""
 resolve_needle_python() {
   local python_executable="$1"
   local resolved_python=""
@@ -74,7 +75,9 @@ validate_needle_python() {
   local python_executable="$1"
   local output_variable="$2"
   local resolved_python
+  local staged_python
   local actual_sha256
+  local platform
   resolved_python="$(resolve_needle_python "$python_executable")" || true
   if [[ -z "$resolved_python" || "$resolved_python" != /* ||
         ! -f "$resolved_python" || -L "$resolved_python" ||
@@ -82,21 +85,52 @@ validate_needle_python() {
     echo "error: cannot resolve canonical regular-file Needle Python executable" >&2
     exit 1
   fi
+  platform="$(uname -s)"
+  if [[ "$platform" != "Linux" && "$platform" != "Darwin" ]]; then
+    echo "error: authenticated Needle Python staging is unsupported on platform: $platform" >&2
+    exit 1
+  fi
+  NEEDLE_PYTHON_STAGE_DIR="$(mktemp -d)"
+  staged_python="$NEEDLE_PYTHON_STAGE_DIR/python"
+  if ! cp "$resolved_python" "$staged_python"; then
+    rm -rf "$NEEDLE_PYTHON_STAGE_DIR"
+    NEEDLE_PYTHON_STAGE_DIR=""
+    echo "error: cannot stage canonical Needle Python executable" >&2
+    exit 1
+  fi
+  if ! chmod 500 "$staged_python"; then
+    rm -rf "$NEEDLE_PYTHON_STAGE_DIR"
+    NEEDLE_PYTHON_STAGE_DIR=""
+    echo "error: cannot protect staged canonical Needle Python executable" >&2
+    exit 1
+  fi
   if command -v sha256sum >/dev/null 2>&1; then
-    actual_sha256="$(sha256sum "$resolved_python")"
+    actual_sha256="$(sha256sum "$staged_python")"
   elif command -v shasum >/dev/null 2>&1; then
-    actual_sha256="$(shasum -a 256 "$resolved_python")"
+    actual_sha256="$(shasum -a 256 "$staged_python")"
   else
+    rm -rf "$NEEDLE_PYTHON_STAGE_DIR"
+    NEEDLE_PYTHON_STAGE_DIR=""
     echo "error: sha256sum or shasum is required to authenticate canonical Needle Python" >&2
     exit 1
   fi
   actual_sha256="${actual_sha256%% *}"
   if [[ "$actual_sha256" != "$NEEDLE_PYTHON_SHA256" ]]; then
+    rm -rf "$NEEDLE_PYTHON_STAGE_DIR"
+    NEEDLE_PYTHON_STAGE_DIR=""
     echo "error: configured Needle Python SHA-256 mismatch" >&2
     exit 1
   fi
-  printf -v "$output_variable" '%s' "$resolved_python"
+  printf -v "$output_variable" '%s' "$staged_python"
 }
+cleanup_needle_python() {
+  if [[ -n "$NEEDLE_PYTHON_STAGE_DIR" ]]; then
+    rm -rf "$NEEDLE_PYTHON_STAGE_DIR"
+    NEEDLE_PYTHON_STAGE_DIR=""
+    NEEDLE_PYTHON_EXECUTABLE=""
+  fi
+}
+trap cleanup_needle_python EXIT
 NEEDLE_INJECTION_VARIABLES=(
   LD_PRELOAD
   LD_LIBRARY_PATH
@@ -718,7 +752,7 @@ if $COMBINED; then
   snapshot_output="$(mktemp)"
   compare_output="$(mktemp)"
   current_snapshot="$(mktemp)"
-  trap 'rm -f "$snapshot_output" "$compare_output" "$current_snapshot"' EXIT
+  trap 'rm -f "$snapshot_output" "$compare_output" "$current_snapshot"; cleanup_needle_python' EXIT
 
   if [[ "$SUITE_FILTER" == "needle_graph" ]]; then
     EMEL_BENCH_NEEDLE_REQUEST_COMPARE=1 run_bench_runner "$build_dir" --mode=emel > "$snapshot_output"
@@ -834,7 +868,7 @@ if $SNAPSHOT; then
   ABS_TOLERANCE_NS="${BENCH_ABS_TOLERANCE_NS:-5000}"
   BASELINE="$ROOT_DIR/snapshots/bench/benchmarks.txt"
   CURRENT="$(mktemp)"
-  trap 'rm -f "$CURRENT"' EXIT
+  trap 'rm -f "$CURRENT"; cleanup_needle_python' EXIT
 
   for tool in cmake ninja git; do
     if ! command -v "$tool" >/dev/null 2>&1; then

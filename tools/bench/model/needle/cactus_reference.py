@@ -34,6 +34,7 @@ EMEL_THREAD_CONTRACT = THREAD_CONTRACT
 MAX_BENCH_COUNT = 32
 DEFAULT_TIMEOUT_SECONDS = 600
 MAX_TIMEOUT_SECONDS = 3600
+SUPERVISOR_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 MODEL_SHA256 = "c7f9eb2c3dc5b52292f8903a22580cd60cea79723e8e9fe5ed8e8e4db9f7778d"
 FIXTURE_SHA256 = "2b7ce059b63fd029a684861439afb6e7f0a61e4c6790737e4cbd3ef602d65dc8"
 NEEDLE_PACKAGE_VERSION = "2.0.8"
@@ -815,51 +816,85 @@ def run_forked_reference(
         args: argparse.Namespace, staged_model: Path, staged_fixture: Path,
         staged_needle_root: Path, staged_library: Path,
         timeout_seconds: int, environment: dict[str, str]) -> None:
+    child: int | None = None
+    child_live = False
+    previous_handlers: dict[signal.Signals, Any] = {}
+    previous_mask = signal.pthread_sigmask(
+        signal.SIG_BLOCK, SUPERVISOR_SIGNALS)
+
+    def interrupt(signum: int, _frame: Any) -> NoReturn:
+        raise SystemExit(128 + signum)
+
     try:
-        child = os.fork()
-    except OSError as exc:
-        fail(f"cannot fork authenticated Needle worker: {exc}")
-    if child == 0:
-        exit_code = 1
+        for supervisor_signal in SUPERVISOR_SIGNALS:
+            previous_handlers[supervisor_signal] = signal.signal(
+                supervisor_signal, interrupt)
         try:
-            os.environ.clear()
-            os.environ.update(environment)
-            record = run_reference(argparse.Namespace(
-                model=str(staged_model), fixture=str(staged_fixture),
-                needle_root=str(staged_needle_root),
-                warmup_iterations=args.warmup_iterations,
-                warmup_runs=args.warmup_runs,
-                iterations=args.iterations, runs=args.runs,
-                output=args.output, staged=True))
-            write_reference_output(record, Path(args.output))
-            exit_code = 0
-        except SystemExit as exc:
-            exit_code = exc.code if type(exc.code) is int else 1
-        except BaseException as exc:
-            print(f"error: needle cactus reference: worker failed: {exc}",
-                  file=sys.stderr)
-        finally:
-            os._exit(exit_code)
-    deadline = time.monotonic() + timeout_seconds
-    while True:
-        try:
-            waited, status = os.waitpid(child, os.WNOHANG)
+            child = os.fork()
         except OSError as exc:
-            fail(f"cannot wait for authenticated Needle worker: {exc}")
-        if waited == child:
-            if os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0:
-                return
-            raise SystemExit(os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1)
-        if time.monotonic() >= deadline:
+            fail(f"cannot fork authenticated Needle worker: {exc}")
+        if child == 0:
+            for supervisor_signal, previous_handler in previous_handlers.items():
+                signal.signal(supervisor_signal, previous_handler)
+            signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+            exit_code = 1
+            try:
+                os.environ.clear()
+                os.environ.update(environment)
+                record = run_reference(argparse.Namespace(
+                    model=str(staged_model), fixture=str(staged_fixture),
+                    needle_root=str(staged_needle_root),
+                    warmup_iterations=args.warmup_iterations,
+                    warmup_runs=args.warmup_runs,
+                    iterations=args.iterations, runs=args.runs,
+                    output=args.output, staged=True))
+                write_reference_output(record, Path(args.output))
+                exit_code = 0
+            except SystemExit as exc:
+                exit_code = exc.code if type(exc.code) is int else 1
+            except BaseException as exc:
+                print(f"error: needle cactus reference: worker failed: {exc}",
+                      file=sys.stderr)
+            finally:
+                os._exit(exit_code)
+
+        child_live = True
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            try:
+                waited, status = os.waitpid(child, os.WNOHANG)
+            except OSError as exc:
+                fail(f"cannot wait for authenticated Needle worker: {exc}")
+            if waited == child:
+                child_live = False
+                if os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0:
+                    return
+                raise SystemExit(
+                    os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1)
+            if time.monotonic() >= deadline:
+                Path(args.output).with_name(
+                    Path(args.output).name + ".tmp").unlink(missing_ok=True)
+                fail(
+                    f"Needle reference process exceeded {timeout_seconds}s timeout")
+            time.sleep(0.01)
+    finally:
+        signal.pthread_sigmask(signal.SIG_BLOCK, SUPERVISOR_SIGNALS)
+        if child_live and child is not None:
             try:
                 os.kill(child, signal.SIGKILL)
-                os.waitpid(child, 0)
-            except OSError:
+            except ProcessLookupError:
                 pass
-            Path(args.output).with_name(Path(args.output).name + ".tmp").unlink(
-                missing_ok=True)
-            fail(f"Needle reference process exceeded {timeout_seconds}s timeout")
-        time.sleep(0.01)
+            try:
+                while True:
+                    waited, _ = os.waitpid(child, 0)
+                    if waited == child:
+                        break
+            except ChildProcessError:
+                pass
+        for supervisor_signal, previous_handler in previous_handlers.items():
+            signal.signal(supervisor_signal, previous_handler)
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
 
 
 
