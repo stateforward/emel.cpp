@@ -590,7 +590,7 @@ configure_bench_build() {
   fi
 
   cmake "${cmake_args[@]}" >&2
-  if [[ "$build_suite_filter" == "needle_graph" ]]; then
+  if [[ "$SUITE_FILTER" == "needle_graph" ]]; then
     cmake --build "$build_dir" --parallel "$EMEL_BUILD_JOBS" --target \
       bench_runner needle_authenticated_exec >&2
     NEEDLE_AUTHENTICATED_EXEC="$build_dir/needle_authenticated_exec"

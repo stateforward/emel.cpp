@@ -1291,6 +1291,27 @@ TEST_CASE("needle canonical compare has pinned model and retokenizes fixture") {
   CHECK(wrapper.find("readlink -f \"$python_executable\" 2>/dev/null") !=
         std::string::npos);
 }
+TEST_CASE("needle compare default build still provisions authenticated exec") {
+  const std::string wrapper = read_file(repo_root() / "scripts" / "bench.sh");
+  const std::size_t configure_begin =
+      wrapper.find("configure_bench_build() {");
+  REQUIRE(configure_begin != std::string::npos);
+  const std::size_t configure_end =
+      wrapper.find("\nupdate_snapshot_baseline() {", configure_begin);
+  REQUIRE(configure_end != std::string::npos);
+  const std::string configure =
+      wrapper.substr(configure_begin, configure_end - configure_begin);
+  CHECK(configure.find("if [[ \"$SUITE_FILTER\" == \"needle_graph\" ]]") !=
+        std::string::npos);
+  CHECK(configure.find("if [[ \"$build_suite_filter\" == \"needle_graph\" ]]") ==
+        std::string::npos);
+  CHECK(configure.find("bench_runner needle_authenticated_exec") !=
+        std::string::npos);
+  CHECK(configure.find(
+            "NEEDLE_AUTHENTICATED_EXEC=\"$build_dir/needle_authenticated_exec\"") !=
+        std::string::npos);
+}
+
 
 TEST_CASE("needle authenticated exec resists source replacement after authentication") {
 #if defined(__linux__)
