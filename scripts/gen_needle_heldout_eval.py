@@ -1,27 +1,32 @@
 #!/usr/bin/env python3
 """Prepare the needle heldout-accuracy eval input for tools/needle_eval.
 
-Renders each /shared/effortless/train/heldout.jsonl row exactly like the
-training renderer (`/data/needle/needle/model/finetune.py` render_example,
-prompt part only) and records IDs from the byte-level reference tokenizer
-(`needle/model/export.py` RefTokenizer) built FROM THE PINNED .cact BLOB. The
-C++ eval requires native parity with these IDs, then feeds native IDs onward.
+Renders each heldout JSONL row exactly like the training renderer
+(`needle/model/finetune.py` render_example, prompt part only) and records IDs
+from the byte-level reference tokenizer (`needle/model/export.py` RefTokenizer)
+built FROM THE PINNED .cact BLOB. The C++ eval requires native parity with
+these IDs, then feeds native IDs onward.
 
 Output line format (one row per heldout example):
     gold_domain \t gold_effort \t ref_ids_space_separated \t prompt_hex
 
-Run with the needle venv:
-    /data/needle/.venv/bin/python3 scripts/gen_needle_heldout_eval.py \
+Run with an environment where the needle package is installed:
+    python3 scripts/gen_needle_heldout_eval.py \
         /shared/effortless/train/heldout.jsonl \
         tests/models/route-w4-qat.cact \
         build/needle_eval/heldout_prompts.tsv
+
+To import from a specific needle checkout, set NEEDLE_ROOT to its path.
 """
 import json
+import os
+from pathlib import Path
 import sys
 
-sys.path.insert(0, "/data/needle")
+needle_root = os.environ.get("NEEDLE_ROOT")
+if needle_root:
+    sys.path.insert(0, str(Path(needle_root).expanduser().resolve()))
 
-from needle.model.export import RefTokenizer  # noqa: E402
 
 IM_START = "<|im_start|>"
 IM_END = "<|im_end|>"
@@ -41,6 +46,10 @@ def render_prompt(example):
 
 
 def main():
+    if len(sys.argv) != 4:
+        raise SystemExit(
+            "usage: gen_needle_heldout_eval.py EVAL_JSONL MODEL_CACT OUTPUT_TSV")
+    from needle.model.export import RefTokenizer
     eval_path, cact_path, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
     tokenizer = RefTokenizer.from_cact(cact_path)
     rows = [json.loads(line) for line in open(eval_path)]

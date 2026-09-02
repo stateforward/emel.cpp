@@ -26,6 +26,9 @@ struct partitioning_non_bpe_skip_input_decision {};
 struct partitioning_no_specials {};
 struct partitioning_non_bpe_parse_special {};
 struct partitioning_non_bpe_skip_special {};
+struct state_prefix_decision {};
+struct state_prefix_capacity_decision {};
+struct state_prefix_inserting {};
 struct partition_decision {};
 struct done {};
 struct errored {};
@@ -137,15 +140,40 @@ struct model {
                    + sml::completion<event::preprocess_runtime>
                    / action::ensure_last_error
 
-      , sml::state<partition_decision> <= sml::state<partitioning_no_specials>
+      , sml::state<state_prefix_decision> <= sml::state<partitioning_no_specials>
                    + sml::completion<event::preprocess_runtime>
                    / action::partition_no_specials
-      , sml::state<partition_decision> <= sml::state<partitioning_non_bpe_parse_special>
+      , sml::state<state_prefix_decision> <= sml::state<partitioning_non_bpe_parse_special>
                    + sml::completion<event::preprocess_runtime>
                    / action::partition_non_bpe_parse_special
-      , sml::state<partition_decision> <= sml::state<partitioning_non_bpe_skip_special>
+      , sml::state<state_prefix_decision> <= sml::state<partitioning_non_bpe_skip_special>
                    + sml::completion<event::preprocess_runtime>
                    / action::partition_non_bpe_skip_special
+
+      , sml::state<state_prefix_capacity_decision> <= sml::state<state_prefix_decision>
+                   + sml::completion<event::preprocess_runtime>
+                   [ guard::guard_needle_dummy_prefix_required{} ]
+      , sml::state<partition_decision> <= sml::state<state_prefix_decision>
+                   + sml::completion<event::preprocess_runtime>
+                   [ guard::guard_needle_dummy_prefix_not_required{} ]
+      , sml::state<errored> <= sml::state<state_prefix_decision>
+                   + sml::completion<event::preprocess_runtime>
+                   / action::ensure_last_error
+
+      , sml::state<state_prefix_inserting> <= sml::state<state_prefix_capacity_decision>
+                   + sml::completion<event::preprocess_runtime>
+                   [ guard::guard_prefix_capacity_sufficient{} ]
+      , sml::state<errored> <= sml::state<state_prefix_capacity_decision>
+                   + sml::completion<event::preprocess_runtime>
+                   [ guard::guard_prefix_capacity_insufficient{} ]
+                   / action::reject_invalid
+      , sml::state<errored> <= sml::state<state_prefix_capacity_decision>
+                   + sml::completion<event::preprocess_runtime>
+                   / action::reject_invalid
+
+      , sml::state<partition_decision> <= sml::state<state_prefix_inserting>
+                   + sml::completion<event::preprocess_runtime>
+                   / action::effect_insert_needle_dummy_prefix
 
       , sml::state<done> <= sml::state<partition_decision>
                    + sml::completion<event::preprocess_runtime>[ guard::partition_ok{} ]
@@ -189,6 +217,12 @@ struct model {
       , sml::state<unexpected> <= sml::state<partitioning_non_bpe_parse_special> + sml::unexpected_event<sml::_>
                    / action::on_unexpected
       , sml::state<unexpected> <= sml::state<partitioning_non_bpe_skip_special> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<state_prefix_decision> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<state_prefix_capacity_decision> + sml::unexpected_event<sml::_>
+                   / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<state_prefix_inserting> + sml::unexpected_event<sml::_>
                    / action::on_unexpected
       , sml::state<unexpected> <= sml::state<partition_decision> + sml::unexpected_event<sml::_>
                    / action::on_unexpected

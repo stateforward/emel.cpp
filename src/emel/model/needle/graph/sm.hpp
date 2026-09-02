@@ -10,6 +10,12 @@
 #include <memory>
 #include <new>
 #include <system_error>
+
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
+#define EMEL_NEEDLE_GRAPH_EXCEPTIONS 1
+#else
+#define EMEL_NEEDLE_GRAPH_EXCEPTIONS 0
+#endif
 #include "emel/sm.hpp"
 
 namespace emel::model::needle::graph {
@@ -340,7 +346,11 @@ struct basic_sm
     std::unique_ptr<basic_sm> machine = {};
     emel::error::type err = emel::error::cast(error::none);
   };
-  using construction_factory = basic_sm *(*)(const needle::contract &);
+  using construction_factory =
+      construction_result (*)(const needle::contract &) noexcept;
+  static constexpr bool construction_exceptions_enabled =
+      EMEL_NEEDLE_GRAPH_EXCEPTIONS != 0;
+
   static construction_result
   create(const needle::contract &contract_in,
          const construction_factory construct = &construct_machine) noexcept {
@@ -351,23 +361,11 @@ struct basic_sm
     if (construct == nullptr)
       return {.machine = {},
               .err = emel::error::cast(error::internal_error)};
-    try {
-      std::unique_ptr<basic_sm> machine{construct(contract_in)};
-      if (machine == nullptr)
-        return {.machine = {},
-                .err = emel::error::cast(error::internal_error)};
-      return {.machine = std::move(machine),
-              .err = emel::error::cast(error::none)};
-    } catch (const std::bad_alloc &) {
-      return {.machine = {},
-              .err = emel::error::cast(error::capacity_exceeded)};
-    } catch (const std::system_error &) {
-      return {.machine = {},
-              .err = emel::error::cast(error::internal_error)};
-    } catch (...) {
-      return {.machine = {},
-              .err = emel::error::cast(error::internal_error)};
-    }
+    construction_result result = construct(contract_in);
+    const auto none = emel::error::cast(error::none);
+    if ((result.machine == nullptr) == (result.err == none))
+      return {.machine = {}, .err = emel::error::cast(error::internal_error)};
+    return result;
   }
   explicit basic_sm(const needle::contract &contract_in)
       : base_type(std::in_place, contract_in,
@@ -542,7 +540,6 @@ struct basic_sm
     ev.breakdown = this->context_.timing;
     return true;
   }
-
   bool process_event(const event::capture_a8_diagnostics &ev) {
     dispatch_scope dispatch{dispatch_gate_};
     if (!dispatch)
@@ -552,8 +549,29 @@ struct basic_sm
   }
 
 private:
-  static basic_sm *construct_machine(const needle::contract &contract_in) {
-    return new basic_sm{contract_in};
+  static construction_result
+  construct_machine(const needle::contract &contract_in) noexcept {
+#if EMEL_NEEDLE_GRAPH_EXCEPTIONS
+    try {
+#endif
+      std::unique_ptr<basic_sm> machine{new (std::nothrow) basic_sm{contract_in}};
+      if (machine == nullptr)
+        return {.machine = {},
+                .err = emel::error::cast(error::capacity_exceeded)};
+      return {.machine = std::move(machine),
+              .err = emel::error::cast(error::none)};
+#if EMEL_NEEDLE_GRAPH_EXCEPTIONS
+    } catch (const std::bad_alloc &) {
+      return {.machine = {},
+              .err = emel::error::cast(error::capacity_exceeded)};
+    } catch (const std::system_error &) {
+      return {.machine = {},
+              .err = emel::error::cast(error::internal_error)};
+    } catch (...) {
+      return {.machine = {},
+              .err = emel::error::cast(error::internal_error)};
+    }
+#endif
   }
 
   bool activation_quant_ = true;

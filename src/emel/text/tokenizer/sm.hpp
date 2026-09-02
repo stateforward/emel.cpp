@@ -23,6 +23,7 @@ struct prefix_decision {};
 struct encoding_ready {};
 struct encoding_token_fragment {};
 struct encoding_raw_fragment {};
+struct encoding_raw_fragment_choice {};
 struct encoding_raw_decision {};
 struct suffix_decision {};
 struct finalizing {};
@@ -163,8 +164,17 @@ struct model {
       , sml::state<encoding_ready> <= sml::state<encoding_token_fragment>
                    + sml::completion<event::tokenize_runtime> / action::append_fragment_token
 
-      , sml::state<encoding_raw_decision> <= sml::state<encoding_raw_fragment>
-                   + sml::completion<event::tokenize_runtime> / action::dispatch_encode_raw_fragment
+      , sml::state<encoding_raw_fragment_choice> <= sml::state<encoding_raw_fragment>
+                   + sml::completion<event::tokenize_runtime>
+      , sml::state<encoding_raw_decision> <= sml::state<encoding_raw_fragment_choice>
+                   + sml::completion<event::tokenize_runtime>[ guard::raw_fragment_is_needle_first{} ]
+                   / action::dispatch_encode_raw_fragment_needle_first
+      , sml::state<encoding_raw_decision> <= sml::state<encoding_raw_fragment_choice>
+                   + sml::completion<event::tokenize_runtime>[ guard::raw_fragment_is_needle_subsequent{} ]
+                   / action::dispatch_encode_raw_fragment_needle_subsequent
+      , sml::state<encoding_raw_decision> <= sml::state<encoding_raw_fragment_choice>
+                   + sml::completion<event::tokenize_runtime>[ guard::raw_fragment_is_standard{} ]
+                   / action::dispatch_encode_raw_fragment_standard
       , sml::state<errored> <= sml::state<encoding_raw_decision>
                    + sml::completion<event::tokenize_runtime>[ guard::encode_rejected_no_error{} ]
                    / action::set_invalid_id_error
@@ -240,6 +250,8 @@ struct model {
                    / action::on_unexpected
       , sml::state<unexpected> <= sml::state<unexpected> + sml::unexpected_event<sml::_>
                    / action::on_unexpected
+      , sml::state<unexpected> <= sml::state<encoding_raw_fragment_choice>
+                   + sml::unexpected_event<sml::_> / action::on_unexpected
     );
     // clang-format on
   }

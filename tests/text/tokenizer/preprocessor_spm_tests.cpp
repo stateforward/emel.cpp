@@ -111,6 +111,70 @@ TEST_CASE("tokenizer_preprocessor_spm_parse_special_false") {
   CHECK(fragments[1].text == std::string_view("BBB"));
 }
 
+TEST_CASE("tokenizer_preprocessor_spm_needle_inserts_dummy_prefix") {
+  auto & vocab = make_spm_vocab_with_specials();
+  vocab.tokenizer_pre_id = emel::model::data::tokenizer_pre::NEEDLE;
+  vocab.add_space_prefix = true;
+  std::array<emel::text::tokenizer::preprocessor::fragment,
+             emel::text::tokenizer::preprocessor::k_max_fragments>
+      fragments = {};
+  size_t count = 0;
+  int32_t err = -1;
+  emel::text::tokenizer::preprocessor::spm::sm machine{};
+  emel::text::tokenizer::preprocessor::event::preprocess ev(
+      vocab, "ABBB", true,
+      std::span<emel::text::tokenizer::preprocessor::fragment>(fragments),
+      count, err);
+
+  REQUIRE(machine.process_event(ev));
+  REQUIRE(count == 3);
+  CHECK(fragments[0].kind ==
+        emel::text::tokenizer::preprocessor::fragment_kind::raw_text);
+  CHECK(fragments[0].text == " ");
+  CHECK(fragments[1].token == 0);
+  CHECK(fragments[2].token == 1);
+}
+
+TEST_CASE("tokenizer_preprocessor_spm_standard_route_does_not_insert_prefix") {
+  auto & vocab = make_spm_vocab_with_specials();
+  vocab.add_space_prefix = true;
+  std::array<emel::text::tokenizer::preprocessor::fragment,
+             emel::text::tokenizer::preprocessor::k_max_fragments>
+      fragments = {};
+  size_t count = 0;
+  int32_t err = -1;
+  emel::text::tokenizer::preprocessor::spm::sm machine{};
+  emel::text::tokenizer::preprocessor::event::preprocess ev(
+      vocab, "ABBB", true,
+      std::span<emel::text::tokenizer::preprocessor::fragment>(fragments),
+      count, err);
+
+  REQUIRE(machine.process_event(ev));
+  REQUIRE(count == 2);
+  CHECK(fragments[0].kind ==
+        emel::text::tokenizer::preprocessor::fragment_kind::token);
+  CHECK(fragments[0].token == 0);
+}
+
+TEST_CASE("tokenizer_preprocessor_spm_needle_prefix_rejects_insufficient_capacity") {
+  auto & vocab = make_spm_vocab_with_specials();
+  vocab.tokenizer_pre_id = emel::model::data::tokenizer_pre::NEEDLE;
+  vocab.add_space_prefix = true;
+  std::array<emel::text::tokenizer::preprocessor::fragment, 2> fragments = {};
+  size_t count = 99;
+  int32_t err = -1;
+  emel::text::tokenizer::preprocessor::spm::sm machine{};
+  emel::text::tokenizer::preprocessor::event::preprocess ev(
+      vocab, "ABBB", true,
+      std::span<emel::text::tokenizer::preprocessor::fragment>(fragments),
+      count, err);
+
+  CHECK_FALSE(machine.process_event(ev));
+  CHECK(count == 0);
+  CHECK(err == emel::text::tokenizer::preprocessor::error_code(
+                     emel::text::tokenizer::preprocessor::error::invalid_request));
+}
+
 TEST_CASE("tokenizer_preprocessor_spm_empty_input_and_recovery") {
   auto & vocab = make_spm_vocab_with_specials();
   std::array<emel::text::tokenizer::preprocessor::fragment,

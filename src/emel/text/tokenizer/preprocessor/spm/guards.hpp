@@ -160,5 +160,39 @@ struct request_text_nonempty {
     return !request_text_empty{}(runtime_ev, ctx);
   }
 };
+struct guard_needle_dummy_prefix_required {
+  bool operator()(const event::preprocess_runtime & runtime_ev,
+                  const action::context &) const noexcept {
+    const auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
+    return ev.ctx.phase_error == preprocessor::error::none &&
+           ev.request.vocab.tokenizer_pre_id ==
+               emel::model::data::tokenizer_pre::NEEDLE &&
+           ev.request.vocab.add_space_prefix &&
+           ev.ctx.fragment_count != 0u &&
+           ev.request.fragments_out[0].kind == fragment_kind::token;
+  }
+};
+
+struct guard_needle_dummy_prefix_not_required {
+  bool operator()(const event::preprocess_runtime & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    return !guard_needle_dummy_prefix_required{}(runtime_ev, ctx);
+  }
+};
+
+struct guard_prefix_capacity_sufficient {
+  bool operator()(const event::preprocess_runtime & runtime_ev,
+                  const action::context &) const noexcept {
+    const auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
+    return ev.ctx.fragment_count < ev.request.fragments_out.size();
+  }
+};
+
+struct guard_prefix_capacity_insufficient {
+  bool operator()(const event::preprocess_runtime & runtime_ev,
+                  const action::context & ctx) const noexcept {
+    return !guard_prefix_capacity_sufficient{}(runtime_ev, ctx);
+  }
+};
 
 }  // namespace emel::text::tokenizer::preprocessor::spm::guard

@@ -440,6 +440,41 @@ struct fragment_is_raw {
   }
 };
 
+struct raw_fragment_is_needle_first {
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type &runtime_ev) const noexcept {
+    const auto &ev =
+        emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+    return fragment_is_raw{}(runtime_ev) && ev.ctx.global_dummy_prefix_pending &&
+           ev.request.vocab != nullptr &&
+           ev.request.vocab->tokenizer_pre_id ==
+               emel::model::data::tokenizer_pre::NEEDLE;
+  }
+};
+
+struct raw_fragment_is_needle_subsequent {
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type &runtime_ev) const noexcept {
+    const auto &ev =
+        emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+    return fragment_is_raw{}(runtime_ev) && !ev.ctx.global_dummy_prefix_pending &&
+           ev.request.vocab != nullptr &&
+           ev.request.vocab->tokenizer_pre_id ==
+               emel::model::data::tokenizer_pre::NEEDLE;
+  }
+};
+
+struct raw_fragment_is_standard {
+  template <class runtime_event_type>
+  bool operator()(const runtime_event_type &runtime_ev) const noexcept {
+    const auto &ev =
+        emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+    return fragment_is_raw{}(runtime_ev) && ev.request.vocab != nullptr &&
+           ev.request.vocab->tokenizer_pre_id !=
+               emel::model::data::tokenizer_pre::NEEDLE;
+  }
+};
+
 struct more_fragments_no_capacity {
   template <class runtime_event_type>
   bool operator()(const runtime_event_type &runtime_ev) const noexcept {
