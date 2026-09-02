@@ -149,13 +149,15 @@ materialize_codebook_q4(const std::span<const float> codebook) noexcept {
   return byte_planes;
 }
 
-inline void prepare_q4(const event::prepare_q4_request &request) noexcept {
-  const auto &view = request.weights;
+inline void prepare_q4(const emel::cact::loader::tensor_view &view,
+                       const std::span<uint8_t> indices,
+                       const std::span<uint8_t> indices_by_input32,
+                       const std::span<float> decoded_norms,
+                       const std::span<float> norms_by_group32) noexcept {
   const uint32_t out = view.shape[0];
-  const uint32_t in = view.shape[1];
   const uint32_t group = view.group;
   detail::layout layout{};
-  (void)detail::checked_layout<4u>(out, in, group, layout);
+  (void)detail::checked_layout<4u>(out, view.shape[1], group, layout);
   const uint32_t in_pad = layout.in_pad;
   const size_t index_count = static_cast<size_t>(out) * in_pad;
   const size_t blocked_rows = out / 32u * 32u;
@@ -163,16 +165,16 @@ inline void prepare_q4(const event::prepare_q4_request &request) noexcept {
   const size_t groups_per_row = in_pad / group;
   const uint8_t *base = static_cast<const uint8_t *>(view.data);
   for (size_t i = 0u; i < index_count; ++i)
-    request.indices[i] =
-        static_cast<uint8_t>(detail::unpack_index<4u>(base, i));
+    indices[i] = static_cast<uint8_t>(detail::unpack_index<4u>(base, i));
   for (size_t row = 0u; row < blocked_rows; row += 32u)
     for (size_t i = 0u; i < in_pad; ++i)
       for (size_t lane = 0u; lane < 32u; ++lane)
-        request.indices_by_input32[row * in_pad + i * 32u + lane] =
-            request.indices[(row + lane) * in_pad + i];
+        indices_by_input32[row * in_pad + i * 32u + lane] =
+            indices[(row + lane) * in_pad + i];
   const uint8_t *norms = base + static_cast<size_t>(layout.packed_bytes);
   for (size_t i = 0u; i < norm_count; ++i)
-    request.norms[i] = detail::fp16_to_fp32(detail::load_u16(norms + i * 2u));
+    decoded_norms[i] =
+        detail::fp16_to_fp32(detail::load_u16(norms + i * 2u));
   constexpr std::array<size_t, 32u> lookup32_raw_rows{
       0u,  1u,  2u,  3u,  16u, 17u, 18u, 19u,
       4u,  5u,  6u,  7u,  20u, 21u, 22u, 23u,
@@ -182,9 +184,8 @@ inline void prepare_q4(const event::prepare_q4_request &request) noexcept {
     for (size_t group_index = 0u; group_index < groups_per_row;
          ++group_index)
       for (size_t lane = 0u; lane < lookup32_raw_rows.size(); ++lane)
-        request.norms_by_group32[row * groups_per_row + group_index * 32u +
-                                 lane] =
-            request.norms[(row + lookup32_raw_rows[lane]) * groups_per_row +
+        norms_by_group32[row * groups_per_row + group_index * 32u + lane] =
+            decoded_norms[(row + lookup32_raw_rows[lane]) * groups_per_row +
                           group_index];
 }
 
@@ -999,23 +1000,12 @@ private:
 public:
   effect_prepare_q4(const effect_prepare_q4 &) noexcept = default;
   void operator()(const event::prepare_q4 &ev, context &ctx) const noexcept {
-    prepare_q4(ev.request);
-    const auto &view = ev.request.weights;
-    detail::layout layout{};
-    (void)detail::checked_layout<4u>(view.shape[0], view.shape[1], view.group,
-                                     layout);
-    const size_t index_count =
-        static_cast<size_t>(view.shape[0]) * layout.in_pad;
-    const size_t blocked_rows = view.shape[0] / 32u * 32u;
-    const size_t blocked_count = blocked_rows * layout.in_pad;
-    const size_t norm_count = index_count / view.group;
-    const size_t blocked_norm_count = blocked_count / view.group;
-    ev.request.prepared.publish(
-        static_cast<const uint8_t *>(view.data), view.shape[0], view.shape[1],
-        view.group, layout.in_pad, ev.request.indices.first(index_count),
-        ev.request.indices_by_input32.first(blocked_count),
-        ev.request.norms.first(norm_count),
-        ev.request.norms_by_group32.first(blocked_norm_count));
+    auto &prepared = ev.request.prepared;
+    prepare_q4(ev.request.weights, std::span<uint8_t>{prepared.indices_},
+               std::span<uint8_t>{prepared.indices_by_input32_},
+               std::span<float>{prepared.norms_},
+               std::span<float>{prepared.norms_by_group32_});
+    prepared.publish();
     ev.result.accepted = true;
     ++ctx.prepare_calls;
   }

@@ -454,13 +454,11 @@ struct basic_sm
       ev.prepare_calls += worker_prepare;
       ev.prepared_calls += worker_prepared;
     }
-    ev.prepared_index_bytes = this->context_.prepared_indices.size();
-    ev.prepared_input32_bytes =
-        this->context_.prepared_indices_by_input32.size();
-    ev.prepared_norm_bytes =
-        this->context_.prepared_norms.size() * sizeof(float);
+    ev.prepared_index_bytes = this->context_.prepared_index_bytes;
+    ev.prepared_input32_bytes = this->context_.prepared_input32_bytes;
+    ev.prepared_norm_bytes = this->context_.prepared_norm_bytes;
     ev.prepared_group32_norm_bytes =
-        this->context_.prepared_norms_by_group32.size() * sizeof(float);
+        this->context_.prepared_group32_norm_bytes;
     return handled;
   }
 

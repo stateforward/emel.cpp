@@ -474,10 +474,36 @@ struct context {
     cq_workspace.resize(plan.cq_workspace);
     a8_quantized.resize(plan.cq_workspace);
     a8_integer_values.resize(plan.cq_workspace);
-    prepared_indices.resize(plan.prepared_indices);
-    prepared_indices_by_input32.resize(plan.prepared_indices);
-    prepared_norms.resize(plan.prepared_norms);
-    prepared_norms_by_group32.resize(plan.prepared_norms_by_group32);
+    prepared_index_bytes = static_cast<size_t>(plan.prepared_indices);
+    prepared_input32_bytes = static_cast<size_t>(plan.prepared_indices);
+    prepared_norm_bytes =
+        static_cast<size_t>(plan.prepared_norms) * sizeof(float);
+    prepared_group32_norm_bytes =
+        static_cast<size_t>(plan.prepared_norms_by_group32) * sizeof(float);
+    const auto make_prepared = [](const tensor_view &view) {
+      return emel::kernel::cq::event::prepared_q4_view{
+          view.shape[0], view.shape[1], view.group};
+    };
+    prepared_embedding = make_prepared(bound.embedding);
+    for (uint32_t i = 0u; i < bound.layer_count; ++i) {
+      const auto &layer = bound.layers[i];
+      auto &prepared = prepared_layers[i];
+      prepared.q_proj = make_prepared(layer.q_proj);
+      prepared.k_proj = make_prepared(layer.k_proj);
+      prepared.v_proj = make_prepared(layer.v_proj);
+      prepared.gate_proj = make_prepared(layer.gate_proj);
+      prepared.out_proj = make_prepared(layer.out_proj);
+    }
+    prepared_mhc.phi_pre = make_prepared(bound.mhc.phi_pre);
+    prepared_mhc.phi_post = make_prepared(bound.mhc.phi_post);
+    prepared_mhc.phi_res = make_prepared(bound.mhc.phi_res);
+    for (uint32_t i = 0u; i < bound.engram_site_count; ++i) {
+      const auto &site = bound.engram_sites[i];
+      auto &prepared = prepared_engram_sites[i];
+      prepared.tables = make_prepared(site.tables);
+      prepared.key_proj = make_prepared(site.key_proj);
+      prepared.value_proj = make_prepared(site.value_proj);
+    }
     if (parallel_projection_wave)
       projection_pool.emplace(3u);
   }
@@ -535,10 +561,10 @@ struct context {
   std::vector<float> cq_workspace;
   std::vector<int8_t> a8_quantized;
   std::vector<float> a8_integer_values;
-  std::vector<uint8_t> prepared_indices;
-  std::vector<uint8_t> prepared_indices_by_input32;
-  std::vector<float> prepared_norms;
-  std::vector<float> prepared_norms_by_group32;
+  size_t prepared_index_bytes = 0u;
+  size_t prepared_input32_bytes = 0u;
+  size_t prepared_norm_bytes = 0u;
+  size_t prepared_group32_norm_bytes = 0u;
   emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook = {};
   const bool parallel_projection_wave = false;
   std::array<uint64_t, 3u> worker_projection_calls = {};

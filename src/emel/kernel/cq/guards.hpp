@@ -96,8 +96,9 @@ inline bool generic_ranges_supported(const event::gemv_request &request,
 }
 
 inline bool prepared_read_ranges_disjoint(
-    const event::prepared_q4_view &view, const event::prepared_codebook_q4 &codebook,
-    const void *write, const size_t write_bytes) noexcept {
+    const event::prepared_q4_view &view,
+    const event::prepared_codebook_q4 &codebook, const void *write,
+    const size_t write_bytes) noexcept {
   size_t indices_bytes = 0u;
   size_t blocked_indices_bytes = 0u;
   size_t norms_bytes = 0u;
@@ -283,17 +284,12 @@ prepare_supported(const event::prepare_q4_request &request) noexcept {
   detail::layout layout{};
   uint64_t index_count = 0u;
   uint64_t blocked_count = 0u;
-  uint64_t norm_count = 0u;
   uint64_t blocked_norm_count = 0u;
   const uint64_t blocked_rows =
       static_cast<uint64_t>(view.shape[0] / 32u * 32u);
   if (view.data == nullptr || view.bits != 4u ||
       view.group > detail::k_max_group ||
       !detail::is_power_of_two(view.group) ||
-      !span_has_data(request.indices) ||
-      !span_has_data(request.indices_by_input32) ||
-      !span_has_data(request.norms) ||
-      !span_has_data(request.norms_by_group32) ||
       !detail::checked_layout<4u>(view.shape[0], view.shape[1], view.group,
                                   layout) ||
       !detail::checked_multiply_u64(view.shape[0], layout.in_pad,
@@ -303,24 +299,18 @@ prepare_supported(const event::prepare_q4_request &request) noexcept {
       !detail::checked_multiply_u64(blocked_rows,
                                     layout.in_pad / view.group,
                                     blocked_norm_count) ||
-      layout.total_bytes > view.nbytes)
+      layout.total_bytes > view.nbytes ||
+      layout.total_bytes > std::numeric_limits<size_t>::max())
     return false;
-  norm_count = index_count / view.group;
-  size_t source_bytes = 0u;
-  size_t indices_bytes = 0u;
-  size_t blocked_indices_bytes = 0u;
-  size_t norms_bytes = 0u;
-  size_t blocked_norms_bytes = 0u;
-  if (layout.total_bytes > std::numeric_limits<size_t>::max() ||
-      request.indices.size() < index_count ||
-      request.indices_by_input32.size() < blocked_count ||
-      request.norms.size() < norm_count ||
-      request.norms_by_group32.size() < blocked_norm_count ||
-      !checked_bytes(layout.total_bytes, 1u, source_bytes) ||
-      !checked_bytes(index_count, sizeof(uint8_t), indices_bytes) ||
-      !checked_bytes(blocked_count, sizeof(uint8_t), blocked_indices_bytes) ||
-      !checked_bytes(norm_count, sizeof(float), norms_bytes) ||
-      !checked_bytes(blocked_norm_count, sizeof(float), blocked_norms_bytes))
+  const uint64_t norm_count = index_count / view.group;
+  const auto &prepared = request.prepared;
+  if (!prepared.capacity_valid() ||
+      prepared.out() != view.shape[0] || prepared.in() != view.shape[1] ||
+      prepared.group() != view.group || prepared.in_pad() != layout.in_pad ||
+      prepared.index_capacity() != index_count ||
+      prepared.input32_capacity() != blocked_count ||
+      prepared.norm_capacity() != norm_count ||
+      prepared.group32_norm_capacity() != blocked_norm_count)
     return false;
   const auto *source_data = static_cast<const uint8_t *>(view.data);
   const uint8_t *source_norms =
@@ -329,28 +319,7 @@ prepare_supported(const event::prepare_q4_request &request) noexcept {
     if (!std::isfinite(
             detail::fp16_to_fp32(detail::load_u16(source_norms + i * 2u))))
       return false;
-  const void *source = source_data;
-  void *indices = request.indices.data();
-  void *blocked_indices = request.indices_by_input32.data();
-  void *norms = request.norms.data();
-  void *blocked_norms = request.norms_by_group32.data();
-  return ranges_disjoint(source, source_bytes, indices, indices_bytes) &&
-         ranges_disjoint(source, source_bytes, blocked_indices,
-                         blocked_indices_bytes) &&
-         ranges_disjoint(source, source_bytes, norms, norms_bytes) &&
-         ranges_disjoint(source, source_bytes, blocked_norms,
-                         blocked_norms_bytes) &&
-         ranges_disjoint(indices, indices_bytes, blocked_indices,
-                         blocked_indices_bytes) &&
-         ranges_disjoint(indices, indices_bytes, norms, norms_bytes) &&
-         ranges_disjoint(indices, indices_bytes, blocked_norms,
-                         blocked_norms_bytes) &&
-         ranges_disjoint(blocked_indices, blocked_indices_bytes, norms,
-                         norms_bytes) &&
-         ranges_disjoint(blocked_indices, blocked_indices_bytes, blocked_norms,
-                         blocked_norms_bytes) &&
-         ranges_disjoint(norms, norms_bytes, blocked_norms,
-                         blocked_norms_bytes);
+  return true;
 }
 inline bool prepared_codebook_structure_supported(
     const event::prepared_codebook_q4 &codebook) noexcept {
@@ -369,36 +338,12 @@ struct guard_prepare_codebook_q4 {
 inline bool prepared_structure_supported(
     const event::prepared_q4_view &view) noexcept {
   detail::layout layout{};
-  if (!view.published() || view.source() == nullptr ||
-      view.group() > detail::k_max_group ||
-      !detail::is_power_of_two(view.group()) ||
-      !detail::checked_layout<4u>(view.out(), view.in(), view.group(), layout) ||
-      view.in_pad() != layout.in_pad)
-    return false;
-  uint64_t index_count = 0u;
-  uint64_t blocked_count = 0u;
-  uint64_t blocked_norm_count = 0u;
-  const uint64_t blocked_rows =
-      static_cast<uint64_t>(view.out() / 32u * 32u);
-  if (!detail::checked_multiply_u64(view.out(), view.in_pad(), index_count) ||
-      !detail::checked_multiply_u64(blocked_rows, view.in_pad(),
-                                    blocked_count) ||
-      !detail::checked_multiply_u64(blocked_rows,
-                                    view.in_pad() / view.group(),
-                                    blocked_norm_count))
-    return false;
-  const uint64_t norm_count = index_count / view.group();
-  return index_count <= std::numeric_limits<size_t>::max() &&
-         norm_count <= std::numeric_limits<size_t>::max() &&
-         blocked_count <= std::numeric_limits<size_t>::max() &&
-         blocked_norm_count <= std::numeric_limits<size_t>::max() &&
-         span_has_data(view.indices()) &&
-         span_has_data(view.indices_by_input32()) && span_has_data(view.norms()) &&
-         span_has_data(view.norms_by_group32()) &&
-         view.indices().size() >= index_count &&
-         view.indices_by_input32().size() >= blocked_count &&
-         view.norms().size() >= norm_count &&
-         view.norms_by_group32().size() >= blocked_norm_count;
+  return view.published() && view.capacity_valid() &&
+         view.group() <= detail::k_max_group &&
+         detail::is_power_of_two(view.group()) &&
+         detail::checked_layout<4u>(view.out(), view.in(), view.group(),
+                                    layout) &&
+         view.in_pad() == layout.in_pad;
 }
 
 struct guard_prepare_q4 {

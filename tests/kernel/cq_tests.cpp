@@ -1,5 +1,6 @@
 #include "emel/kernel/cq/detail.hpp"
 #include "emel/kernel/cq/sm.hpp"
+#include "../allocation_tracker.hpp"
 #include <array>
 #include <cfenv>
 #include <cmath>
@@ -227,7 +228,7 @@ TEST_CASE("CQ4 prepared objects are default-invalid") {
   const emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
   CHECK_FALSE(prepared.published());
   CHECK_FALSE(prepared_codebook.published());
-  CHECK(prepared.source() == nullptr);
+  CHECK_FALSE(prepared.capacity_valid());
   CHECK(prepared.indices().empty());
   CHECK(prepared_codebook.values().empty());
 }
@@ -247,150 +248,112 @@ TEST_CASE("CQ4 prepared route rejects a zero group without evaluating counts") {
   CHECK_FALSE(result.accepted);
 }
 
-TEST_CASE("CQ4 prepare guard rejects tensor byte-size arithmetic overflow") {
-  constexpr uint64_t extent = std::numeric_limits<uint32_t>::max();
-  constexpr uint64_t index_count = extent * extent;
-  const auto *readable = reinterpret_cast<const uint8_t *>(uintptr_t{1u});
-  auto *bytes = reinterpret_cast<uint8_t *>(uintptr_t{1u});
-  auto *floats = reinterpret_cast<float *>(uintptr_t{1u});
-  const tensor_view weights{.dtype = 3u,
-                            .ndim = 2u,
-                            .shape = {static_cast<uint32_t>(extent),
-                                      static_cast<uint32_t>(extent), 0u, 0u},
-                            .nbytes = std::numeric_limits<uint64_t>::max(),
-                            .group = 1u,
-                            .bits = 4u,
-                            .data = readable};
-  emel::kernel::cq::event::prepared_q4_view prepared{};
-  const emel::kernel::cq::event::prepare_q4_request request{
-      weights,
-      std::span<uint8_t>{bytes, static_cast<size_t>(index_count)},
-      std::span<uint8_t>{bytes, static_cast<size_t>(index_count)},
-      std::span<float>{floats, static_cast<size_t>(index_count)},
-      std::span<float>{floats, static_cast<size_t>(index_count)},
-      prepared};
+TEST_CASE("CQ4 prepared capacity rejects invalid geometry") {
+  const emel::kernel::cq::event::prepared_q4_view zero_out{0u, 128u, 128u};
+  const emel::kernel::cq::event::prepared_q4_view zero_in{32u, 0u, 128u};
+  const emel::kernel::cq::event::prepared_q4_view zero_group{32u, 128u, 0u};
+  const emel::kernel::cq::event::prepared_q4_view non_power_group{32u, 128u,
+                                                                  3u};
+  CHECK_FALSE(zero_out.capacity_valid());
+  CHECK_FALSE(zero_in.capacity_valid());
+  CHECK_FALSE(zero_group.capacity_valid());
+  CHECK_FALSE(non_power_group.capacity_valid());
+}
+
+TEST_CASE("CQ4 prepare rejects geometry that differs from owned capacity") {
+  constexpr uint32_t out = 32u, in = 128u, group = 128u;
+  const auto packed = blob<4u>(std::vector<uint32_t>(out * in, 3u), out, in,
+                                group, std::vector<uint16_t>(out, 0x3c00u));
+  const auto weights = view(packed, out, in, group, 4u);
+  emel::kernel::cq::event::prepared_q4_view prepared{out + 1u, in, group};
+  const emel::kernel::cq::event::prepare_q4_request request{weights, prepared};
   emel::kernel::cq::event::dispatch_result result{};
-  const emel::kernel::cq::event::prepare_q4 event{request, result};
-
-  CHECK_FALSE(emel::kernel::cq::guard::guard_prepare_q4{}(
-      event, emel::kernel::cq::action::context{}));
-
   emel::kernel::cq::sm machine;
-  CHECK_FALSE(machine.process_event(event));
+  CHECK_FALSE(machine.process_event(
+      emel::kernel::cq::event::prepare_q4{request, result}));
   CHECK_FALSE(result.accepted);
   CHECK_FALSE(prepared.published());
 }
 
-TEST_CASE("CQ4 prepare rejects all source and destination overlaps without writes") {
+TEST_CASE("CQ4 prepare refreshes owned payload through trusted dispatch") {
   constexpr uint32_t out = 32u, in = 128u, group = 128u;
-  const auto packed = blob<4u>(std::vector<uint32_t>(out * in, 3u), out, in,
-                                group, std::vector<uint16_t>(out, 0x3c00u));
+  auto packed = blob<4u>(std::vector<uint32_t>(out * in, 3u), out, in, group,
+                          std::vector<uint16_t>(out, 0x3c00u));
   const auto weights = view(packed, out, in, group, 4u);
-  const size_t index_count = static_cast<size_t>(out) * in;
-  const size_t norm_count = out;
-  const size_t blocked_norms = blocked_norm_count(weights);
-
-  for (uint32_t overlap = 0u; overlap < 10u; ++overlap) {
-    std::vector<uint8_t> indices_storage(index_count, 17u);
-    std::vector<uint8_t> blocked_indices_storage(index_count, 19u);
-    std::vector<float> norms_storage(norm_count, 23.0f);
-    std::vector<float> blocked_norms_storage(blocked_norms, 29.0f);
-    std::span<uint8_t> indices{indices_storage};
-    std::span<uint8_t> blocked_indices{blocked_indices_storage};
-    std::span<float> norms{norms_storage};
-    std::span<float> blocked_norm_values{blocked_norms_storage};
-    tensor_view overlapping_weights = weights;
-    if (overlap == 0u)
-      indices = {const_cast<uint8_t *>(packed.data()), index_count};
-    else if (overlap == 1u)
-      blocked_indices = {const_cast<uint8_t *>(packed.data()), index_count};
-    else if (overlap == 2u)
-      norms = {reinterpret_cast<float *>(const_cast<uint8_t *>(packed.data())),
-               norm_count};
-    else if (overlap == 3u)
-      blocked_norm_values = {
-          reinterpret_cast<float *>(const_cast<uint8_t *>(packed.data())),
-          blocked_norms};
-    else if (overlap == 4u)
-      blocked_indices = indices;
-    else if (overlap == 5u)
-      norms = {reinterpret_cast<float *>(indices.data()), norm_count};
-    else if (overlap == 6u)
-      blocked_norm_values = {reinterpret_cast<float *>(indices.data()),
-                             blocked_norms};
-    else if (overlap == 7u)
-      norms = {reinterpret_cast<float *>(blocked_indices.data()), norm_count};
-    else if (overlap == 8u)
-      blocked_norm_values = {
-          reinterpret_cast<float *>(blocked_indices.data()), blocked_norms};
-    else
-      blocked_norm_values = norms;
-    const auto indices_before = indices_storage;
-    const auto blocked_indices_before = blocked_indices_storage;
-    const auto norms_before = norms_storage;
-    const auto blocked_norms_before = blocked_norms_storage;
-    emel::kernel::cq::event::prepared_q4_view prepared{};
-    const emel::kernel::cq::event::prepare_q4_request request{
-        overlapping_weights, indices, blocked_indices, norms,
-        blocked_norm_values, prepared};
-    emel::kernel::cq::event::dispatch_result result{};
-    emel::kernel::cq::sm machine;
-
-    CHECK_FALSE(machine.process_event(
-        emel::kernel::cq::event::prepare_q4{request, result}));
-    CHECK_FALSE(result.accepted);
-    CHECK(indices_storage == indices_before);
-    CHECK(blocked_indices_storage == blocked_indices_before);
-    CHECK(norms_storage == norms_before);
-    CHECK(blocked_norms_storage == blocked_norms_before);
-    CHECK_FALSE(prepared.published());
-  }
+  emel::kernel::cq::event::prepared_q4_view prepared{out, in, group};
+  const emel::kernel::cq::event::prepare_q4_request request{weights, prepared};
+  emel::kernel::cq::sm machine;
+  emel::kernel::cq::event::dispatch_result first_result{};
+  REQUIRE(machine.process_event(
+      emel::kernel::cq::event::prepare_q4{request, first_result}));
+  packed[0] = 0x44u;
+  emel::kernel::cq::event::dispatch_result second_result{};
+  REQUIRE(machine.process_event(
+      emel::kernel::cq::event::prepare_q4{request, second_result}));
+  CHECK(prepared.indices().front() == 4u);
 }
 
-TEST_CASE("CQ4 prepare rejects every nonempty null destination without writes") {
+
+TEST_CASE("CQ4 preparation dispatch does not allocate") {
   constexpr uint32_t out = 32u, in = 128u, group = 128u;
   const auto packed = blob<4u>(std::vector<uint32_t>(out * in, 3u), out, in,
                                 group, std::vector<uint16_t>(out, 0x3c00u));
   const auto weights = view(packed, out, in, group, 4u);
-  std::vector<uint8_t> indices(static_cast<size_t>(out) * in, 17u);
-  std::vector<uint8_t> blocked_indices(indices.size(), 19u);
-  std::vector<float> norms(out, 23.0f);
-  std::vector<float> blocked_norms(blocked_norm_count(weights), 29.0f);
+  emel::kernel::cq::event::prepared_q4_view prepared{out, in, group};
+  const emel::kernel::cq::event::prepare_q4_request request{weights, prepared};
+  emel::kernel::cq::event::dispatch_result result{};
+  emel::kernel::cq::sm machine;
+  emel::test::allocation::allocation_scope allocations{};
+  REQUIRE(machine.process_event(
+      emel::kernel::cq::event::prepare_q4{request, result}));
+  CHECK(result.accepted);
+  CHECK(allocations.allocations() == 0u);
+}
 
-  for (uint32_t missing = 0u; missing < 4u; ++missing) {
-    auto indices_span = std::span<uint8_t>{indices};
-    auto blocked_indices_span = std::span<uint8_t>{blocked_indices};
-    auto norms_span = std::span<float>{norms};
-    auto blocked_norms_span = std::span<float>{blocked_norms};
-    if (missing == 0u)
-      indices_span = {static_cast<uint8_t *>(nullptr), indices.size()};
-    else if (missing == 1u)
-      blocked_indices_span = {static_cast<uint8_t *>(nullptr),
-                              blocked_indices.size()};
-    else if (missing == 2u)
-      norms_span = {static_cast<float *>(nullptr), norms.size()};
-    else
-      blocked_norms_span = {static_cast<float *>(nullptr),
-                            blocked_norms.size()};
-    const auto indices_before = indices;
-    const auto blocked_indices_before = blocked_indices;
-    const auto norms_before = norms;
-    const auto blocked_norms_before = blocked_norms;
-    emel::kernel::cq::event::prepared_q4_view prepared{};
-    const emel::kernel::cq::event::prepare_q4_request request{
-        weights, indices_span, blocked_indices_span, norms_span,
-        blocked_norms_span, prepared};
-    emel::kernel::cq::event::dispatch_result result{};
-    emel::kernel::cq::sm machine;
+TEST_CASE("CQ4 prepared payload owns selectors norms and codebook") {
+  constexpr uint32_t out = 32u, in = 128u, group = 128u;
+  std::vector<uint32_t> selectors(static_cast<size_t>(out) * in, 3u);
+  std::vector<uint16_t> norm_bits(out, 0x3c00u);
+  auto packed = blob<4u>(selectors, out, in, group, norm_bits);
+  const auto weights = view(packed, out, in, group, 4u);
+  emel::kernel::cq::event::prepared_q4_view prepared{out, in, group};
+  emel::kernel::cq::event::dispatch_result prepare_result{};
+  const emel::kernel::cq::event::prepare_q4_request prepare_request{
+      weights, prepared};
+  emel::kernel::cq::sm machine;
+  REQUIRE(machine.process_event(
+      emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
 
-    CHECK_FALSE(machine.process_event(
-        emel::kernel::cq::event::prepare_q4{request, result}));
-    CHECK(indices == indices_before);
-    CHECK(blocked_indices == blocked_indices_before);
-    CHECK(norms == norms_before);
-    CHECK(blocked_norms == blocked_norms_before);
-    CHECK_FALSE(prepared.published());
-  }
+  std::array<float, emel::cact::loader::k_codebook_len> codebook{};
+  codebook[15u] = 0.25f;
+  emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
+  emel::kernel::cq::event::dispatch_result codebook_result{};
+  const emel::kernel::cq::event::prepare_codebook_q4_request codebook_request{
+      codebook, prepared_codebook};
+  REQUIRE(machine.process_event(emel::kernel::cq::event::prepare_codebook_q4{
+      codebook_request, codebook_result}));
+
+  std::array<float, in> before{};
+  std::array<float, in> after{};
+  const emel::kernel::cq::event::prepared_dequant_rows_request before_request{
+      prepared, prepared_codebook, 0u, 1u, 1.0f, before};
+  emel::kernel::cq::event::dispatch_result before_result{};
+  REQUIRE(machine.process_event(
+      emel::kernel::cq::event::execute_prepared_dequant_q4{before_request,
+                                                           before_result}));
+
+  std::fill(packed.begin(), packed.end(), uint8_t{0xffu});
+  codebook.fill(1.0e30f);
+  const emel::kernel::cq::event::prepared_dequant_rows_request after_request{
+      prepared, prepared_codebook, 0u, 1u, 1.0f, after};
+  emel::kernel::cq::event::dispatch_result after_result{};
+  REQUIRE(machine.process_event(
+      emel::kernel::cq::event::execute_prepared_dequant_q4{after_request,
+                                                           after_result}));
+  CHECK(after == before);
+  CHECK(prepared.indices().front() == 3u);
+  CHECK(prepared.norms().front() == 1.0f);
+  CHECK(prepared_codebook.values()[15u] == 0.25f);
 }
 TEST_CASE("CQ checked layout rejects uint32 padded width overflow") {
   emel::kernel::cq::detail::layout checked{};
@@ -887,11 +850,10 @@ TEST_CASE("CQ public prepared routes reject non-finite scales without writes") {
   std::vector<uint8_t> indices_by_input32(static_cast<size_t>(out) * in);
   std::vector<float> norms(out);
   std::vector<float> norms_by_group32(out);
-  emel::kernel::cq::event::prepared_q4_view prepared{};
+  emel::kernel::cq::event::prepared_q4_view prepared{out, in, group};
   emel::kernel::cq::sm prepare_machine;
   emel::kernel::cq::event::dispatch_result prepare_result{};
-  const emel::kernel::cq::event::prepare_q4_request prepare_request{
-      weights, indices, indices_by_input32, norms, norms_by_group32, prepared};
+  const emel::kernel::cq::event::prepare_q4_request prepare_request{weights, prepared};
   REQUIRE(prepare_machine.process_event(
       emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
   std::array<float, 28u> codebook{};
@@ -981,31 +943,17 @@ TEST_CASE("CQ public prepared routes reject non-finite scales without writes") {
   }
 }
 #if defined(__linux__)
-TEST_CASE("CQ4 prepared row execution reads only the requested row") {
+TEST_CASE("CQ4 prepared row execution remains local to owned storage") {
   constexpr uint32_t group = 128u, in = 128u, out = 32768u;
   const auto packed = blob<4u>(std::vector<uint32_t>(
                                     static_cast<size_t>(out) * in, 3u),
                                 out, in, group,
                                 std::vector<uint16_t>(out, 0x3c00u));
   const auto weights = view(packed, out, in, group, 4u);
-  const size_t index_count = static_cast<size_t>(out) * in;
-  const size_t norm_count = out;
-  protected_tail_mapping indices_storage(index_count);
-  protected_tail_mapping blocked_indices_storage(index_count);
-  protected_tail_mapping norms_storage(norm_count * sizeof(float));
-  protected_tail_mapping blocked_norms_storage(norm_count * sizeof(float));
-  REQUIRE(indices_storage.valid());
-  REQUIRE(blocked_indices_storage.valid());
-  REQUIRE(norms_storage.valid());
-  REQUIRE(blocked_norms_storage.valid());
-  auto indices = indices_storage.span<uint8_t>(index_count);
-  auto blocked_indices = blocked_indices_storage.span<uint8_t>(index_count);
-  auto norms = norms_storage.span<float>(norm_count);
-  auto blocked_norms = blocked_norms_storage.span<float>(norm_count);
-  emel::kernel::cq::event::prepared_q4_view prepared{};
+  emel::kernel::cq::event::prepared_q4_view prepared{out, in, group};
   emel::kernel::cq::event::dispatch_result prepare_result{};
-  const emel::kernel::cq::event::prepare_q4_request prepare_request{
-      weights, indices, blocked_indices, norms, blocked_norms, prepared};
+  const emel::kernel::cq::event::prepare_q4_request prepare_request{weights,
+                                                                    prepared};
   emel::kernel::cq::sm machine;
   REQUIRE(machine.process_event(
       emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
@@ -1017,10 +965,9 @@ TEST_CASE("CQ4 prepared row execution reads only the requested row") {
       codebook, prepared_codebook};
   REQUIRE(machine.process_event(emel::kernel::cq::event::prepare_codebook_q4{
       codebook_request, codebook_result}));
-  REQUIRE(indices_storage.protect_tail());
-  REQUIRE(blocked_indices_storage.protect_tail());
-  REQUIRE(norms_storage.protect_tail());
-  REQUIRE(blocked_norms_storage.protect_tail());
+  protected_tail_mapping unrelated_storage(1u << 20u);
+  REQUIRE(unrelated_storage.valid());
+  REQUIRE(unrelated_storage.protect_tail());
 
   const pid_t child = ::fork();
   REQUIRE(child >= 0);
@@ -1044,6 +991,7 @@ TEST_CASE("CQ4 prepared row execution reads only the requested row") {
 }
 #endif
 
+
 TEST_CASE("CQ4 prepare accepts only selectors materialized from packed source") {
   constexpr uint32_t group = 128u, in = 128u, out = 32u;
   const auto packed = blob<4u>(std::vector<uint32_t>(out * in, 15u), out, in,
@@ -1053,10 +1001,9 @@ TEST_CASE("CQ4 prepare accepts only selectors materialized from packed source") 
   std::vector<uint8_t> blocked_indices(indices.size());
   std::vector<float> norms(out);
   std::vector<float> blocked_norms(blocked_norm_count(weights));
-  emel::kernel::cq::event::prepared_q4_view prepared{};
+  emel::kernel::cq::event::prepared_q4_view prepared{out, in, group};
   emel::kernel::cq::event::dispatch_result prepare_result{};
-  const emel::kernel::cq::event::prepare_q4_request prepare_request{
-      weights, indices, blocked_indices, norms, blocked_norms, prepared};
+  const emel::kernel::cq::event::prepare_q4_request prepare_request{weights, prepared};
   emel::kernel::cq::sm machine;
 
   REQUIRE(machine.process_event(
@@ -1079,9 +1026,8 @@ TEST_CASE("CQ4 prepare rejects non-finite source norms without publication") {
     std::vector<uint8_t> blocked_indices(indices.size(), 19u);
     std::vector<float> norms(out, 23.0f);
     std::vector<float> blocked_norms(blocked_norm_count(weights), 29.0f);
-    emel::kernel::cq::event::prepared_q4_view prepared{};
-    const emel::kernel::cq::event::prepare_q4_request prepare_request{
-        weights, indices, blocked_indices, norms, blocked_norms, prepared};
+    emel::kernel::cq::event::prepared_q4_view prepared{out, in, group};
+    const emel::kernel::cq::event::prepare_q4_request prepare_request{weights, prepared};
     emel::kernel::cq::event::dispatch_result prepare_result{};
     emel::kernel::cq::sm machine;
 
@@ -1105,10 +1051,9 @@ TEST_CASE("CQ prepared dequant rejects a nonempty null output without writes") {
   std::vector<uint8_t> blocked_indices(indices.size());
   std::vector<float> norms(out);
   std::vector<float> blocked_norms(blocked_norm_count(weights));
-  emel::kernel::cq::event::prepared_q4_view prepared{};
+  emel::kernel::cq::event::prepared_q4_view prepared{out, in, group};
   emel::kernel::cq::event::dispatch_result prepare_result{};
-  const emel::kernel::cq::event::prepare_q4_request prepare_request{
-      weights, indices, blocked_indices, norms, blocked_norms, prepared};
+  const emel::kernel::cq::event::prepare_q4_request prepare_request{weights, prepared};
   emel::kernel::cq::sm machine;
   REQUIRE(machine.process_event(
       emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
@@ -1320,16 +1265,15 @@ TEST_CASE("CQ4 preparation preserves selectors norms and numerical identity") {
   std::vector<uint8_t> layout_indices_by_input32(layout_out * layout_in);
   std::vector<float> layout_norms(layout_out * layout_in / layout_group);
   std::vector<float> layout_norms_by_group32(blocked_norm_count(layout_view));
-  emel::kernel::cq::event::prepared_q4_view layout_prepared{};
-  const emel::kernel::cq::event::prepare_q4_request layout_prepare_request{
-      layout_view, layout_indices, layout_indices_by_input32, layout_norms,
-      layout_norms_by_group32, layout_prepared};
+  emel::kernel::cq::event::prepared_q4_view layout_prepared{
+      layout_out, layout_in, layout_group};
+  const emel::kernel::cq::event::prepare_q4_request layout_prepare_request{layout_view, layout_prepared};
   emel::kernel::cq::sm sm;
   emel::kernel::cq::event::dispatch_result layout_prepare_result{};
   REQUIRE(sm.process_event(emel::kernel::cq::event::prepare_q4{
       layout_prepare_request, layout_prepare_result}));
   CHECK(layout_prepared.published());
-  CHECK(layout_prepared.source() == layout_view.data);
+  CHECK(layout_prepared.capacity_valid());
   CHECK(layout_prepared.indices().size() == layout_out * layout_in);
   CHECK(layout_prepared.norms().size() ==
         layout_out * layout_in / layout_group);
@@ -1345,7 +1289,6 @@ TEST_CASE("CQ4 preparation preserves selectors norms and numerical identity") {
       cb, prepared_codebook};
   REQUIRE(sm.process_event(emel::kernel::cq::event::prepare_codebook_q4{
       codebook_request, codebook_result}));
-  CHECK(prepared_codebook.published());
   std::array<float, layout_in> layout_activation{};
   std::array<float, layout_in> layout_workspace{};
   std::array<float, layout_out> rejected_output{};
@@ -1377,10 +1320,9 @@ TEST_CASE("CQ4 preparation preserves selectors norms and numerical identity") {
   std::vector<float> canonical_norms(canonical_out);
   std::vector<float> canonical_norms_by_group32(
       blocked_norm_count(canonical_view));
-  emel::kernel::cq::event::prepared_q4_view canonical_prepared{};
-  const emel::kernel::cq::event::prepare_q4_request canonical_prepare_request{
-      canonical_view, canonical_indices, canonical_indices_by_input32,
-      canonical_norms, canonical_norms_by_group32, canonical_prepared};
+  emel::kernel::cq::event::prepared_q4_view canonical_prepared{
+      canonical_out, canonical_in, canonical_group};
+  const emel::kernel::cq::event::prepare_q4_request canonical_prepare_request{canonical_view, canonical_prepared};
   emel::kernel::cq::event::dispatch_result canonical_prepare_result{};
   REQUIRE(sm.process_event(emel::kernel::cq::event::prepare_q4{
       canonical_prepare_request, canonical_prepare_result}));
@@ -1428,9 +1370,8 @@ TEST_CASE("CQ4 prepared full route rejects activation workspace alias") {
   std::vector<uint8_t> indices_by_input32(out * in);
   std::vector<float> norms(out);
   std::vector<float> norms_by_group32(blocked_norm_count(weights));
-  emel::kernel::cq::event::prepared_q4_view prepared{};
-  const emel::kernel::cq::event::prepare_q4_request direct_prepare_request{
-      weights, indices, indices_by_input32, norms, norms_by_group32, prepared};
+  emel::kernel::cq::event::prepared_q4_view prepared{out, in, group};
+  const emel::kernel::cq::event::prepare_q4_request direct_prepare_request{weights, prepared};
   emel::kernel::cq::event::dispatch_result direct_prepare_result{};
   emel::kernel::cq::sm direct_prepare_machine;
   REQUIRE(direct_prepare_machine.process_event(
@@ -1468,9 +1409,8 @@ TEST_CASE("CQ4 prepared batch rejects overlapping outputs without writes") {
   std::vector<uint8_t> indices_by_input32(out * in);
   std::vector<float> norms(out);
   std::vector<float> norms_by_group32(blocked_norm_count(weights));
-  emel::kernel::cq::event::prepared_q4_view prepared{};
-  const emel::kernel::cq::event::prepare_q4_request direct_prepare_request{
-      weights, indices, indices_by_input32, norms, norms_by_group32, prepared};
+  emel::kernel::cq::event::prepared_q4_view prepared{out, in, group};
+  const emel::kernel::cq::event::prepare_q4_request direct_prepare_request{weights, prepared};
   emel::kernel::cq::event::dispatch_result direct_prepare_result{};
   emel::kernel::cq::sm direct_prepare_machine;
   REQUIRE(direct_prepare_machine.process_event(
@@ -1521,11 +1461,10 @@ TEST_CASE(
   std::vector<float> norms(out * in / group);
   std::vector<float> norms_by_group32(blocked_norm_count(v));
   std::vector<uint8_t> indices_by_input32(out * in);
-  emel::kernel::cq::event::prepared_q4_view prepared{};
+  emel::kernel::cq::event::prepared_q4_view prepared{out, in, group};
   emel::kernel::cq::sm sm;
   emel::kernel::cq::event::dispatch_result prepare_result{};
-  const emel::kernel::cq::event::prepare_q4_request prepare_request{
-      v, indices, indices_by_input32, norms, norms_by_group32, prepared};
+  const emel::kernel::cq::event::prepare_q4_request prepare_request{v, prepared};
   REQUIRE(sm.process_event(
       emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
   emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
@@ -1588,10 +1527,6 @@ TEST_CASE("CQ4 realistic batch4 matches independent scalar and prepared calls") 
   struct target_fixture {
     std::vector<uint8_t> blob;
     tensor_view source{};
-    std::vector<uint8_t> indices;
-    std::vector<uint8_t> indices_by_input32;
-    std::vector<float> norms;
-    std::vector<float> norms_by_group32;
     emel::kernel::cq::event::prepared_q4_view prepared{};
     std::vector<float> scalar;
     std::vector<float> separate;
@@ -1626,15 +1561,11 @@ TEST_CASE("CQ4 realistic batch4 matches independent scalar and prepared calls") 
     }
     target.blob = blob<4u>(selectors, out, in, group, norm_bits);
     target.source = view(target.blob, out, in, group, 4u);
-    target.indices.resize(static_cast<size_t>(out) * in);
-    target.indices_by_input32.resize(static_cast<size_t>(out) * in);
-    target.norms.resize(static_cast<size_t>(out) * in / group);
+    target.prepared =
+        emel::kernel::cq::event::prepared_q4_view{out, in, group};
     emel::kernel::cq::event::dispatch_result prepare_result{};
-    const size_t blocked_rows = out / 32u * 32u;
-    target.norms_by_group32.resize(blocked_rows * in / group);
     const emel::kernel::cq::event::prepare_q4_request prepare_request{
-        target.source, target.indices, target.indices_by_input32, target.norms,
-        target.norms_by_group32, target.prepared};
+        target.source, target.prepared};
     REQUIRE(sm.process_event(
         emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
 
@@ -1708,10 +1639,9 @@ TEST_CASE("CQ4 prepared route rejects group tails and preserves row tails") {
     std::vector<uint8_t> indices_by_input32(static_cast<size_t>(out) * in);
     std::vector<float> norms(static_cast<size_t>(out) * 2u);
     std::vector<float> norms_by_group32(blocked_norm_count(v));
-    emel::kernel::cq::event::prepared_q4_view prepared{};
+    emel::kernel::cq::event::prepared_q4_view prepared{out, in, group};
     emel::kernel::cq::event::dispatch_result prepare_result{};
-    const emel::kernel::cq::event::prepare_q4_request prepare_request{
-        v, indices, indices_by_input32, norms, norms_by_group32, prepared};
+    const emel::kernel::cq::event::prepare_q4_request prepare_request{v, prepared};
     REQUIRE(sm.process_event(
         emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
     std::vector<float> activation(in);
@@ -1746,10 +1676,9 @@ TEST_CASE("CQ4 prepared route rejects group tails and preserves row tails") {
   std::vector<uint8_t> indices_by_input32(static_cast<size_t>(out) * in);
   std::vector<float> norms(out);
   std::vector<float> norms_by_group32(blocked_norm_count(v));
-  emel::kernel::cq::event::prepared_q4_view prepared{};
+  emel::kernel::cq::event::prepared_q4_view prepared{out, in, group};
   emel::kernel::cq::event::dispatch_result prepare_result{};
-  const emel::kernel::cq::event::prepare_q4_request prepare_request{
-      v, indices, indices_by_input32, norms, norms_by_group32, prepared};
+  const emel::kernel::cq::event::prepare_q4_request prepare_request{v, prepared};
   REQUIRE(sm.process_event(
       emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
   std::array<float, in> activation{};
@@ -1802,11 +1731,10 @@ TEST_CASE("CQ4 prepared norm hoist matches scalar for realistic random tensors")
   std::vector<uint8_t> indices_by_input32(static_cast<size_t>(out) * in);
   std::vector<float> norms(static_cast<size_t>(out) * in / group);
   std::vector<float> norms_by_group32(static_cast<size_t>(out) * in / group);
-  emel::kernel::cq::event::prepared_q4_view prepared{};
+  emel::kernel::cq::event::prepared_q4_view prepared{out, in, group};
   emel::kernel::cq::sm sm;
   emel::kernel::cq::event::dispatch_result prepare_result{};
-  const emel::kernel::cq::event::prepare_q4_request prepare_request{
-      v, indices, indices_by_input32, norms, norms_by_group32, prepared};
+  const emel::kernel::cq::event::prepare_q4_request prepare_request{v, prepared};
   REQUIRE(sm.process_event(
       emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
   emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
@@ -1868,11 +1796,10 @@ TEST_CASE("CQ4 prepared block32 input-major route preserves exact output") {
     norm_bits[i] = static_cast<uint16_t>(0x3000u + i);
   const auto b = blob<4u>(source_indices, out, in, group, norm_bits);
   const auto v = view(b, out, in, group, 4u);
-  emel::kernel::cq::event::prepared_q4_view prepared{};
+  emel::kernel::cq::event::prepared_q4_view prepared{out, in, group};
   emel::kernel::cq::sm sm;
   emel::kernel::cq::event::dispatch_result prepare_result{};
-  const emel::kernel::cq::event::prepare_q4_request prepare_request{
-      v, indices, indices_by_input32, norms, norms_by_group32, prepared};
+  const emel::kernel::cq::event::prepare_q4_request prepare_request{v, prepared};
   REQUIRE(sm.process_event(
       emel::kernel::cq::event::prepare_q4{prepare_request, prepare_result}));
   emel::kernel::cq::event::prepared_codebook_q4 prepared_codebook{};
@@ -1973,9 +1900,8 @@ TEST_CASE("CQ4 prepared block64 matches block32 bitwise including tails and scal
     std::vector<float> norms(static_cast<size_t>(out) * in / group);
     std::vector<float> norms_by_group32(
         static_cast<size_t>(out / 32u * 32u) * in / group);
-    emel::kernel::cq::event::prepared_q4_view prepared{};
-    const emel::kernel::cq::event::prepare_q4_request direct_prepare_request{
-      v, indices, indices_by_input32, norms, norms_by_group32, prepared};
+    emel::kernel::cq::event::prepared_q4_view prepared{out, in, group};
+    const emel::kernel::cq::event::prepare_q4_request direct_prepare_request{v, prepared};
   emel::kernel::cq::event::dispatch_result direct_prepare_result{};
   emel::kernel::cq::sm direct_prepare_machine;
   REQUIRE(direct_prepare_machine.process_event(
@@ -2050,9 +1976,8 @@ TEST_CASE("CQ4 prepared dot-only dispatch matches full route and rejects malform
   std::vector<uint8_t> indices_by_input32(static_cast<size_t>(out / 32u * 32u) * in);
   std::vector<float> norms(out);
   std::vector<float> norms_by_group32(out / 32u * 32u);
-  emel::kernel::cq::event::prepared_q4_view prepared{};
-  const emel::kernel::cq::event::prepare_q4_request direct_prepare_request{
-      v, indices, indices_by_input32, norms, norms_by_group32, prepared};
+  emel::kernel::cq::event::prepared_q4_view prepared{out, in, group};
+  const emel::kernel::cq::event::prepare_q4_request direct_prepare_request{v, prepared};
   emel::kernel::cq::event::dispatch_result direct_prepare_result{};
   emel::kernel::cq::sm direct_prepare_machine;
   REQUIRE(direct_prepare_machine.process_event(
