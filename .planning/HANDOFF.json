@@ -8,12 +8,12 @@
   "task": 5,
   "total_tasks": 5,
   "status": "completed",
-  "head": "a7fd218463cf50f239dea69819e7114c14774556",
+  "runtime_source_head": "a7fd218463cf50f239dea69819e7114c14774556",
   "branch": "feat/cact-needle-runtime",
   "pull_request": {
     "number": 116,
     "state": "open",
-    "head": "a7fd218463cf50f239dea69819e7114c14774556",
+    "contains_runtime_source_head": true,
     "current": true,
     "merge_authority_required": true
   },
@@ -21,8 +21,8 @@
     {"id": 0, "name": "Native cact loader, Needle graph, exact CQ kernels, tokenizer parity, and heldout evaluator", "status": "done"},
     {"id": 1, "name": "Exact CQ and maintained native runtime performance work", "status": "done"},
     {"id": 2, "name": "Upstream SML scheduler cutover and wavefront ownership repairs", "status": "done"},
-    {"id": 3, "name": "Current-head tests, heldout evaluation, scoped gate, and blind reviews", "status": "done"},
-    {"id": 4, "name": "Publish current head to PR #116 and close control-plane state", "status": "done"}
+    {"id": 3, "name": "Runtime-source-head tests, heldout evaluation, scoped gate, and blind reviews", "status": "done"},
+    {"id": 4, "name": "Publish runtime source head to PR #116 and close control-plane state", "status": "done"}
   ],
   "remaining_tasks": [],
   "blockers": [],
@@ -43,7 +43,7 @@
     "wavefront_clang": "17/17 cases, 590 assertions",
     "wavefront_zig": "17/17 cases, 590 assertions",
     "heldout": "287 rows, domain 0.8397, effort 0.7631, zero tokenizer mismatches",
-    "scoped_gate": "current head built and heldout passed",
+    "scoped_gate": "runtime source head built and heldout passed",
     "aggregate_gate": "red solely on repository-wide lint snapshot baseline drift listing unrelated files; no green aggregate claim",
     "blind_reviews": "final rules/HSM and completeness reviews returned empty findings"
   },
@@ -51,5 +51,5 @@
     {"path": "snapshots/quality_gates/timing.txt", "ownership": "unrelated user state", "action": "untouched"}
   ],
   "next_action": "Owner reviews open/current PR #116 and merges only with explicit authority.",
-  "context_notes": "Runtime and control-plane source work are complete at a7fd218463cf50f239dea69819e7114c14774556. PR #116 is open/current. There are no source blockers. Do not claim aggregate green, merge, cross-backend comparability, ratios/equivalence, or 435 tok/s."
+  "context_notes": "Runtime/source repairs are complete with final runtime source commit a7fd218463cf50f239dea69819e7114c14774556. PR #116 is open/current and its branch includes that commit plus subsequent control-plane-only commits. There are no source blockers. Do not claim aggregate green, merge, cross-backend comparability, ratios/equivalence, or 435 tok/s."
 }
