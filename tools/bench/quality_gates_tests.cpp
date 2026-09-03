@@ -1213,3 +1213,172 @@ TEST_CASE("bench runner emits a host-arch marker the compare gate consumes") {
   // host-arch exemption logic has a single home.
   CHECK(script.find("-v host_arch=\"$host_arch\"") != std::string::npos);
 }
+
+#if !defined(_WIN32)
+TEST_CASE("memory envelope computes half of effective total memory") {
+  const auto output = std::filesystem::temp_directory_path() /
+                      "emel_memory_cap_half_test.txt";
+  const auto script = repo_root() / "scripts" / "build_jobs.sh";
+  const command_result result = run_command(
+      "env EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "EMEL_MEMORY_TEST_CGROUP_MAX=max EMEL_MEMORY_TEST_CORES=64 bash " +
+          shell_quote(script.string()) + " --memory-cap-check",
+      output);
+  CHECK(result.status == 0);
+  CHECK(result.output.find("effective_total_bytes=107374182400") !=
+        std::string::npos);
+  CHECK(result.output.find("cap_bytes=53687091200") != std::string::npos);
+}
+
+TEST_CASE("memory envelope honors a finite parent cgroup limit") {
+  const auto output = std::filesystem::temp_directory_path() /
+                      "emel_memory_cap_cgroup_test.txt";
+  const auto script = repo_root() / "scripts" / "build_jobs.sh";
+  const command_result result = run_command(
+      "env EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "EMEL_MEMORY_TEST_CGROUP_MAX=42949672960 EMEL_MEMORY_TEST_CORES=64 bash " +
+          shell_quote(script.string()) + " --memory-cap-check",
+      output);
+  CHECK(result.status == 0);
+  CHECK(result.output.find("effective_total_bytes=42949672960") !=
+        std::string::npos);
+  CHECK(result.output.find("cap_bytes=21474836480") != std::string::npos);
+}
+
+TEST_CASE("memory overrides validate and build jobs clamp to the cap") {
+  const auto output = std::filesystem::temp_directory_path() /
+                      "emel_memory_override_test.txt";
+  const auto script = repo_root() / "scripts" / "build_jobs.sh";
+  const std::string base =
+      "env EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "EMEL_MEMORY_TEST_CGROUP_MAX=max EMEL_MEMORY_TEST_CORES=64 ";
+
+  command_result result = run_command(
+      base + "EMEL_MEMORY_CAP_PERCENT=51 bash " +
+          shell_quote(script.string()) + " --memory-cap-check",
+      output);
+  CHECK(result.status != 0);
+  CHECK(result.output.find("requires "
+                           "EMEL_DANGEROUS_ALLOW_MEMORY_CAP_ABOVE_50=1") !=
+        std::string::npos);
+
+  result = run_command(base + "EMEL_BUILD_JOBS=40 bash " +
+                           shell_quote(script.string()) +
+                           " --memory-cap-check",
+                       output);
+  CHECK(result.status == 0);
+  CHECK(result.output.find("safe_build_jobs=7") != std::string::npos);
+  CHECK(result.output.find("build_jobs=7") != std::string::npos);
+  CHECK(result.output.find("clamping EMEL_BUILD_JOBS=40") !=
+        std::string::npos);
+
+  result = run_command(base + "EMEL_BUILD_JOBS=invalid bash " +
+                           shell_quote(script.string()) +
+                           " --memory-cap-check",
+                       output);
+  CHECK(result.status != 0);
+  CHECK(result.output.find("EMEL_BUILD_JOBS must be a positive integer") !=
+        std::string::npos);
+}
+
+TEST_CASE("quality gate constructs Linux and Darwin whole-tree envelopes") {
+  const auto output = std::filesystem::temp_directory_path() /
+                      "emel_memory_envelope_command_test.txt";
+  const auto script = repo_root() / "scripts" / "quality_gates.sh";
+  const std::string base =
+      "env EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "EMEL_MEMORY_TEST_CGROUP_MAX=max EMEL_MEMORY_TEST_CORES=64 ";
+
+  command_result result = run_command(
+      base + "EMEL_MEMORY_TEST_OS=Linux bash " +
+          shell_quote(script.string()) + " --memory-cap-check",
+      output);
+  CHECK(result.status == 0);
+  CHECK(result.output.find("systemd-run --user --scope --quiet") !=
+        std::string::npos);
+  CHECK(result.output.find("--property=MemoryMax=53687091200") !=
+        std::string::npos);
+  CHECK(result.output.find("--property=MemorySwapMax=0") !=
+        std::string::npos);
+  CHECK(result.output.find("EMEL_MEMORY_ENVELOPE_ACTIVE=1") !=
+        std::string::npos);
+
+  result = run_command(base + "EMEL_MEMORY_TEST_OS=Darwin bash " +
+                           shell_quote(script.string()) +
+                           " --memory-cap-check",
+                       output);
+  CHECK(result.status == 0);
+  CHECK(result.output.find("ps -axo pid=,ppid=,rss=") !=
+        std::string::npos);
+  CHECK(result.output.find("kill_at_bytes=42949672960") !=
+        std::string::npos);
+  CHECK(result.output.find("interval_seconds=0.01") != std::string::npos);
+}
+
+TEST_CASE("quality gate recursion and fail-closed contracts are explicit") {
+  const auto output = std::filesystem::temp_directory_path() /
+                      "emel_memory_envelope_failure_test.txt";
+  const auto script = repo_root() / "scripts" / "quality_gates.sh";
+  const std::string base =
+      "env EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "EMEL_MEMORY_TEST_CGROUP_MAX=max EMEL_MEMORY_TEST_CORES=64 ";
+
+  command_result result = run_command(
+      "printf '1 0 100\\n2 1 200\\n3 2 300\\n4 9 400\\n' | " + base +
+          "EMEL_MEMORY_TEST_OS=Darwin bash " + shell_quote(script.string()) +
+          " --memory-cap-accounting-check 1",
+      output);
+  CHECK(result.status == 0);
+  CHECK(result.output == "600\n");
+
+  result = run_command(
+      base + "EMEL_MEMORY_ENVELOPE_ACTIVE=1 "
+             "EMEL_MEMORY_ENVELOPE_KIND=systemd "
+             "EMEL_MEMORY_BASE_TOTAL_BYTES=107374182400 "
+             "EMEL_MEMORY_TEST_CURRENT_MAX=53687091200 "
+             "EMEL_MEMORY_TEST_CURRENT_SWAP=0 bash " +
+          shell_quote(script.string()) + " --memory-cap-check",
+      output);
+  CHECK(result.status == 0);
+  CHECK(result.output.find("envelope_active=1") != std::string::npos);
+  CHECK(result.output.find("envelope_kind=systemd") != std::string::npos);
+  CHECK(result.output.find("systemd-run") == std::string::npos);
+
+  result = run_command(base + "EMEL_MEMORY_TEST_FORCE_ENVELOPE_FAILURE=1 bash " +
+                           shell_quote(script.string()) +
+                           " --memory-cap-enforce-check",
+                       output);
+  CHECK(result.status != 0);
+  CHECK(result.output.find("could not install") != std::string::npos);
+
+  result = run_command(
+      base + "EMEL_MEMORY_TEST_FORCE_ENVELOPE_FAILURE=1 "
+             "EMEL_ALLOW_UNCAPPED_MEMORY=1 bash " +
+          shell_quote(script.string()) + " --memory-cap-enforce-check",
+      output);
+  CHECK(result.status == 0);
+  CHECK(result.output.find("uncapped_override=1") != std::string::npos);
+  CHECK(result.output.find("proceeding without a memory envelope") !=
+        std::string::npos);
+}
+
+TEST_CASE("Linux active envelope rejects loose limits") {
+  const auto output = std::filesystem::temp_directory_path() /
+                      "emel_memory_envelope_verify_test.txt";
+  const auto script = repo_root() / "scripts" / "quality_gates.sh";
+  const std::string base =
+      "env EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "EMEL_MEMORY_TEST_CGROUP_MAX=max EMEL_MEMORY_TEST_CORES=64 "
+      "EMEL_MEMORY_ENVELOPE_ACTIVE=1 EMEL_MEMORY_ENVELOPE_KIND=systemd "
+      "EMEL_MEMORY_BASE_TOTAL_BYTES=107374182400 ";
+
+  const command_result result = run_command(
+      base + "EMEL_MEMORY_TEST_CURRENT_MAX=53687091201 "
+             "EMEL_MEMORY_TEST_CURRENT_SWAP=0 bash " +
+          shell_quote(script.string()) + " --memory-cap-check",
+      output);
+  CHECK(result.status != 0);
+  CHECK(result.output.find("memory envelope verification failed") !=
+        std::string::npos);
+}
+#endif
