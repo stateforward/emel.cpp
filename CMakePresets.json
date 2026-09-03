@@ -42,14 +42,5 @@
         "CMAKE_CXX_COMPILER": "zig c++"
       }
     }
-  ],
-  "testPresets": [
-    {
-      "name": "test-debug",
-      "configurePreset": "debug",
-      "output": {
-        "outputOnFailure": true
-      }
-    }
   ]
 }
