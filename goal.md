@@ -34,9 +34,11 @@ path beats `llama.cpp` on this CPU.
 - Merged local non-draft PR heads: `emel.cpp#95`, `#96`, `#97`, `#98`, `#99`.
 - Explicitly not merged: draft PRs `emel.cpp#48` and `#49`.
 - Upstream scheduler fix: `stateforward/sml.cpp` commit
-  `a1512d799bde690b639166707d6955dddf7a40f0` provides the batch and runtime
-  worker-budget API used here, including the batch-reservation rollback
-  deadlock fix. The local SML pin points at that exact commit.
+  `67f898e6e19d516bb445841263fd35db3f3cd3c3` is the reviewed upstream head
+  used here. It retains the batch-reservation rollback queue-wake fix and adds
+  deterministic fixes for out-of-order MPMC head publication and stale worker
+  permits after a peer drains the queue. The local SML pin points at that exact
+  commit.
 - Local wrapper state: `src/emel/sm.hpp` no longer flattens
   `process_event_async(...)` through `.result()`, and wrapper-level event
   error normalization has been removed. Matmul fanout uses the upstream fixed
@@ -648,6 +650,20 @@ path beats `llama.cpp` on this CPU.
   generation benchmark still reports LFM2 single-lane behind llama.cpp and
   multithreaded ahead, with benchmark-regression warnings non-fatal under the
   scoped gate.
+- Scheduler pin refresh verification: reconfiguring `build/zig` fetched exact
+  dependency HEAD `67f898e6e19d516bb445841263fd35db3f3cd3c3`. Upstream focused
+  `test_thread_pool_scheduler` and `test_co_sm_thread_pool` passed, including
+  the deterministic batch-rollback queue-wake, out-of-order MPMC head
+  publication, and stale worker-permit regressions. `/tmp/probe7` completed 10
+  consecutive contention runs. After rebuilding `emel_tests_bin`, focused
+  `thread_pool_scheduler*` (14 cases / 49 assertions),
+  `co_sm_thread_pool_scheduler*` (5 / 23), and `parallel matmul*` (15 / 352)
+  filters all passed.
+- Final engineering recheck of exact head `67f898e6e19d516bb445841263fd35db3f3cd3c3`
+  returned Proven-for with no findings: the `dequeue_result` protocol discards
+  stale permits while retaining the reserved-unpublished spin, and rollback
+  wake, publication ordering, batch-state, stop, join, and queue/batch
+  coexistence contracts remain correct.
 
 ## Completion Bar
 
