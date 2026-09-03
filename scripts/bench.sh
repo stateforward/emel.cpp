@@ -158,7 +158,9 @@ usage: scripts/bench.sh [--snapshot] [--compare] [--compare-update] [--update] [
   --suite=...  run only the named benchmark suite
   --memory-max=<bytes|NNpct|none> weight_streaming only: wrap the runner in a
                systemd-run user scope with MemoryMax (and MemorySwapMax=0);
-               NNpct derives bytes from the fixture size; none runs unwrapped.
+               NNpct derives bytes from the fixture size; none disables only
+               the additional benchmark-local cap and remains inside the
+               repository-wide 50% safety envelope.
                Runs the suite directly (no snapshot/compare gating).
 USAGE
 }
@@ -1090,9 +1092,10 @@ if $RUN_ONLY; then
   cmake "${cmake_args[@]}" >&2
   cmake --build "$run_only_build_dir" --parallel "$EMEL_BUILD_JOBS" --target bench_runner >&2
   if [[ -n "$MEMORY_MAX_BYTES" ]]; then
-    # Capped runs measure the EMEL lanes only: the llama.cpp baseline comes
-    # from the unwrapped --memory-max=none run (its 385MiB compute buffer would
-    # otherwise dominate any meaningful MemoryMax).
+    # --memory-max=none disables only the benchmark-local cap. The llama.cpp
+    # baseline still inherits the repository-wide 50% process-tree envelope;
+    # omitting the inner cap prevents its compute buffer from dominating the
+    # requested benchmark-local pressure limit.
     run_bench_runner "$run_only_build_dir" --mode=emel
   else
     run_bench_runner "$run_only_build_dir" --mode=compare

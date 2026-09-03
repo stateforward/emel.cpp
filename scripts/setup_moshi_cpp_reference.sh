@@ -10,6 +10,8 @@ set -euo pipefail
 # parity); until then --build-only is accepted and prints a notice.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/build_jobs.sh
+source "$ROOT_DIR/scripts/build_jobs.sh"
 REFERENCE_DIR="${EMEL_MOSHI_CPP_SOURCE_DIR:-$ROOT_DIR/build/moshi_cpp_reference/src}"
 ARTIFACT_DIR="${EMEL_MOSHI_REFERENCE_ARTIFACT_DIR:-$ROOT_DIR/build/moshi_reference}"
 MOSHI_CPP_REPO="${EMEL_MOSHI_CPP_REPO:-https://github.com/Codes4Fun/moshi.cpp.git}"

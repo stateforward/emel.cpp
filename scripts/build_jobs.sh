@@ -10,6 +10,10 @@ fi
 emel_memory_error() { printf 'error: %s\n' "$*" >&2; }
 emel_is_uint() { [[ "$1" =~ ^[0-9]+$ ]]; }
 
+if [[ "${BASH_SOURCE[0]}" != "$0" && ( "${1:-}" == "--help" || "${1:-}" == "-h" ) ]]; then
+  return 0
+fi
+
 emel_physical_memory_bytes() {
   if [[ "${EMEL_MEMORY_TEST_MODE:-0}" == 1 && -n "${EMEL_MEMORY_TEST_PHYSICAL_BYTES:-}" ]]; then
     emel_is_uint "$EMEL_MEMORY_TEST_PHYSICAL_BYTES" && ((EMEL_MEMORY_TEST_PHYSICAL_BYTES > 0)) || {
@@ -130,27 +134,17 @@ emel_systemd_available() {
     systemd-run --user --scope --quiet --unit="emel-probe-$$" --property="MemoryMax=$EMEL_MEMORY_CAP_BYTES" --property=MemorySwapMax=0 true >/dev/null 2>&1
 }
 
-emel_run_delegated_cgroup() {
-  local parent scope ready child status; parent="$(emel_cgroup_v2_dir)" || return 125; [[ -w "$parent/cgroup.procs" ]] || return 125
-  scope="$parent/emel-build-$$"; mkdir "$scope" 2>/dev/null || return 125; ready="${TMPDIR:-/tmp}/emel-build-$$.ready"; rm -f "$ready"
-  if ! printf '%s\n' "$EMEL_MEMORY_CAP_BYTES" >"$scope/memory.max" || ! printf '0\n' >"$scope/memory.swap.max"; then rmdir "$scope" 2>/dev/null || true; return 125; fi
-  env -u EMEL_MEMORY_TEST_PHYSICAL_BYTES -u EMEL_MEMORY_TEST_CURRENT_MAX -u EMEL_MEMORY_TEST_CURRENT_SWAP -u EMEL_MEMORY_TEST_PARENT_MAX -u EMEL_MEMORY_TEST_OS -u EMEL_MEMORY_TEST_OWNED_SCOPE EMEL_MEMORY_CGROUP_READY_FILE="$ready" "$0" "$@" & child=$!
-  if ! printf '%s\n' "$child" >"$scope/cgroup.procs"; then kill "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rmdir "$scope" 2>/dev/null || true; return 125; fi
-  : >"$ready"; status=0; wait "$child" || status=$?; rm -f "$ready"; rmdir "$scope" 2>/dev/null || true; return "$status"
-}
-
 emel_enter_memory_envelope() {
-  local os status
+  local os
   if [[ "${EMEL_MEMORY_TEST_MODE:-0}" == 1 && -n "${EMEL_MEMORY_TEST_OS:-}" ]]; then os="$EMEL_MEMORY_TEST_OS"; else os="$(uname -s)"; fi
   if [[ "$os" != Linux ]]; then emel_memory_error "macOS has no supported native aggregate descendant memory controller; sampled watchdogs and Linux-artifact container builds are not valid hard envelopes"; return 1; fi
-  if [[ -n "${EMEL_MEMORY_CGROUP_READY_FILE:-}" ]]; then while [[ ! -e "$EMEL_MEMORY_CGROUP_READY_FILE" ]]; do sleep 0.01; done; fi
   if emel_inside_owned_envelope; then emel_verify_active_linux_envelope; return; fi
   if [[ "${EMEL_MEMORY_ENVELOPE_DRY_RUN:-0}" == 1 ]]; then emel_systemd_scope_command "$@"; return 2; fi
-  if emel_systemd_available; then
-    exec env -u EMEL_MEMORY_TEST_PHYSICAL_BYTES -u EMEL_MEMORY_TEST_CURRENT_MAX -u EMEL_MEMORY_TEST_CURRENT_SWAP -u EMEL_MEMORY_TEST_PARENT_MAX -u EMEL_MEMORY_TEST_OS -u EMEL_MEMORY_TEST_OWNED_SCOPE systemd-run --user --scope --quiet --same-dir --unit="emel-build-$$" --property="MemoryMax=$EMEL_MEMORY_CAP_BYTES" --property=MemorySwapMax=0 "$0" "$@"
+  if ! emel_systemd_available; then
+    emel_memory_error "verified systemd --user scopes with cgroup v2 MemoryMax and MemorySwapMax are required for repository builds and gates"
+    return 1
   fi
-  status=0; emel_run_delegated_cgroup "$@" || status=$?; if ((status != 125)); then exit "$status"; fi
-  emel_memory_error "could not install the $EMEL_MEMORY_CAP_BYTES-byte Linux cgroup v2 process-tree envelope; enable user systemd or delegated cgroup v2"; return 1
+  exec env -u EMEL_MEMORY_TEST_PHYSICAL_BYTES -u EMEL_MEMORY_TEST_CURRENT_MAX -u EMEL_MEMORY_TEST_CURRENT_SWAP -u EMEL_MEMORY_TEST_ANCESTOR_MAXES -u EMEL_MEMORY_TEST_OS -u EMEL_MEMORY_TEST_OWNED_SCOPE systemd-run --user --scope --quiet --same-dir --unit="emel-build-$$" --property="MemoryMax=$EMEL_MEMORY_CAP_BYTES" --property=MemorySwapMax=0 "$0" "$@"
 }
 
 emel_compute_build_jobs() {

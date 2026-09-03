@@ -1392,6 +1392,21 @@ TEST_CASE("every native build or installer enters the hard envelope first") {
   }
 }
 
+TEST_CASE("material setup scripts enter the hard envelope first") {
+  const auto scripts = repo_root() / "scripts";
+  for (const std::string name : {"setup_diarization_pytorch_ref_env.sh",
+                                 "setup_moshi_cpp_reference.sh",
+                                 "setup_personaplex_mlx_reference.sh",
+                                 "setup_whisper_cpp_reference.sh"}) {
+    const std::string text = read_file(scripts / name);
+    CAPTURE(name);
+    const std::size_t source = text.find("build_jobs.sh");
+    CHECK(source != std::string::npos);
+    CHECK(source < text.find("python"));
+    CHECK(source < text.find("cmake"));
+  }
+}
+
 TEST_CASE("direct check and lint gates enter the hard envelope first") {
   const auto scripts = repo_root() / "scripts";
   for (const auto &entry : std::filesystem::directory_iterator(scripts)) {
@@ -1426,6 +1441,19 @@ TEST_CASE("removed memory bypasses and sampled watchdog stay absent") {
   CHECK(helper.find("DANGEROUS_ALLOW") == std::string::npos);
   CHECK(gates.find("darwin-rss-watchdog") == std::string::npos);
   CHECK(gates.find("process_tree_rss") == std::string::npos);
+  CHECK(helper.find("emel_run_delegated_cgroup") == std::string::npos);
+  CHECK(helper.find("delegated cgroup") == std::string::npos);
+  CHECK(helper.find("verified systemd --user scopes") != std::string::npos);
+}
+
+TEST_CASE("pure help bypass precedes memory initialization") {
+  const std::string helper =
+      read_file(repo_root() / "scripts" / "build_jobs.sh");
+  const std::size_t help = helper.find("${1:-}\" == \"--help\"");
+  const std::size_t initialize = helper.find("emel_initialize_build_memory ||");
+  REQUIRE(help != std::string::npos);
+  REQUIRE(initialize != std::string::npos);
+  CHECK(help < initialize);
 }
 
 TEST_CASE("CMake presets expose configuration only") {
