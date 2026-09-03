@@ -214,11 +214,10 @@ def decode_envelope_hex(value: str, name: str) -> Any:
         decoded = bytes.fromhex(value).decode("utf-8")
         envelope = json.loads(decoded)
     except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        fail(f"{name} is not canonical UTF-8 JSON hex: {exc}")
-    if canonical_envelope(envelope) != decoded:
-        fail(f"{name} is not canonical JSON")
+        fail(f"{name} is not UTF-8 JSON hex: {exc}")
     if type(envelope) is not dict:
         fail(f"{name} must decode to an object")
+    canonical_envelope(envelope)
     return envelope
 
 def decode_tsv_prompt(line: str) -> str:
@@ -618,12 +617,34 @@ def parse_emel(path: Path) -> dict[str, Any]:
     if not path.is_file():
         fail(f"missing EMEL output: {path}")
     phases: dict[str, dict[str, str]] = {}
+    envelope_hex: dict[int, str] = {}
     marker: dict[str, str] | None = None
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeError) as exc:
         fail(f"cannot read EMEL output: {exc}")
     for raw in lines:
+        if raw.startswith("# needle_request_envelope: "):
+            fields: dict[str, str] = {}
+            for token in raw.split()[2:]:
+                if "=" not in token:
+                    fail("malformed EMEL envelope token")
+                key, value = token.split("=", 1)
+                if key in fields:
+                    fail(f"duplicate EMEL envelope key: {key}")
+                fields[key] = value
+            if set(fields) != {"workload_id", "row", "hex"}:
+                fail("EMEL envelope row has unexpected keys")
+            if fields["workload_id"] != WORKLOAD_ID:
+                fail("EMEL envelope workload mismatch")
+            try:
+                row = int(fields["row"])
+            except ValueError as exc:
+                fail(f"EMEL envelope row is invalid: {exc}")
+            if row < 0 or row >= PROMPT_ROWS or row in envelope_hex:
+                fail("EMEL envelope row is duplicate or out of range")
+            envelope_hex[row] = fields["hex"]
+            continue
         if raw.startswith("# needle_graph:") and f"workload_id={WORKLOAD_ID} " in raw:
             marker = {}
             for token in raw.split()[2:]:
@@ -650,12 +671,13 @@ def parse_emel(path: Path) -> dict[str, Any]:
             marker = None
     if set(phases) != {"wall", "prefill", "decode"}:
         fail("EMEL output does not contain canonical wall/prefill/decode request rows")
-    envelope_keys = {f"envelope_{index}_hex" for index in range(PROMPT_ROWS)}
+    if set(envelope_hex) != set(range(PROMPT_ROWS)):
+        fail("EMEL output does not contain exactly four request envelopes")
     required_marker_keys = {
         "backend_id", "route", "model_id", "fixture_id", "workload_id",
         "thread_count", "thread_contract", "prompt_rows", "max_new_tokens",
         "sampling_id", "stop_id", "warmup_iterations", "warmup_runs",
-        "phase_rate_semantics", *envelope_keys,
+        "phase_rate_semantics",
     }
     required_metric_keys = {"ns_per_op", "tokens_per_second", "iter", "runs"}
     allowed_keys = required_marker_keys | required_metric_keys | {
@@ -691,8 +713,7 @@ def parse_emel(path: Path) -> dict[str, Any]:
             fail(f"EMEL {phase} row metadata mismatch: " +
                  ", ".join(sorted(mismatches)))
     normalized_envelopes = [
-        decode_envelope_hex(wall[f"envelope_{index}_hex"],
-                            f"EMEL envelope {index}")
+        decode_envelope_hex(envelope_hex[index], f"EMEL envelope {index}")
         for index in range(PROMPT_ROWS)
     ]
     try:

@@ -778,8 +778,13 @@ for key, value in (("runs", True), ("wall_ns_per_request", math.nan),
     invalid[key] = value
     rejected(lambda invalid=invalid: module.validate_reference(invalid))
 
-def emel_text(metric="1.0", runs="1"):
-    rows = []
+def emel_text(metric="1.0", runs="1", envelope=None):
+    envelope = envelope or {"success": True}
+    envelope_hex = module.canonical_envelope(envelope).encode().hex()
+    rows = [
+        f"# needle_request_envelope: workload_id={module.WORKLOAD_ID} row={row} hex={envelope_hex}"
+        for row in range(module.PROMPT_ROWS)
+    ]
     common = ("model_id=route_w4_qat_cact "
               "workload_id=needle_heldout_first4_greedy80_eos_v1 "
               "backend_id=emel_needle_request_serial route=serial "
@@ -788,11 +793,7 @@ def emel_text(metric="1.0", runs="1"):
               "prompt_rows=4 max_new_tokens=80 sampling_id=" + module.SAMPLING_ID + " "
               "stop_id=" + module.STOP_ID + " phase_tokens_per_batch=1 "
               "warmup_iterations=1 warmup_runs=1 phase_rate_semantics=" +
-              module.PHASE_NONCOMPARABLE_REASON + " "
-              "envelope_0_hex=7b2273756363657373223a747275657d "
-              "envelope_1_hex=7b2273756363657373223a747275657d "
-              "envelope_2_hex=7b2273756363657373223a747275657d "
-              "envelope_3_hex=7b2273756363657373223a747275657d")
+              module.PHASE_NONCOMPARABLE_REASON)
     for phase in ("wall", "prefill", "decode"):
         rows.append(f"# needle_graph: lane=emel case=x {common} phase={phase}")
         rows.append(f"x ns_per_op={metric} tokens_per_second={metric} iter=1 runs={runs}")
@@ -817,6 +818,25 @@ good_emel.write_text(emel_text())
 parsed = module.parse_emel(good_emel)
 assert parsed["backend_id"] == "emel_needle_request_serial"
 assert parsed["thread_count"] == module.THREAD_COUNT == 1
+large_envelope = {"success": True, "reasoning": "x" * 2048}
+large_emel = root / "large-emel.txt"
+large_emel.write_text(emel_text(envelope=large_envelope))
+large_parsed = module.parse_emel(large_emel)
+assert large_parsed["normalized_envelopes"] == [large_envelope] * module.PROMPT_ROWS
+unordered_json = '{"success":true,"function_calls":[{"name":"route","arguments":{"z":1,"a":2}}]}'
+unordered_emel = root / "unordered-emel.txt"
+unordered_hex = unordered_json.encode().hex()
+unordered_emel.write_text(emel_text().replace(
+    module.canonical_envelope({"success": True}).encode().hex(), unordered_hex))
+unordered_parsed = module.parse_emel(unordered_emel)
+assert unordered_parsed["normalized_envelopes"][0]["function_calls"][0]["name"] == "route"
+
+mismatch_reference = dict(reference)
+mismatch_reference["normalized_envelopes"] = [{"success": False}] * module.PROMPT_ROWS
+mismatch_reference_path = root / "mismatch-reference.json"
+mismatch_reference_path.write_text(json.dumps(mismatch_reference))
+module.compare(types.SimpleNamespace(
+    emel_input=str(good_emel), reference_input=str(mismatch_reference_path)))
 assert parsed["thread_contract"] == module.THREAD_CONTRACT == "single_thread"
 reference_path = root / "reference.json"
 reference_path.write_text(json.dumps(reference))

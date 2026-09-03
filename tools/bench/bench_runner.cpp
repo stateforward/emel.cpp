@@ -426,6 +426,9 @@ void print_snapshot(const std::vector<bench::result> &results,
       std::printf("# needle_microbenchmark: lane=%s case=%s %s\n",
                   entry.lane.c_str(), entry.name.c_str(), entry.note.c_str());
     }
+    if (is_needle_graph_case_name(entry.name) && !entry.output_text.empty()) {
+      std::fwrite(entry.output_text.data(), 1u, entry.output_text.size(), stdout);
+    }
     if (is_needle_graph_case_name(entry.name)) {
       std::printf("# needle_graph: lane=%s case=%s model_id=%s workload_id=%s "
                   "%s\n",

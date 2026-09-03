@@ -888,8 +888,15 @@ emel::bench::result make_request_row(const char *name, const char *phase,
              std::to_string(cfg.warmup_iterations) + " warmup_runs=" +
              std::to_string(cfg.warmup_runs) +
              " phase_rate_semantics=closed_reference_phase_contract_missing_token_counts_and_timestamps";
-  for (std::size_t index = 0u; index < envelopes.size(); ++index)
-    out.note += " envelope_" + std::to_string(index) + "_hex=" + hex_encode(envelopes[index]);
+  if (std::string_view{phase} == "wall") {
+    for (std::size_t index = 0u; index < envelopes.size(); ++index) {
+      out.output_text += "# needle_request_envelope: workload_id=";
+      out.output_text += k_request_workload_id;
+      out.output_text += " row=" + std::to_string(index) + " hex=";
+      out.output_text += hex_encode(envelopes[index]);
+      out.output_text.push_back('\n');
+    }
+  }
   return out;
 }
 
