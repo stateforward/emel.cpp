@@ -15,6 +15,10 @@ EOF
   exit 0
 fi
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/build_jobs.sh
+source "$ROOT_DIR/scripts/build_jobs.sh"
+
 if [[ -z "${EMEL_WHISPER_CPP_CLI:-}" ]]; then
   echo "EMEL_WHISPER_CPP_CLI is required and must point to whisper-cli" >&2
   exit 2

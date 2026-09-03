@@ -1453,6 +1453,23 @@ TEST_CASE("profile scripts enter the hard envelope first") {
     CHECK(source < text.find("bench_runner"));
   }
 }
+
+TEST_CASE("benchmark direct-exec wrappers enter the hard envelope first") {
+  const auto scripts = repo_root() / "scripts";
+  for (const auto &entry : std::filesystem::directory_iterator(scripts)) {
+    if (!entry.is_regular_file() || entry.path().extension() != ".sh") continue;
+    const std::string name = entry.path().filename().string();
+    if (!name.starts_with("bench_")) continue;
+    const std::string text = read_file(entry.path());
+    std::size_t direct_exec = text.find("exec \"${EMEL_");
+    if (direct_exec == std::string::npos) direct_exec = text.find("exec \"$EMEL_");
+    if (direct_exec == std::string::npos) continue;
+    CAPTURE(name);
+    const std::size_t source = text.find("build_jobs.sh");
+    CHECK(source != std::string::npos);
+    CHECK(source < direct_exec);
+  }
+}
 TEST_CASE("removed memory bypasses and sampled watchdog stay absent") {
   const std::string helper =
       read_file(repo_root() / "scripts" / "build_jobs.sh");
