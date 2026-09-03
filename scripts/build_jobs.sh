@@ -55,27 +55,42 @@ emel_current_cgroup_limits() {
   emel_read_cgroup_limits "$dir"
 }
 
-emel_parent_cgroup_memory_max() {
-  if [[ "${EMEL_MEMORY_TEST_MODE:-0}" == 1 && -n "${EMEL_MEMORY_TEST_PARENT_MAX:-}" ]]; then
-    printf '%s\n' "$EMEL_MEMORY_TEST_PARENT_MAX"; return
+emel_min_cgroup_memory_max() {
+  local start="$1" dir="$1" max swap minimum=max
+  if [[ "${EMEL_MEMORY_TEST_MODE:-0}" == 1 && -n "${EMEL_MEMORY_TEST_ANCESTOR_MAXES:-}" ]]; then
+    local value
+    IFS=, read -ra values <<<"$EMEL_MEMORY_TEST_ANCESTOR_MAXES"
+    for value in "${values[@]}"; do
+      if [[ "$value" != max ]]; then
+        emel_is_uint "$value" && ((value > 0)) || { emel_memory_error "invalid test ancestor memory.max: $value"; return 1; }
+        if [[ "$minimum" == max || value -lt minimum ]]; then minimum="$value"; fi
+      fi
+    done
+    printf '%s\n' "$minimum"; return
   fi
-  local dir parent max swap
-  dir="$(emel_cgroup_v2_dir)" || return 1; parent="${dir%/*}"
-  [[ "$parent" != "$dir" ]] || return 1
-  read -r max swap < <(emel_read_cgroup_limits "$parent") || return 1
-  printf '%s\n' "$max"
+  while :; do
+    read -r max swap < <(emel_read_cgroup_limits "$dir") || return 1
+    if [[ "$max" != max ]]; then
+      emel_is_uint "$max" && ((max > 0)) || { emel_memory_error "invalid cgroup memory.max at $dir: $max"; return 1; }
+      if [[ "$minimum" == max || max -lt minimum ]]; then minimum="$max"; fi
+    fi
+    [[ "$dir" == /sys/fs/cgroup ]] && break
+    dir="${dir%/*}"; [[ -n "$dir" && "$dir" != "$start/.." ]] || return 1
+  done
+  printf '%s\n' "$minimum"
 }
 
 emel_effective_total_from_limit() {
   local physical="$1" limit="$2"
   if [[ "$limit" == max ]]; then printf '%s\n' "$physical"; return; fi
-  emel_is_uint "$limit" && ((limit > 0)) || { emel_memory_error "invalid cgroup memory.max: $limit"; return 1; }
   if ((limit < physical)); then printf '%s\n' "$limit"; else printf '%s\n' "$physical"; fi
 }
 
 emel_effective_total_memory_bytes() {
-  local physical max swap; physical="$(emel_physical_memory_bytes)" || return
-  if read -r max swap < <(emel_current_cgroup_limits); then emel_effective_total_from_limit "$physical" "$max"; else printf '%s\n' "$physical"; fi
+  local physical dir minimum; physical="$(emel_physical_memory_bytes)" || return
+  dir="$(emel_cgroup_v2_dir)" || { printf '%s\n' "$physical"; return; }
+  minimum="$(emel_min_cgroup_memory_max "$dir")" || return
+  emel_effective_total_from_limit "$physical" "$minimum"
 }
 
 emel_cap_bytes_for_total() {
@@ -91,10 +106,12 @@ emel_inside_owned_envelope() {
 }
 
 emel_verify_active_linux_envelope() {
-  local physical parent_max expected current_max current_swap
+  local physical dir parent ancestor_min expected current_max current_swap
   physical="$(emel_physical_memory_bytes)" || return
-  parent_max="$(emel_parent_cgroup_memory_max)" || { emel_memory_error "cannot read the envelope parent cgroup memory.max"; return 1; }
-  EMEL_MEMORY_EFFECTIVE_TOTAL_BYTES="$(emel_effective_total_from_limit "$physical" "$parent_max")" || return
+  dir="$(emel_cgroup_v2_dir)" || { emel_memory_error "cannot locate active cgroup v2"; return 1; }
+  parent="${dir%/*}"; [[ "$parent" != "$dir" ]] || { emel_memory_error "owned envelope has no parent cgroup"; return 1; }
+  ancestor_min="$(emel_min_cgroup_memory_max "$parent")" || return
+  EMEL_MEMORY_EFFECTIVE_TOTAL_BYTES="$(emel_effective_total_from_limit "$physical" "$ancestor_min")" || return
   expected="$(emel_cap_bytes_for_total "$EMEL_MEMORY_EFFECTIVE_TOTAL_BYTES")" || return
   read -r current_max current_swap < <(emel_current_cgroup_limits) || { emel_memory_error "cannot read active cgroup v2 limits"; return 1; }
   emel_is_uint "$current_max" && ((current_max <= expected)) || { emel_memory_error "memory.max=$current_max exceeds recomputed cap $expected"; return 1; }

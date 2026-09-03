@@ -1236,6 +1236,7 @@ TEST_CASE("memory envelope honors a finite parent cgroup limit") {
   const auto script = repo_root() / "scripts" / "build_jobs.sh";
   const command_result result = run_command(
       "env EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "EMEL_MEMORY_TEST_ANCESTOR_MAXES=42949672960,max "
       "EMEL_MEMORY_TEST_CURRENT_MAX=42949672960 "
       "EMEL_MEMORY_TEST_CURRENT_SWAP=0 EMEL_MEMORY_TEST_CORES=64 bash " +
           shell_quote(script.string()) + " --memory-cap-check",
@@ -1338,6 +1339,18 @@ TEST_CASE("memory envelope marker requires observable cgroup limits") {
         std::string::npos);
 
   result = run_command(
+      "env EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "EMEL_MEMORY_TEST_CORES=64 EMEL_MEMORY_TEST_OWNED_SCOPE=1 "
+      "EMEL_MEMORY_TEST_ANCESTOR_MAXES=max,42949672960,85899345920 "
+      "EMEL_MEMORY_TEST_CURRENT_MAX=21474836481 "
+      "EMEL_MEMORY_TEST_CURRENT_SWAP=0 bash " +
+          shell_quote(script.string()) + " --memory-cap-check",
+      output);
+  CHECK(result.status != 0);
+  CHECK(result.output.find("exceeds recomputed cap 21474836480") !=
+        std::string::npos);
+
+  result = run_command(
       base + "EMEL_MEMORY_TEST_CURRENT_MAX=53687091200 "
              "EMEL_MEMORY_TEST_CURRENT_SWAP=max bash " +
           shell_quote(script.string()) + " --memory-cap-check",
@@ -1358,17 +1371,23 @@ TEST_CASE("sourced production entry ignores memory test environment") {
       output);
   CHECK(result.status == 0);
 }
-TEST_CASE("every script with a build invocation sources the hard envelope") {
+TEST_CASE("every native build or installer enters the hard envelope first") {
   const auto scripts = repo_root() / "scripts";
   for (const auto &entry : std::filesystem::directory_iterator(scripts)) {
     if (!entry.is_regular_file() || entry.path().extension() != ".sh") continue;
     const std::string text = read_file(entry.path());
-    const bool builds = text.find("cmake --build") != std::string::npos ||
-                        text.find("ninja ") != std::string::npos ||
-                        text.find("zig build") != std::string::npos;
-    if (builds) {
+    std::size_t first_work = std::string::npos;
+    for (const std::string needle : {"cmake --build", "zig build", "ninja ",
+                                     "pip install", "pip3 install", "uv pip",
+                                     "uv sync"}) {
+      const std::size_t position = text.find(needle);
+      if (position < first_work) first_work = position;
+    }
+    if (first_work != std::string::npos) {
       CAPTURE(entry.path().filename().string());
-      CHECK(text.find("build_jobs.sh") != std::string::npos);
+      const std::size_t source = text.find("build_jobs.sh");
+      CHECK(source != std::string::npos);
+      CHECK(source < first_work);
     }
   }
 }

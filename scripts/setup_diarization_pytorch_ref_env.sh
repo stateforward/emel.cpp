@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/build_jobs.sh
+source "$ROOT_DIR/scripts/build_jobs.sh"
 VENV_DIR="${EMEL_DIARIZATION_PYTORCH_REFERENCE_VENV:-$ROOT_DIR/build/diarization_pytorch_ref_venv}"
 PYTHON_BIN="${EMEL_DIARIZATION_PYTORCH_REFERENCE_PYTHON_BIN:-python3.11}"
 REQUIREMENTS_FILE="${EMEL_DIARIZATION_PYTORCH_REFERENCE_REQUIREMENTS:-$ROOT_DIR/tools/bench/diarization_pytorch_reference_requirements.txt}"
