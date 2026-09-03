@@ -1370,12 +1370,31 @@ TEST_CASE("sourced production entry ignores memory test environment") {
   const auto output = std::filesystem::temp_directory_path() /
                       "emel_memory_source_trust_test.txt";
   const auto helper = repo_root() / "scripts" / "build_jobs.sh";
+  const auto fake_bin = std::filesystem::temp_directory_path() /
+                        "emel_memory_fake_systemd_bin";
+  std::filesystem::create_directories(fake_bin);
+  for (const std::string tool : {"systemctl", "systemd-run"}) {
+    const auto path = fake_bin / tool;
+    write_file(path, "#!/bin/sh\nexit 99\n");
+    std::filesystem::permissions(
+        path, std::filesystem::perms::owner_exec |
+                  std::filesystem::perms::owner_read |
+                  std::filesystem::perms::owner_write,
+        std::filesystem::perm_options::replace);
+  }
+
   const command_result result = run_command(
-      "env EMEL_MEMORY_TEST_OS=Darwin EMEL_MEMORY_TEST_PHYSICAL_BYTES=1 "
-      "EMEL_MEMORY_TEST_CURRENT_MAX=1 EMEL_MEMORY_TEST_CURRENT_SWAP=0 bash -c " +
-          shell_quote("source " + shell_quote(helper.string())),
+      "env PATH=" + shell_quote(fake_bin.string() + ":/usr/bin:/bin") +
+          " EMEL_MEMORY_TEST_OS=Darwin EMEL_MEMORY_TEST_PHYSICAL_BYTES=1 "
+          "EMEL_MEMORY_TEST_CURRENT_MAX=1 EMEL_MEMORY_TEST_CURRENT_SWAP=0 "
+          "bash -c " + shell_quote("source " + shell_quote(helper.string())),
       output);
-  CHECK(result.status == 0);
+  CHECK(result.status != 0);
+  CHECK(result.output.find("verified systemd --user scopes") !=
+        std::string::npos);
+  CHECK(result.output.find("macOS has no supported") == std::string::npos);
+  std::error_code ec;
+  std::filesystem::remove_all(fake_bin, ec);
 }
 TEST_CASE("every native build or installer enters the hard envelope first") {
   const auto scripts = repo_root() / "scripts";
