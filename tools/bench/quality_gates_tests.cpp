@@ -1324,7 +1324,9 @@ TEST_CASE("memory envelope marker requires observable cgroup limits") {
   const auto script = repo_root() / "scripts" / "build_jobs.sh";
   const std::string base =
       "env EMEL_MEMORY_TEST_OS=Linux EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
-      "EMEL_MEMORY_TEST_CORES=64 EMEL_MEMORY_TEST_OWNED_SCOPE=1 "
+      "EMEL_MEMORY_TEST_CORES=64 "
+      "EMEL_MEMORY_TEST_MEMBERSHIP=/user.slice/emel-build-test.scope "
+      "EMEL_MEMORY_TEST_SYSTEMD_CONTROL_GROUP=/user.slice/emel-build-test.scope "
       "EMEL_MEMORY_TEST_ANCESTOR_MAXES=max ";
 
   command_result result = run_command(
@@ -1346,7 +1348,9 @@ TEST_CASE("memory envelope marker requires observable cgroup limits") {
 
   result = run_command(
       "env EMEL_MEMORY_TEST_OS=Linux EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
-      "EMEL_MEMORY_TEST_CORES=64 EMEL_MEMORY_TEST_OWNED_SCOPE=1 "
+      "EMEL_MEMORY_TEST_CORES=64 "
+      "EMEL_MEMORY_TEST_MEMBERSHIP=/user.slice/emel-build-test.scope "
+      "EMEL_MEMORY_TEST_SYSTEMD_CONTROL_GROUP=/user.slice/emel-build-test.scope "
       "EMEL_MEMORY_TEST_ANCESTOR_MAXES=max,42949672960,85899345920 "
       "EMEL_MEMORY_TEST_CURRENT_MAX=21474836481 "
       "EMEL_MEMORY_TEST_CURRENT_SWAP=0 bash " +
@@ -1364,6 +1368,20 @@ TEST_CASE("memory envelope marker requires observable cgroup limits") {
   CHECK(result.status != 0);
   CHECK(result.output.find("memory.swap.max=max, required 0") !=
         std::string::npos);
+
+  result = run_command(
+      "env EMEL_MEMORY_TEST_OS=Linux EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "EMEL_MEMORY_TEST_CORES=64 "
+      "EMEL_MEMORY_TEST_MEMBERSHIP=/user.slice/emel-build-forged.scope "
+      "EMEL_MEMORY_TEST_CGROUP_V2=present "
+      "EMEL_MEMORY_TEST_ANCESTOR_MAXES=max "
+      "EMEL_MEMORY_TEST_CURRENT_MAX=53687091200 "
+      "EMEL_MEMORY_TEST_CURRENT_SWAP=0 bash " +
+          shell_quote(script.string()) + " --memory-cap-check",
+      output);
+  CHECK(result.status == 0);
+  CHECK(result.output.find("systemd-run --user --scope") !=
+        std::string::npos);
 }
 
 TEST_CASE("sourced production entry ignores memory test environment") {
@@ -1373,9 +1391,10 @@ TEST_CASE("sourced production entry ignores memory test environment") {
   const auto fake_bin = std::filesystem::temp_directory_path() /
                         "emel_memory_fake_systemd_bin";
   std::filesystem::create_directories(fake_bin);
-  for (const std::string tool : {"systemctl", "systemd-run"}) {
+  for (const std::string tool : {"systemctl", "systemd-run", "uname"}) {
     const auto path = fake_bin / tool;
-    write_file(path, "#!/bin/sh\nexit 99\n");
+    write_file(path, tool == "uname" ? "#!/bin/sh\necho Linux\n"
+                                      : "#!/bin/sh\nexit 99\n");
     std::filesystem::permissions(
         path, std::filesystem::perms::owner_exec |
                   std::filesystem::perms::owner_read |
@@ -1390,8 +1409,10 @@ TEST_CASE("sourced production entry ignores memory test environment") {
           "bash -c " + shell_quote("source " + shell_quote(helper.string())),
       output);
   CHECK(result.status != 0);
-  CHECK(result.output.find("verified systemd --user scopes") !=
-        std::string::npos);
+  const bool source_failed_closed =
+      result.output.find("verified systemd --user scopes") != std::string::npos ||
+      result.output.find("cgroup v2 with a readable unified") != std::string::npos;
+  CHECK(source_failed_closed);
   CHECK(result.output.find("macOS has no supported") == std::string::npos);
   std::error_code ec;
   std::filesystem::remove_all(fake_bin, ec);
@@ -1406,9 +1427,10 @@ TEST_CASE("memory-cap-run never executes payload without an envelope") {
   const auto sentinel = std::filesystem::temp_directory_path() /
                         "emel_memory_run_payload_sentinel";
   std::filesystem::create_directories(fake_bin);
-  for (const std::string tool : {"systemctl", "systemd-run"}) {
+  for (const std::string tool : {"systemctl", "systemd-run", "uname"}) {
     const auto path = fake_bin / tool;
-    write_file(path, "#!/bin/sh\nexit 99\n");
+    write_file(path, tool == "uname" ? "#!/bin/sh\necho Linux\n"
+                                      : "#!/bin/sh\nexit 99\n");
     std::filesystem::permissions(
         path, std::filesystem::perms::owner_exec |
                   std::filesystem::perms::owner_read |
@@ -1424,10 +1446,28 @@ TEST_CASE("memory-cap-run never executes payload without an envelope") {
           " --memory-cap-run touch " + shell_quote(sentinel.string()),
       output);
   CHECK(result.status != 0);
-  CHECK(result.output.find("verified systemd --user scopes") !=
-        std::string::npos);
+  const bool run_failed_closed =
+      result.output.find("verified systemd --user scopes") != std::string::npos ||
+      result.output.find("cgroup v2 with a readable unified") != std::string::npos;
+  CHECK(run_failed_closed);
   CHECK_FALSE(std::filesystem::exists(sentinel));
   std::filesystem::remove_all(fake_bin, ec);
+}
+
+TEST_CASE("memory command construction fails without cgroup v2") {
+  const auto output = std::filesystem::temp_directory_path() /
+                      "emel_memory_missing_cgroup_v2_test.txt";
+  const auto helper = repo_root() / "scripts" / "build_jobs.sh";
+  const command_result result = run_command(
+      "env EMEL_MEMORY_TEST_OS=Linux EMEL_MEMORY_TEST_CGROUP_V2=missing "
+      "EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "EMEL_MEMORY_TEST_ANCESTOR_MAXES=max "
+      "EMEL_MEMORY_TEST_CURRENT_MAX=max EMEL_MEMORY_TEST_CURRENT_SWAP=max "
+      "bash " + shell_quote(helper.string()) + " --memory-cap-check",
+      output);
+  CHECK(result.status != 0);
+  CHECK(result.output.find("cgroup v2 with a readable unified") !=
+        std::string::npos);
 }
 TEST_CASE("every native build or installer enters the hard envelope first") {
   const auto scripts = repo_root() / "scripts";

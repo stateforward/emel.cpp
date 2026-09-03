@@ -330,13 +330,20 @@ NEVER push directly to `main`.
 NEVER commit `tmp/llama.cpp`.
 ALWAYS use zig toolchain (zig cc and zig c++) for default development and
 production builds.
-ALWAYS bound build parallelism through `scripts/build_jobs.sh` (sourced by the
-build, bench, coverage, and gate scripts): jobs = min(cores, MemAvailable /
-per-job budget), where the budget defaults to 6GB (coverage builds pass 8GB)
-and is overridable via `EMEL_BUILD_JOB_MEM_GB`; the job count itself is
-overridable via `EMEL_BUILD_JOBS`. The SML template TUs cost ~3-4GB of
-compiler RSS each under zig c++ -O3 and ~7-8GB under g++ -O0 --coverage, so
-unbounded `--parallel` oversubscribes memory long before CPU.
+ALWAYS run repository builds, gates, benchmarks, profiles, and material setup
+scripts through `scripts/build_jobs.sh`. On Linux it MUST install a systemd user
+cgroup v2 scope, authenticate that scope by matching systemd's `ControlGroup`
+to the process's unified cgroup membership, and verify that `MemoryMax` is at
+most 50% of effective memory (physical memory limited by the minimum finite
+`memory.max` across all ancestor cgroups) and `MemorySwapMax` is zero. It MUST
+fail closed when verified user systemd/cgroup v2 enforcement is unavailable
+and on macOS, which has no supported native aggregate descendant memory
+controller. Build jobs are secondary: min(cores, (cap minus conservative
+reserve) / per-job budget), with the per-job budget defaulting to 6GB and
+coverage builds using 8GB. User job requests MUST be clamped to that safe
+maximum. The SML template TUs cost ~3-4GB of compiler RSS each under zig c++
+-O3 and ~7-8GB under g++ -O0 --coverage, so unbounded `--parallel`
+oversubscribes memory long before CPU.
 NEVER run more than one build, gate, or benchmark job concurrently on a
 shared host; gates and benches launch their own inner builds and fixture
 processes, so stacking them multiplies compiler fleets and context-sized

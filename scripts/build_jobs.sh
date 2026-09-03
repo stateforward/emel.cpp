@@ -27,17 +27,36 @@ emel_physical_memory_bytes() {
   emel_is_uint "$bytes" && ((bytes > 0)) || { emel_memory_error "could not determine physical memory"; return 1; }
   printf '%s\n' "$bytes"
 }
-
-emel_cgroup_v2_dir() {
+emel_cgroup_v2_membership() {
+  if [[ "${EMEL_MEMORY_TEST_MODE:-0}" == 1 && -n "${EMEL_MEMORY_TEST_MEMBERSHIP:-}" ]]; then
+    printf '%s\n' "$EMEL_MEMORY_TEST_MEMBERSHIP"
+    return
+  fi
   [[ -r /proc/self/cgroup && -r /sys/fs/cgroup/cgroup.controllers ]] || return 1
   local hierarchy controllers membership
   while IFS=: read -r hierarchy controllers membership; do
     if [[ "$hierarchy" == 0 && -z "$controllers" && "$membership" == /* &&
           "$membership" != *'/../'* && "$membership" != */.. ]]; then
-      printf '/sys/fs/cgroup%s\n' "$membership"; return
+      printf '%s\n' "$membership"; return
     fi
   done </proc/self/cgroup
   return 1
+}
+
+emel_cgroup_v2_dir() {
+  local membership
+  membership="$(emel_cgroup_v2_membership)" || return 1
+  printf '/sys/fs/cgroup%s\n' "$membership"
+}
+
+emel_require_cgroup_v2() {
+  if [[ "${EMEL_MEMORY_TEST_MODE:-0}" == 1 && -n "${EMEL_MEMORY_TEST_CGROUP_V2:-}" ]]; then
+    [[ "$EMEL_MEMORY_TEST_CGROUP_V2" == present ]]
+    return
+  fi
+  local dir
+  dir="$(emel_cgroup_v2_dir)" || return 1
+  [[ -r /sys/fs/cgroup/cgroup.controllers && -r "$dir/cgroup.controllers" ]]
 }
 
 emel_read_cgroup_limits() {
@@ -105,16 +124,28 @@ emel_cap_bytes_for_total() {
 }
 
 emel_inside_owned_envelope() {
-  if [[ "${EMEL_MEMORY_TEST_MODE:-0}" == 1 && "${EMEL_MEMORY_TEST_OWNED_SCOPE:-0}" == 1 ]]; then return 0; fi
-  local dir base; dir="$(emel_cgroup_v2_dir)" || return 1; base="${dir##*/}"
-  [[ "$base" == emel-build-*.scope || "$base" == emel-build-* ]]
+  local membership base control_group
+  membership="$(emel_cgroup_v2_membership)" || return 1
+  base="${membership##*/}"
+  [[ "$base" == emel-build-*.scope ]] || return 1
+  if [[ "${EMEL_MEMORY_TEST_MODE:-0}" == 1 && -n "${EMEL_MEMORY_TEST_SYSTEMD_CONTROL_GROUP:-}" ]]; then
+    control_group="$EMEL_MEMORY_TEST_SYSTEMD_CONTROL_GROUP"
+  else
+    command -v systemctl >/dev/null 2>&1 || return 1
+    control_group="$(systemctl --user show "$base" --property=ControlGroup --value 2>/dev/null)" || return 1
+  fi
+  [[ "$control_group" == "$membership" ]]
 }
 
 emel_verify_active_linux_envelope() {
   local physical dir parent ancestor_min expected current_max current_swap
   physical="$(emel_physical_memory_bytes)" || return
-  dir="$(emel_cgroup_v2_dir)" || { emel_memory_error "cannot locate active cgroup v2"; return 1; }
-  parent="${dir%/*}"; [[ "$parent" != "$dir" ]] || { emel_memory_error "owned envelope has no parent cgroup"; return 1; }
+  if [[ "${EMEL_MEMORY_TEST_MODE:-0}" == 1 ]]; then
+    parent=/sys/fs/cgroup
+  else
+    dir="$(emel_cgroup_v2_dir)" || { emel_memory_error "cannot locate active cgroup v2"; return 1; }
+    parent="${dir%/*}"; [[ "$parent" != "$dir" ]] || { emel_memory_error "owned envelope has no parent cgroup"; return 1; }
+  fi
   ancestor_min="$(emel_min_cgroup_memory_max "$parent")" || return
   EMEL_MEMORY_EFFECTIVE_TOTAL_BYTES="$(emel_effective_total_from_limit "$physical" "$ancestor_min")" || return
   expected="$(emel_cap_bytes_for_total "$EMEL_MEMORY_EFFECTIVE_TOTAL_BYTES")" || return
@@ -126,10 +157,13 @@ emel_verify_active_linux_envelope() {
 
 emel_systemd_scope_command() {
   printf 'systemd-run --user --scope --quiet --same-dir --unit=emel-build-%s --property=MemoryMax=%s --property=MemorySwapMax=0 %q' "$$" "$EMEL_MEMORY_CAP_BYTES" "$0"
-  local arg; for arg in "$@"; do printf ' %q' "$arg"; done; printf '\n'
+  local arg
+  for arg in "$@"; do printf ' %q' "$arg"; done
+  printf '\n'
 }
 
 emel_systemd_available() {
+  emel_require_cgroup_v2 || return 1
   command -v systemd-run >/dev/null 2>&1 && command -v systemctl >/dev/null 2>&1 &&
     systemctl --user show-environment >/dev/null 2>&1 &&
     systemd-run --user --scope --quiet --unit="emel-probe-$$" --property="MemoryMax=$EMEL_MEMORY_CAP_BYTES" --property=MemorySwapMax=0 true >/dev/null 2>&1
@@ -140,6 +174,10 @@ emel_enter_memory_envelope() {
   if [[ "${EMEL_MEMORY_TEST_MODE:-0}" == 1 && -n "${EMEL_MEMORY_TEST_OS:-}" ]]; then os="$EMEL_MEMORY_TEST_OS"; else os="$(uname -s)"; fi
   if [[ "$os" != Linux ]]; then emel_memory_error "macOS has no supported native aggregate descendant memory controller; sampled watchdogs and Linux-artifact container builds are not valid hard envelopes"; return 1; fi
   if emel_inside_owned_envelope; then emel_verify_active_linux_envelope; return; fi
+  if ! emel_require_cgroup_v2; then
+    emel_memory_error "cgroup v2 with a readable unified cgroup.controllers hierarchy is required for repository builds and gates"
+    return 1
+  fi
   if [[ "${EMEL_MEMORY_ENVELOPE_DRY_RUN:-0}" == 1 ]]; then emel_systemd_scope_command "$@"; return 2; fi
   if ! emel_systemd_available; then
     emel_memory_error "verified systemd --user scopes with cgroup v2 MemoryMax and MemorySwapMax are required for repository builds and gates"
