@@ -23,6 +23,7 @@
 #include "emel/model/loader/sm.hpp"
 #include "emel/model/needle/graph/sm.hpp"
 #include "emel/model/needle/sm.hpp"
+#include "emel/model/needle/request/sm.hpp"
 #include "emel/model/tensor/sm.hpp"
 #include "emel/speech/codec/mimi/sm.hpp"
 #include "emel/speech/generator/sm.hpp"

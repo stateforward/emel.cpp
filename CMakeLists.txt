@@ -128,6 +128,7 @@ add_library(emel STATIC
   src/emel/model/data.cpp
   src/emel/model/generation/any.cpp
   src/emel/text/unicode_data.cpp
+  src/emel/model/needle/request/sm.cpp
   src/emel/model/llama/detail.cpp
   src/emel/model/qwen3/detail.cpp
   src/emel/model/lfm2/detail.cpp

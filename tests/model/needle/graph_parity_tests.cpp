@@ -2,6 +2,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <cstdlib>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -17,6 +18,9 @@
 #include "emel/cact/loader/sm.hpp"
 #include "emel/model/needle/graph/sm.hpp"
 #include "emel/model/needle/sm.hpp"
+
+#include "../../allocation_tracker.hpp"
+#include "emel/model/needle/request/sm.hpp"
 
 namespace {
 
@@ -165,6 +169,114 @@ void check_all_equal(const std::span<const float> values,
                      const float expected) {
   for (const float value : values)
     CHECK(value == expected);
+}
+
+
+
+uint64_t hash_ids(const std::span<const int32_t> ids) noexcept {
+  uint64_t hash = 1469598103934665603ULL;
+  for (const int32_t id : ids) {
+    const uint32_t value = static_cast<uint32_t>(id);
+    for (uint32_t byte = 0u; byte < 4u; ++byte) {
+      hash ^= static_cast<uint8_t>(value >> (byte * 8u));
+      hash *= 1099511628211ULL;
+    }
+  }
+  return hash;
+}
+
+struct request_prompt_fixture {
+  std::vector<int32_t> ids;
+  std::string prompt;
+};
+
+std::vector<request_prompt_fixture> first_request_prompts() {
+  const auto path = std::filesystem::path{EMEL_TEST_REPO_ROOT} /
+                    "tests/fixtures/cact/needle-heldout-prompts.tsv";
+  std::ifstream input(path);
+  REQUIRE(input.good());
+  std::vector<request_prompt_fixture> rows;
+  std::string line;
+  while (rows.size() < 4u && std::getline(input, line)) {
+    const size_t first = line.find('\t');
+    const size_t second = line.find('\t', first + 1u);
+    const size_t third = line.find('\t', second + 1u);
+    REQUIRE(first != std::string::npos);
+    REQUIRE(second != std::string::npos);
+    REQUIRE(third != std::string::npos);
+    request_prompt_fixture row{};
+    const std::string ids = line.substr(second + 1u, third - second - 1u);
+    size_t cursor = 0u;
+    while (cursor < ids.size()) {
+      char *end = nullptr;
+      row.ids.push_back(static_cast<int32_t>(
+          std::strtol(ids.c_str() + cursor, &end, 10)));
+      REQUIRE(end != ids.c_str() + cursor);
+      cursor = static_cast<size_t>(end - ids.c_str());
+      while (cursor < ids.size() && ids[cursor] == ' ') ++cursor;
+    }
+    const std::string hex = line.substr(third + 1u);
+    REQUIRE(hex.size() % 2u == 0u);
+    row.prompt.reserve(hex.size() / 2u);
+    for (size_t i = 0u; i < hex.size(); i += 2u)
+      row.prompt.push_back(static_cast<char>(
+          std::stoi(hex.substr(i, 2u), nullptr, 16)));
+    rows.push_back(std::move(row));
+  }
+  REQUIRE(rows.size() == 4u);
+  return rows;
+}
+
+TEST_CASE("needle request source adapter preserves first-four rendered prompts and token ids") {
+  auto fixture = load_contract_fixture();
+  emel::model::needle::request::sm request{fixture.contract};
+  const auto rows = first_request_prompts();
+  const std::array<uint64_t, 4> expected_hashes = {
+      0x27b46d6bd8eff67eULL, 0x381d6bf6b10d2fccULL,
+      0xfce2b4b02fb723a3ULL, 0x4deefc5c4b77dc74ULL};
+
+  for (size_t i = 0u; i < rows.size(); ++i) {
+    const std::string_view prompt = rows[i].prompt;
+    constexpr std::string_view tools_begin = "<tools>";
+    constexpr std::string_view tools_end = "</tools>\n";
+    constexpr std::string_view query_end =
+        "<|im_end|>\n<|im_start|>assistant\n";
+    const size_t tools_at = prompt.find(tools_begin);
+    const size_t tools_end_at = prompt.find(tools_end, tools_at);
+    REQUIRE(tools_at != std::string_view::npos);
+    REQUIRE(tools_end_at != std::string_view::npos);
+    REQUIRE(prompt.ends_with(query_end));
+    const std::string_view tools = prompt.substr(
+        tools_at + tools_begin.size(),
+        tools_end_at - tools_at - tools_begin.size());
+    const size_t query_begin = tools_end_at + tools_end.size();
+    const std::string_view query = prompt.substr(
+        query_begin, prompt.size() - query_begin - query_end.size());
+    REQUIRE(request.process_event(
+        emel::model::needle::request::event::configure{{}, tools}));
+    emel::test::allocation::allocation_scope allocation_scope;
+    REQUIRE(request.prepare(
+        emel::model::needle::request::event::prepare{query, 80u}));
+    CHECK(allocation_scope.allocations() == 0u);
+    CHECK(request.rendered_prompt() == prompt);
+    CHECK(request.prompt_token_ids().size() == rows[i].ids.size() + 1u);
+    CHECK(request.prompt_token_ids().front() == 2);
+    CHECK(hash_ids(request.prompt_token_ids().subspan(1u)) == expected_hashes[i]);
+    CHECK(std::ranges::equal(request.prompt_token_ids().subspan(1u), rows[i].ids));
+  }
+}
+
+TEST_CASE("needle request normalizes deterministic generated call envelopes") {
+  auto fixture = load_contract_fixture();
+  emel::model::needle::request::action::context ctx{
+      emel::model::needle::request::action::dependencies{fixture.contract}};
+  constexpr std::string_view generated =
+      "<think>\nshort reason\n</think>\n<tool_call>[{\"name\":\"route\",\"arguments\":{\"domain\":\"other\",\"effort\":\"low\"}}]</tool_call>";
+  REQUIRE(emel::model::needle::request::action::normalize_generated_response(
+      ctx, generated));
+  CHECK(std::string_view{ctx.normalized_envelope.data(),
+                         ctx.normalized_envelope_size} ==
+        "{\"error\":null,\"error_code\":null,\"function_calls\":[{\"name\":\"route\",\"arguments\":{\"domain\":\"other\",\"effort\":\"low\"}}],\"reason\":null,\"reasoning\":\"short reason\",\"success\":true,\"type\":\"call\",\"validation\":{\"negation\":false,\"ungrounded\":[]}}");
 }
 
 } // namespace
