@@ -323,14 +323,20 @@ bool allowed_environment_name(const char *entry) noexcept {
   return false;
 }
 
-std::array<char *, 24> clean_environment() {
+#ifdef EMEL_AUTHENTICATED_EXEC_TESTING
+constexpr std::size_t k_environment_capacity = 26u;
+#else
+constexpr std::size_t k_environment_capacity = 24u;
+#endif
+
+std::array<char *, k_environment_capacity> clean_environment() {
   static char python_no_user_site[] = "PYTHONNOUSERSITE=1";
   static char python_no_bytecode[] = "PYTHONDONTWRITEBYTECODE=1";
-  std::array<char *, 24> result{};
+  std::array<char *, k_environment_capacity> result{};
   std::size_t count = 0u;
   for (char **entry = ::environ; *entry != nullptr; ++entry) {
     if (allowed_environment_name(*entry)) {
-      if (count + 3u >= result.size()) fail("too many allowlisted environment entries");
+      if (count + 3u > result.size()) fail("too many allowlisted environment entries");
       result[count++] = *entry;
     }
   }
@@ -364,7 +370,7 @@ int main(int argc, char **argv) {
 #endif
   if (::lseek(executable, 0, SEEK_SET) < 0) fail_errno("cannot rewind sealed interpreter memfd");
 
-  std::array<char *, 24> environment = clean_environment();
+  std::array<char *, k_environment_capacity> environment = clean_environment();
   ::syscall(SYS_execveat, executable, "", argv + 4, environment.data(),
             AT_EMPTY_PATH);
   fail_errno("execveat(AT_EMPTY_PATH) of sealed interpreter failed");

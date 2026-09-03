@@ -1434,6 +1434,42 @@ TEST_CASE("needle authenticated exec closes interpreter memfd across exec") {
 #endif
 }
 
+TEST_CASE("needle authenticated exec accepts every allowlisted environment variable") {
+#if defined(__linux__)
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-authenticated-exec-full-environment";
+  std::error_code ec;
+  std::filesystem::remove_all(tmp_dir, ec);
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::string environment =
+      "HOME=/tmp XDG_CACHE_HOME=/tmp TMPDIR=/tmp TMP=/tmp TEMP=/tmp "
+      "LANG=C LANGUAGE=C LC_ALL=C LC_CTYPE=C LC_NUMERIC=C LC_TIME=C "
+      "LC_COLLATE=C LC_MONETARY=C LC_MESSAGES=C LC_PAPER=C LC_NAME=C "
+      "LC_ADDRESS=C LC_TELEPHONE=C LC_MEASUREMENT=C LC_IDENTIFICATION=C "
+      "NEEDLE_THREADS=1 ";
+  const std::string program =
+      "import os; names=('HOME','XDG_CACHE_HOME','TMPDIR','TMP','TEMP','LANG',"
+      "'LANGUAGE','LC_ALL','LC_CTYPE','LC_NUMERIC','LC_TIME','LC_COLLATE',"
+      "'LC_MONETARY','LC_MESSAGES','LC_PAPER','LC_NAME','LC_ADDRESS',"
+      "'LC_TELEPHONE','LC_MEASUREMENT','LC_IDENTIFICATION','NEEDLE_THREADS'); "
+      "assert all(name in os.environ for name in names); print('full-env-ok')";
+  const process_capture capture = run_command_capture(
+      environment + quote_arg_posix(needle_authenticated_exec_test_path().string()) +
+          " /usr/bin/python3.12 "
+          "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118" +
+          " -- /usr/bin/python3.12 -I -S -B -c " + quote_arg_posix(program) +
+          " > " + quote_arg_posix(stdout_path.string()) + " 2> " +
+          quote_arg_posix(stderr_path.string()),
+      stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stdout_text == "full-env-ok\n");
+  CHECK(capture.stderr_text.empty());
+#endif
+}
+
 TEST_CASE("needle compare wrapper rejects model, library override, and unbounded counts") {
 #if !defined(_WIN32)
   const std::filesystem::path tmp_dir =
