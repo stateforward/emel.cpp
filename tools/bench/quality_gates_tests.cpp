@@ -1402,4 +1402,11 @@ TEST_CASE("removed memory bypasses and sampled watchdog stay absent") {
   CHECK(gates.find("darwin-rss-watchdog") == std::string::npos);
   CHECK(gates.find("process_tree_rss") == std::string::npos);
 }
+
+TEST_CASE("CMake presets do not expose unenveloped build invocations") {
+  const std::string presets = read_file(repo_root() / "CMakePresets.json");
+  CHECK(presets.find("\"buildPresets\"") == std::string::npos);
+  CHECK(presets.find("\"configurePresets\"") != std::string::npos);
+  CHECK(presets.find("\"testPresets\"") != std::string::npos);
+}
 #endif

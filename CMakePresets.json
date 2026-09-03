@@ -43,20 +43,6 @@
       }
     }
   ],
-  "buildPresets": [
-    {
-      "name": "build-debug",
-      "configurePreset": "debug"
-    },
-    {
-      "name": "build-release",
-      "configurePreset": "release"
-    },
-    {
-      "name": "build-zig-release",
-      "configurePreset": "zig-release"
-    }
-  ],
   "testPresets": [
     {
       "name": "test-debug",
