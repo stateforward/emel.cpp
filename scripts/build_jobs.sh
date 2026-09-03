@@ -1,208 +1,112 @@
 #!/usr/bin/env bash
-# Shared memory-budget and build-parallelism calculations. Aggregate quality
-# gates install the exported cap as a process-tree envelope; standalone build
-# scripts use the same capped budget to derive their secondary job clamp.
+# Shared hard memory envelope and secondary build-parallelism clamp. Every
+# repository script that builds sources this file before invoking a build tool.
 
-emel_memory_error() {
-  printf 'error: %s\n' "$*" >&2
-}
-
-emel_is_uint() {
-  [[ "$1" =~ ^[0-9]+$ ]]
-}
+emel_memory_error() { printf 'error: %s\n' "$*" >&2; }
+emel_is_uint() { [[ "$1" =~ ^[0-9]+$ ]]; }
 
 emel_physical_memory_bytes() {
   if [[ -n "${EMEL_MEMORY_TEST_PHYSICAL_BYTES:-}" ]]; then
-    emel_is_uint "$EMEL_MEMORY_TEST_PHYSICAL_BYTES" &&
-      ((EMEL_MEMORY_TEST_PHYSICAL_BYTES > 0)) || {
-        emel_memory_error "EMEL_MEMORY_TEST_PHYSICAL_BYTES must be a positive integer"
-        return 1
-      }
-    printf '%s\n' "$EMEL_MEMORY_TEST_PHYSICAL_BYTES"
-    return
+    emel_is_uint "$EMEL_MEMORY_TEST_PHYSICAL_BYTES" && ((EMEL_MEMORY_TEST_PHYSICAL_BYTES > 0)) || { emel_memory_error "EMEL_MEMORY_TEST_PHYSICAL_BYTES must be a positive integer"; return 1; }
+    printf '%s\n' "$EMEL_MEMORY_TEST_PHYSICAL_BYTES"; return
   fi
-
   if [[ -r /proc/meminfo ]]; then
-    local mem_kb
-    mem_kb="$(awk '/^MemTotal:/ { print $2; exit }' /proc/meminfo)"
-    emel_is_uint "$mem_kb" && ((mem_kb > 0)) || {
-      emel_memory_error "could not determine physical memory from /proc/meminfo"
-      return 1
-    }
-    printf '%s\n' "$((mem_kb * 1024))"
-    return
+    local kb; kb="$(awk '/^MemTotal:/ { print $2; exit }' /proc/meminfo)"
+    emel_is_uint "$kb" && ((kb > 0)) || { emel_memory_error "could not determine physical memory"; return 1; }
+    printf '%s\n' "$((kb * 1024))"; return
   fi
-
-  local mem_bytes
-  mem_bytes="$(sysctl -n hw.memsize 2>/dev/null || true)"
-  emel_is_uint "$mem_bytes" && ((mem_bytes > 0)) || {
-    emel_memory_error "could not determine physical memory (expected /proc/meminfo or sysctl hw.memsize)"
-    return 1
-  }
-  printf '%s\n' "$mem_bytes"
+  local bytes; bytes="$(sysctl -n hw.memsize 2>/dev/null || true)"
+  emel_is_uint "$bytes" && ((bytes > 0)) || { emel_memory_error "could not determine physical memory"; return 1; }
+  printf '%s\n' "$bytes"
 }
 
 emel_cgroup_v2_dir() {
   [[ -r /proc/self/cgroup && -r /sys/fs/cgroup/cgroup.controllers ]] || return 1
-  local hierarchy controllers membership
-  while IFS=: read -r hierarchy controllers membership; do
-    if [[ "$hierarchy" == "0" && -z "$controllers" && "$membership" == /* &&
-          "$membership" != *'/../'* && "$membership" != */.. ]]; then
-      printf '/sys/fs/cgroup%s\n' "$membership"
-      return 0
-    fi
+  local h c p
+  while IFS=: read -r h c p; do
+    if [[ "$h" == 0 && -z "$c" && "$p" == /* && "$p" != *'/../'* && "$p" != */.. ]]; then printf '/sys/fs/cgroup%s\n' "$p"; return; fi
   done </proc/self/cgroup
   return 1
 }
 
-emel_current_cgroup_memory_max() {
-  if [[ -n "${EMEL_MEMORY_TEST_CGROUP_MAX:-}" ]]; then
-    printf '%s\n' "$EMEL_MEMORY_TEST_CGROUP_MAX"
-    return
-  fi
-  local cgroup_dir
-  cgroup_dir="$(emel_cgroup_v2_dir)" || {
-    printf 'max\n'
-    return
-  }
-  [[ -r "$cgroup_dir/memory.max" ]] || {
-    printf 'max\n'
-    return
-  }
-  IFS= read -r REPLY <"$cgroup_dir/memory.max"
-  printf '%s\n' "$REPLY"
+emel_current_cgroup_limits() {
+  if [[ -n "${EMEL_MEMORY_TEST_CURRENT_MAX:-}" || -n "${EMEL_MEMORY_TEST_CURRENT_SWAP:-}" ]]; then printf '%s %s\n' "${EMEL_MEMORY_TEST_CURRENT_MAX:-max}" "${EMEL_MEMORY_TEST_CURRENT_SWAP:-max}"; return; fi
+  local dir max swap; dir="$(emel_cgroup_v2_dir)" || return 1
+  [[ -r "$dir/memory.max" && -r "$dir/memory.swap.max" ]] || return 1
+  IFS= read -r max <"$dir/memory.max"; IFS= read -r swap <"$dir/memory.swap.max"; printf '%s %s\n' "$max" "$swap"
 }
 
 emel_effective_total_memory_bytes() {
-  local physical_bytes cgroup_max effective
-  physical_bytes="$(emel_physical_memory_bytes)" || return
-
-  # An active envelope exports the pre-envelope basis so sourcing this file in
-  # nested build scripts does not repeatedly halve the already-capped scope.
-  if [[ "${EMEL_MEMORY_ENVELOPE_ACTIVE:-0}" == "1" &&
-        -n "${EMEL_MEMORY_BASE_TOTAL_BYTES:-}" ]]; then
-    emel_is_uint "$EMEL_MEMORY_BASE_TOTAL_BYTES" &&
-      ((EMEL_MEMORY_BASE_TOTAL_BYTES > 0 && EMEL_MEMORY_BASE_TOTAL_BYTES <= physical_bytes)) || {
-        emel_memory_error "invalid EMEL_MEMORY_BASE_TOTAL_BYTES in active envelope"
-        return 1
-      }
-    printf '%s\n' "$EMEL_MEMORY_BASE_TOTAL_BYTES"
-    return
-  fi
-
-  effective="$physical_bytes"
-  cgroup_max="$(emel_current_cgroup_memory_max)" || return
-  if [[ "$cgroup_max" != "max" ]]; then
-    emel_is_uint "$cgroup_max" && ((cgroup_max > 0)) || {
-      emel_memory_error "cgroup memory.max is neither 'max' nor a positive integer: $cgroup_max"
-      return 1
-    }
-    if ((cgroup_max < effective)); then
-      effective="$cgroup_max"
-    fi
+  local physical max swap effective; physical="$(emel_physical_memory_bytes)" || return; effective="$physical"
+  if read -r max swap < <(emel_current_cgroup_limits); then
+    if [[ "$max" != max ]]; then emel_is_uint "$max" && ((max > 0)) || { emel_memory_error "invalid cgroup memory.max: $max"; return 1; }; if ((max < effective)); then effective="$max"; fi; fi
   fi
   printf '%s\n' "$effective"
 }
 
-emel_memory_cap_percent() {
-  local percent="${EMEL_MEMORY_CAP_PERCENT:-50}"
-  emel_is_uint "$percent" && ((percent >= 1 && percent <= 100)) || {
-    emel_memory_error "EMEL_MEMORY_CAP_PERCENT must be an integer from 1 through 100"
-    return 1
-  }
-  if ((percent > 50)) && [[ "${EMEL_DANGEROUS_ALLOW_MEMORY_CAP_ABOVE_50:-0}" != "1" ]]; then
-    emel_memory_error "EMEL_MEMORY_CAP_PERCENT above 50 requires EMEL_DANGEROUS_ALLOW_MEMORY_CAP_ABOVE_50=1"
-    return 1
-  fi
-  printf '%s\n' "$percent"
+emel_verify_active_linux_envelope() {
+  local max swap target="${EMEL_MEMORY_ENVELOPE_TARGET_BYTES:-}"
+  emel_is_uint "$target" && ((target > 0)) || { emel_memory_error "memory envelope target is missing"; return 1; }
+  read -r max swap < <(emel_current_cgroup_limits) || { emel_memory_error "cannot read active cgroup v2 limits"; return 1; }
+  emel_is_uint "$max" && ((max <= target)) || { emel_memory_error "memory.max=$max exceeds required $target"; return 1; }
+  [[ "$swap" == 0 ]] || { emel_memory_error "memory.swap.max=$swap, required 0"; return 1; }
+  EMEL_MEMORY_CAP_BYTES="$target"; EMEL_MEMORY_EFFECTIVE_TOTAL_BYTES="${EMEL_MEMORY_ENVELOPE_BASE_TOTAL_BYTES:-$((target * 2))}"
+}
+
+emel_systemd_scope_command() {
+  printf 'systemd-run --user --scope --quiet --same-dir --property=MemoryMax=%s --property=MemorySwapMax=0 env EMEL_MEMORY_ENVELOPE_TARGET_BYTES=%s EMEL_MEMORY_ENVELOPE_BASE_TOTAL_BYTES=%s %q' "$EMEL_MEMORY_CAP_BYTES" "$EMEL_MEMORY_CAP_BYTES" "$EMEL_MEMORY_EFFECTIVE_TOTAL_BYTES" "$0"
+  local arg; for arg in "$@"; do printf ' %q' "$arg"; done; printf '\n'
+}
+
+emel_systemd_available() {
+  command -v systemd-run >/dev/null 2>&1 && command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1 && systemd-run --user --scope --quiet --property="MemoryMax=$EMEL_MEMORY_CAP_BYTES" --property=MemorySwapMax=0 true >/dev/null 2>&1
+}
+
+emel_run_delegated_cgroup() {
+  local parent scope ready child status; parent="$(emel_cgroup_v2_dir)" || return 125; [[ -w "$parent/cgroup.procs" ]] || return 125
+  scope="$parent/emel-build-$$"; mkdir "$scope" 2>/dev/null || return 125; ready="${TMPDIR:-/tmp}/emel-build-$$.ready"; rm -f "$ready"
+  if ! printf '%s\n' "$EMEL_MEMORY_CAP_BYTES" >"$scope/memory.max" || ! printf '0\n' >"$scope/memory.swap.max"; then rmdir "$scope" 2>/dev/null || true; return 125; fi
+  env EMEL_MEMORY_ENVELOPE_TARGET_BYTES="$EMEL_MEMORY_CAP_BYTES" EMEL_MEMORY_ENVELOPE_BASE_TOTAL_BYTES="$EMEL_MEMORY_EFFECTIVE_TOTAL_BYTES" EMEL_MEMORY_CGROUP_READY_FILE="$ready" "$0" "$@" & child=$!
+  if ! printf '%s\n' "$child" >"$scope/cgroup.procs"; then kill "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; rmdir "$scope" 2>/dev/null || true; return 125; fi
+  : >"$ready"; status=0; wait "$child" || status=$?; rm -f "$ready"; rmdir "$scope" 2>/dev/null || true; return "$status"
+}
+
+emel_enter_memory_envelope() {
+  local os="${EMEL_MEMORY_TEST_OS:-$(uname -s)}" status
+  if [[ "$os" != Linux ]]; then emel_memory_error "macOS has no supported native aggregate descendant memory controller; sampled watchdogs and Linux-artifact container builds are not valid hard envelopes"; return 1; fi
+  if [[ -n "${EMEL_MEMORY_CGROUP_READY_FILE:-}" ]]; then while [[ ! -e "$EMEL_MEMORY_CGROUP_READY_FILE" ]]; do sleep 0.01; done; fi
+  if [[ -n "${EMEL_MEMORY_ENVELOPE_TARGET_BYTES:-}" ]]; then emel_verify_active_linux_envelope; return; fi
+  if [[ "${EMEL_MEMORY_ENVELOPE_DRY_RUN:-0}" == 1 ]]; then emel_systemd_scope_command "$@"; return 2; fi
+  if emel_systemd_available; then exec systemd-run --user --scope --quiet --same-dir --property="MemoryMax=$EMEL_MEMORY_CAP_BYTES" --property=MemorySwapMax=0 env EMEL_MEMORY_ENVELOPE_TARGET_BYTES="$EMEL_MEMORY_CAP_BYTES" EMEL_MEMORY_ENVELOPE_BASE_TOTAL_BYTES="$EMEL_MEMORY_EFFECTIVE_TOTAL_BYTES" "$0" "$@"; fi
+  status=0; emel_run_delegated_cgroup "$@" || status=$?; if ((status != 125)); then exit "$status"; fi
+  emel_memory_error "could not install the $EMEL_MEMORY_CAP_BYTES-byte Linux cgroup v2 process-tree envelope; enable user systemd or delegated cgroup v2"; return 1
 }
 
 emel_compute_build_jobs() {
-  local budget_gb="${1:-${EMEL_BUILD_JOB_MEM_GB:-6}}"
-  local cores="${EMEL_MEMORY_TEST_CORES:-}"
-  local usable_bytes mem_jobs safe_jobs
-  emel_is_uint "$budget_gb" && ((budget_gb > 0)) || {
-    emel_memory_error "EMEL_BUILD_JOB_MEM_GB must be a positive integer"
-    return 1
-  }
-  if [[ -z "$cores" ]]; then
-    cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '4\n')"
-  fi
-  emel_is_uint "$cores" && ((cores > 0)) || {
-    emel_memory_error "online processor count must be a positive integer"
-    return 1
-  }
-
-  usable_bytes=$((EMEL_MEMORY_CAP_BYTES - EMEL_MEMORY_RESERVE_BYTES))
-  if ((usable_bytes < 1)); then
-    usable_bytes=1
-  fi
-  mem_jobs=$((usable_bytes / (budget_gb * 1024 * 1024 * 1024)))
-  safe_jobs=$((cores < mem_jobs ? cores : mem_jobs))
-  if ((safe_jobs < 1)); then
-    safe_jobs=1
-  fi
-  printf '%s\n' "$safe_jobs"
+  local budget="${1:-${EMEL_BUILD_JOB_MEM_GB:-6}}" cores="${EMEL_MEMORY_TEST_CORES:-}" usable mem_jobs jobs
+  emel_is_uint "$budget" && ((budget > 0)) || { emel_memory_error "EMEL_BUILD_JOB_MEM_GB must be positive"; return 1; }
+  [[ -n "$cores" ]] || cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '4\n')"; emel_is_uint "$cores" && ((cores > 0)) || return 1
+  usable=$((EMEL_MEMORY_CAP_BYTES - EMEL_MEMORY_RESERVE_BYTES)); if ((usable < 1)); then usable=1; fi; mem_jobs=$((usable / (budget * 1073741824))); jobs=$((cores < mem_jobs ? cores : mem_jobs)); if ((jobs < 1)); then jobs=1; fi; printf '%s\n' "$jobs"
 }
 
 emel_initialize_build_memory() {
-  local effective_total cap_percent reserve_default requested_jobs
-  effective_total="$(emel_effective_total_memory_bytes)" || return
-  cap_percent="$(emel_memory_cap_percent)" || return
-
-  EMEL_MEMORY_EFFECTIVE_TOTAL_BYTES="$effective_total"
-  EMEL_MEMORY_BASE_TOTAL_BYTES="$effective_total"
-  EMEL_MEMORY_CAP_PERCENT_EFFECTIVE="$cap_percent"
-  EMEL_MEMORY_CAP_BYTES=$((effective_total / 100 * cap_percent + (effective_total % 100) * cap_percent / 100))
-  ((EMEL_MEMORY_CAP_BYTES > 0)) || {
-    emel_memory_error "computed memory cap is zero"
-    return 1
-  }
-
-  reserve_default=$((EMEL_MEMORY_CAP_BYTES / 10))
-  if ((reserve_default < 1024 * 1024 * 1024)); then
-    reserve_default=$((1024 * 1024 * 1024))
-  elif ((reserve_default > 4 * 1024 * 1024 * 1024)); then
-    reserve_default=$((4 * 1024 * 1024 * 1024))
-  fi
-  if ((reserve_default > EMEL_MEMORY_CAP_BYTES / 2)); then
-    reserve_default=$((EMEL_MEMORY_CAP_BYTES / 2))
-  fi
-  EMEL_MEMORY_RESERVE_BYTES="${EMEL_BUILD_RESERVE_BYTES:-$reserve_default}"
-  emel_is_uint "$EMEL_MEMORY_RESERVE_BYTES" &&
-    ((EMEL_MEMORY_RESERVE_BYTES < EMEL_MEMORY_CAP_BYTES)) || {
-      emel_memory_error "EMEL_BUILD_RESERVE_BYTES must be a non-negative integer below the memory cap"
-      return 1
-    }
-
-  EMEL_SAFE_BUILD_JOBS="$(emel_compute_build_jobs)" || return
-  requested_jobs="${EMEL_BUILD_JOBS:-$EMEL_SAFE_BUILD_JOBS}"
-  emel_is_uint "$requested_jobs" && ((requested_jobs > 0)) || {
-    emel_memory_error "EMEL_BUILD_JOBS must be a positive integer"
-    return 1
-  }
-  if ((requested_jobs > EMEL_SAFE_BUILD_JOBS)) &&
-    [[ "${EMEL_DANGEROUS_ALLOW_UNSAFE_BUILD_JOBS:-0}" != "1" ]]; then
-    printf 'warning: clamping EMEL_BUILD_JOBS=%s to memory-safe maximum %s; use EMEL_DANGEROUS_ALLOW_UNSAFE_BUILD_JOBS=1 to bypass\n' \
-      "$requested_jobs" "$EMEL_SAFE_BUILD_JOBS" >&2
-    requested_jobs="$EMEL_SAFE_BUILD_JOBS"
-  fi
-  EMEL_BUILD_JOBS="$requested_jobs"
-  CMAKE_BUILD_PARALLEL_LEVEL="$EMEL_BUILD_JOBS"
-
-  export EMEL_MEMORY_EFFECTIVE_TOTAL_BYTES EMEL_MEMORY_BASE_TOTAL_BYTES
-  export EMEL_MEMORY_CAP_PERCENT_EFFECTIVE EMEL_MEMORY_CAP_BYTES
-  export EMEL_MEMORY_RESERVE_BYTES EMEL_SAFE_BUILD_JOBS EMEL_BUILD_JOBS
-  export CMAKE_BUILD_PARALLEL_LEVEL
+  local percent reserve requested
+  if [[ -n "${EMEL_MEMORY_ENVELOPE_TARGET_BYTES:-}" && "${EMEL_MEMORY_TEST_OS:-$(uname -s)}" == Linux ]]; then emel_verify_active_linux_envelope || return; else EMEL_MEMORY_EFFECTIVE_TOTAL_BYTES="$(emel_effective_total_memory_bytes)" || return; percent="${EMEL_MEMORY_CAP_PERCENT:-50}"; emel_is_uint "$percent" && ((percent >= 1 && percent <= 50)) || { emel_memory_error "EMEL_MEMORY_CAP_PERCENT must be 1..50"; return 1; }; EMEL_MEMORY_CAP_BYTES=$((EMEL_MEMORY_EFFECTIVE_TOTAL_BYTES / 100 * percent + (EMEL_MEMORY_EFFECTIVE_TOTAL_BYTES % 100) * percent / 100)); fi
+  reserve=$((EMEL_MEMORY_CAP_BYTES / 10)); if ((reserve < 1073741824)); then reserve=1073741824; elif ((reserve > 4294967296)); then reserve=4294967296; fi; if ((reserve > EMEL_MEMORY_CAP_BYTES / 2)); then reserve=$((EMEL_MEMORY_CAP_BYTES / 2)); fi
+  EMEL_MEMORY_RESERVE_BYTES="${EMEL_BUILD_RESERVE_BYTES:-$reserve}"; emel_is_uint "$EMEL_MEMORY_RESERVE_BYTES" && ((EMEL_MEMORY_RESERVE_BYTES < EMEL_MEMORY_CAP_BYTES)) || { emel_memory_error "invalid EMEL_BUILD_RESERVE_BYTES"; return 1; }
+  EMEL_SAFE_BUILD_JOBS="$(emel_compute_build_jobs)" || return; requested="${EMEL_BUILD_JOBS:-$EMEL_SAFE_BUILD_JOBS}"; emel_is_uint "$requested" && ((requested > 0)) || { emel_memory_error "EMEL_BUILD_JOBS must be a positive integer"; return 1; }; if ((requested > EMEL_SAFE_BUILD_JOBS)); then printf 'warning: clamping EMEL_BUILD_JOBS=%s to %s\n' "$requested" "$EMEL_SAFE_BUILD_JOBS" >&2; requested="$EMEL_SAFE_BUILD_JOBS"; fi
+  EMEL_BUILD_JOBS="$requested"; CMAKE_BUILD_PARALLEL_LEVEL="$requested"; export EMEL_MEMORY_EFFECTIVE_TOTAL_BYTES EMEL_MEMORY_CAP_BYTES EMEL_MEMORY_RESERVE_BYTES EMEL_SAFE_BUILD_JOBS EMEL_BUILD_JOBS CMAKE_BUILD_PARALLEL_LEVEL
 }
 
 emel_initialize_build_memory || return 1 2>/dev/null || exit 1
-
-if [[ "${BASH_SOURCE[0]}" == "$0" && "${1:-}" == "--memory-cap-check" ]]; then
-  printf 'effective_total_bytes=%s\n' "$EMEL_MEMORY_EFFECTIVE_TOTAL_BYTES"
-  printf 'cap_percent=%s\n' "$EMEL_MEMORY_CAP_PERCENT_EFFECTIVE"
-  printf 'cap_bytes=%s\n' "$EMEL_MEMORY_CAP_BYTES"
-  printf 'reserve_bytes=%s\n' "$EMEL_MEMORY_RESERVE_BYTES"
-  printf 'safe_build_jobs=%s\n' "$EMEL_SAFE_BUILD_JOBS"
-  printf 'build_jobs=%s\n' "$EMEL_BUILD_JOBS"
+if [[ "${1:-}" == --memory-cap-check ]]; then
+  printf 'effective_total_bytes=%s\ncap_bytes=%s\nreserve_bytes=%s\nsafe_build_jobs=%s\nbuild_jobs=%s\n' "$EMEL_MEMORY_EFFECTIVE_TOTAL_BYTES" "$EMEL_MEMORY_CAP_BYTES" "$EMEL_MEMORY_RESERVE_BYTES" "$EMEL_SAFE_BUILD_JOBS" "$EMEL_BUILD_JOBS"
+  if [[ -z "${EMEL_MEMORY_ENVELOPE_TARGET_BYTES:-}" ]]; then
+    check_status=0
+    EMEL_MEMORY_ENVELOPE_DRY_RUN=1 emel_enter_memory_envelope "$@" || check_status=$?
+    if ((check_status != 2)); then exit "$check_status"; fi
+  fi
+  exit 0
 fi
+if [[ "${1:-}" == --memory-cap-run ]]; then shift; (($# > 0)) || exit 1; emel_enter_memory_envelope --memory-cap-run "$@"; exec "$@"; fi
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then emel_enter_memory_envelope "$@"; fi

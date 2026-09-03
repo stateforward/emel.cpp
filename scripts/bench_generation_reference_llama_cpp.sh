@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/build_jobs.sh
+source "$ROOT_DIR/scripts/build_jobs.sh"
 # shellcheck source=scripts/zig_toolchain.sh
 source "$ROOT_DIR/scripts/zig_toolchain.sh"
 TOOLS_DIR="$ROOT_DIR/tools/bench"
@@ -137,8 +139,6 @@ case "$BENCHMARK_LANE_SELECTOR" in
 esac
 
 if ! $RUN_ONLY; then
-  # shellcheck source=scripts/build_jobs.sh
-  source "$ROOT_DIR/scripts/build_jobs.sh"
   for tool in cmake ninja git; do
     if ! command -v "$tool" >/dev/null 2>&1; then
       echo "error: required tool missing: $tool" >&2

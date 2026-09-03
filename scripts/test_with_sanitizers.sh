@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/build_jobs.sh
+source "$ROOT_DIR/scripts/build_jobs.sh"
+
 for tool in cmake ctest ninja clang clang++; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "error: required tool missing: $tool" >&2
@@ -8,7 +12,7 @@ for tool in cmake ctest ninja clang clang++; do
   fi
 done
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 BUILD_ROOT="$ROOT_DIR/build/sanitizers"
 
 cpu_count=2
