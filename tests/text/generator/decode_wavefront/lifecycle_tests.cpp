@@ -1,6 +1,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <thread>
 
@@ -437,6 +438,59 @@ TEST_CASE("decode wavefront worker pool dispatches compatible lanes concurrently
     CHECK(fixture.compute_cb.done_called);
     CHECK_FALSE(fixture.compute_cb.error_called);
     CHECK(fixture.compute_output.reused_topology == 1u);
+  }
+}
+
+TEST_CASE("decode wavefront parallel dispatch routes each supported lane count") {
+  int model_tag = 1;
+  int backend_tag = 2;
+  for (size_t lane_count = 2u; lane_count <= wavefront::event::k_max_lanes;
+       ++lane_count) {
+    CAPTURE(lane_count);
+    std::array<std::unique_ptr<graph_lane_fixture>,
+               wavefront::event::k_max_lanes>
+        fixtures{};
+    for (auto & fixture : fixtures) {
+      fixture = std::make_unique<graph_lane_fixture>();
+      prepare_lane(*fixture);
+    }
+
+    const auto key = make_key(&model_tag, &backend_tag);
+    std::array<wavefront::event::lane, wavefront::event::k_max_lanes> lanes{{
+        {fixtures[0]->graph, fixtures[0]->compute_request, key,
+         fixtures[0]->lane_accepted},
+        {fixtures[1]->graph, fixtures[1]->compute_request, key,
+         fixtures[1]->lane_accepted},
+        {fixtures[2]->graph, fixtures[2]->compute_request, key,
+         fixtures[2]->lane_accepted},
+        {fixtures[3]->graph, fixtures[3]->compute_request, key,
+         fixtures[3]->lane_accepted},
+        {fixtures[4]->graph, fixtures[4]->compute_request, key,
+         fixtures[4]->lane_accepted},
+        {fixtures[5]->graph, fixtures[5]->compute_request, key,
+         fixtures[5]->lane_accepted},
+        {fixtures[6]->graph, fixtures[6]->compute_request, key,
+         fixtures[6]->lane_accepted},
+        {fixtures[7]->graph, fixtures[7]->compute_request, key,
+         fixtures[7]->lane_accepted},
+    }};
+    wavefront::event::dispatch_summary summary{};
+    wavefront::event::run request{
+        std::span<wavefront::event::lane>{lanes.data(), lane_count}, summary};
+    wavefront::action::worker_pool pool{};
+    wavefront::sm machine{pool};
+
+    CHECK(machine.process_event(request));
+    CHECK(machine.is(stateforward::sml::state<wavefront::state_idle>));
+    CHECK(summary.err == emel::error::cast(wavefront::error::none));
+    CHECK(summary.grouped);
+    CHECK(summary.all_submitted);
+    CHECK(summary.joined);
+    CHECK(summary.dispatched_lanes == static_cast<int32_t>(lane_count));
+    CHECK(summary.failed_lane == wavefront::event::k_no_failed_lane);
+    for (size_t lane_index = 0u; lane_index < lane_count; ++lane_index) {
+      CHECK(fixtures[lane_index]->lane_accepted);
+    }
   }
 }
 

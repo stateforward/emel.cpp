@@ -107,9 +107,12 @@ struct guard_serial_dispatch {
   }
 };
 
-struct guard_parallel_dispatch {
+template <size_t lane_count>
+struct guard_parallel_lane_count {
+  static_assert(lane_count >= 2u && lane_count <= event::k_max_lanes);
+
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
-    return ctx.pool != nullptr && ev.lanes.size() > 1u &&
+    return ctx.pool != nullptr && ev.lanes.size() == lane_count &&
            detail::all_lane_graphs_distinct(ev) &&
            detail::all_lane_outcomes_distinct(ev);
   }

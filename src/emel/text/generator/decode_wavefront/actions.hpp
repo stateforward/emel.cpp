@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <utility>
 
 #include "emel/graph/sm.hpp"
 #include "emel/text/generator/decode_wavefront/context.hpp"
@@ -56,77 +57,30 @@ struct effect_dispatch_lane {
   }
 };
 
+template <size_t lane_count>
 struct effect_dispatch_parallel_lanes {
-  void operator()(const event::run & ev, context & ctx) const noexcept {
-    for (auto & lane : ev.lanes) {
-      lane.accepted = false;
-    }
+  static_assert(lane_count >= 2u && lane_count <= event::k_max_lanes);
 
-    // Fork/join over the already-selected lane group. The upstream batch API
-    // either publishes every lane or rejects the whole group before moving a
-    // callable, so post-join guards keep routing scheduler failures explicitly.
+  void operator()(const event::run & ev, context & ctx) const noexcept {
     worker_pool::join_group group{};
     emel::policy::fork_join_start_gate gate{};
-    auto make_task = [&gate](event::lane &lane) noexcept {
-      auto *lane_ptr = &lane;
-      return [lane_ptr, &gate]() noexcept {
-        gate.arrive_and_wait();
-        auto &current_lane = *lane_ptr;
-        const emel::graph::event::compute_reserved reserved_compute{
-            current_lane.compute};
-        current_lane.accepted =
-            current_lane.graph.process_event(reserved_compute);
-      };
-    };
-    size_t submitted_lanes = 0u;
-    switch (ev.lanes.size()) {
-    case 2u:
-      submitted_lanes = ctx.pool->try_submit_batch(
-          group, make_task(ev.lanes[0]), make_task(ev.lanes[1]));
-      break;
-    case 3u:
-      submitted_lanes = ctx.pool->try_submit_batch(
-          group, make_task(ev.lanes[0]), make_task(ev.lanes[1]),
-          make_task(ev.lanes[2]));
-      break;
-    case 4u:
-      submitted_lanes = ctx.pool->try_submit_batch(
-          group, make_task(ev.lanes[0]), make_task(ev.lanes[1]),
-          make_task(ev.lanes[2]), make_task(ev.lanes[3]));
-      break;
-    case 5u:
-      submitted_lanes = ctx.pool->try_submit_batch(
-          group, make_task(ev.lanes[0]), make_task(ev.lanes[1]),
-          make_task(ev.lanes[2]), make_task(ev.lanes[3]),
-          make_task(ev.lanes[4]));
-      break;
-    case 6u:
-      submitted_lanes = ctx.pool->try_submit_batch(
-          group, make_task(ev.lanes[0]), make_task(ev.lanes[1]),
-          make_task(ev.lanes[2]), make_task(ev.lanes[3]),
-          make_task(ev.lanes[4]), make_task(ev.lanes[5]));
-      break;
-    case 7u:
-      submitted_lanes = ctx.pool->try_submit_batch(
-          group, make_task(ev.lanes[0]), make_task(ev.lanes[1]),
-          make_task(ev.lanes[2]), make_task(ev.lanes[3]),
-          make_task(ev.lanes[4]), make_task(ev.lanes[5]),
-          make_task(ev.lanes[6]));
-      break;
-    case 8u:
-      submitted_lanes = ctx.pool->try_submit_batch(
-          group, make_task(ev.lanes[0]), make_task(ev.lanes[1]),
-          make_task(ev.lanes[2]), make_task(ev.lanes[3]),
-          make_task(ev.lanes[4]), make_task(ev.lanes[5]),
-          make_task(ev.lanes[6]), make_task(ev.lanes[7]));
-      break;
-    default:
-      break;
-    }
-    gate.open_after_arrivals(submitted_lanes);
-    ev.out.all_submitted = submitted_lanes == ev.lanes.size();
-    ev.out.joined = group.wait();
-    ev.out.dispatched_lanes = static_cast<int32_t>(submitted_lanes);
+
+    [&]<size_t... lane_indices>(std::index_sequence<lane_indices...>) noexcept {
+      ((ev.lanes[lane_indices].accepted = false), ...);
+      const size_t submitted_lanes = ctx.pool->try_submit_batch(
+          group,
+          ([&lane = ev.lanes[lane_indices], &gate]() noexcept {
+            gate.arrive_and_wait();
+            const emel::graph::event::compute_reserved reserved_compute{
+                lane.compute};
+            lane.accepted = lane.graph.process_event(reserved_compute);
+          })...);
+
+      gate.open_after_arrivals(submitted_lanes);
+      ev.out.all_submitted = submitted_lanes == lane_count;
+      ev.out.joined = group.wait();
+      ev.out.dispatched_lanes = static_cast<int32_t>(submitted_lanes);
+    }(std::make_index_sequence<lane_count>{});
   }
 };
 
@@ -160,7 +114,6 @@ inline constexpr effect_mark_grouped_lanes effect_mark_grouped_lanes{};
 inline constexpr effect_reject_invalid_request effect_reject_invalid_request{};
 inline constexpr effect_reject_incompatible_lanes effect_reject_incompatible_lanes{};
 inline constexpr effect_reject_parallel_scheduler effect_reject_parallel_scheduler{};
-inline constexpr effect_dispatch_parallel_lanes effect_dispatch_parallel_lanes{};
 inline constexpr effect_commit_done effect_commit_done{};
 inline constexpr effect_on_unexpected effect_on_unexpected{};
 
