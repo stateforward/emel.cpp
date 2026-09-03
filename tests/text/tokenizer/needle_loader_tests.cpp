@@ -13,6 +13,8 @@
 
 #include "doctest/doctest.h"
 
+#include "../../allocation_tracker.hpp"
+
 #include "emel/cact/loader/sm.hpp"
 #include "emel/model/needle/sm.hpp"
 #include "emel/text/tokenizer/needle/detail.hpp"
@@ -724,24 +726,86 @@ TEST_CASE("needle tokenizer loader rejects non-finite piece scores before "
     loader_state state = {};
     loader_scope scope{state};
     auto vocab = std::make_unique<emel::model::data::vocab>();
-    vocab->n_tokens = 9u;
-    vocab->token_bytes_used = 7u;
-    vocab->entries[0].text_length = 3u;
-    vocab->token_storage[0] = 'x';
+    std::memset(vocab.get(), 0x5a, sizeof(*vocab));
+    vocab->escape_whitespaces = false;
     const emel::text::tokenizer::needle::event::load load{
         std::span<const uint8_t>{corrupted}, *vocab, k_load_done_cb,
         k_load_error_cb};
 
-    CHECK_FALSE(machine.process_event(load));
+    bool accepted = false;
+    size_t allocation_count = 0u;
+    {
+      emel::test::allocation::allocation_scope allocations{};
+      accepted = machine.process_event(load);
+      allocation_count = allocations.allocations();
+    }
+    CHECK_FALSE(accepted);
+    CHECK(allocation_count == 0u);
     CHECK(state.done_count == 0u);
     CHECK(state.error_count == 1u);
     CHECK(
         state.err ==
         emel::error::cast(emel::text::tokenizer::needle::error::model_invalid));
     CHECK(vocab->n_tokens == 0u);
+    CHECK(vocab->n_token_types == 0u);
     CHECK(vocab->token_bytes_used == 0u);
-    CHECK(vocab->entries[0].text_length == 0u);
-    CHECK(vocab->token_storage[0] == '\0');
+    CHECK(vocab->n_merges == 0u);
+    CHECK(vocab->merge_bytes_used == 0u);
+    CHECK(vocab->precompiled_charsmap_size == 0u);
+    CHECK(vocab->tokenizer_model_name[0] == '\0');
+    CHECK(vocab->tokenizer_pre_name[0] == '\0');
+    CHECK(vocab->token_storage.front() == '\0');
+    CHECK(vocab->token_storage.back() == '\0');
+    CHECK(vocab->merge_storage.front() == '\0');
+    CHECK(vocab->merge_storage.back() == '\0');
+    CHECK(vocab->entries.front().text_offset == 0u);
+    CHECK(vocab->entries.front().text_length == 0u);
+    CHECK(vocab->entries.front().score == 0.0f);
+    CHECK(vocab->entries.front().type == 0);
+    CHECK(vocab->entries.back().text_offset == 0u);
+    CHECK(vocab->entries.back().text_length == 0u);
+    CHECK(vocab->entries.back().score == 0.0f);
+    CHECK(vocab->entries.back().type == 0);
+    CHECK(vocab->merge_offsets.front() == 0u);
+    CHECK(vocab->merge_offsets.back() == 0u);
+    CHECK(vocab->merge_lengths.front() == 0u);
+    CHECK(vocab->merge_lengths.back() == 0u);
+    CHECK(vocab->precompiled_charsmap.front() == 0u);
+    CHECK(vocab->precompiled_charsmap.back() == 0u);
+    CHECK(vocab->lstrip_flags.front() == 0u);
+    CHECK(vocab->lstrip_flags.back() == 0u);
+    CHECK(vocab->rstrip_flags.front() == 0u);
+    CHECK(vocab->rstrip_flags.back() == 0u);
+    CHECK(vocab->tokenizer_model_id ==
+          emel::model::data::tokenizer_model::UNKNOWN);
+    CHECK(vocab->tokenizer_pre_id ==
+          emel::model::data::tokenizer_pre::DEFAULT);
+    CHECK(vocab->bos_id == -1);
+    CHECK(vocab->eos_id == -1);
+    CHECK(vocab->eot_id == -1);
+    CHECK(vocab->eom_id == -1);
+    CHECK(vocab->unk_id == -1);
+    CHECK(vocab->sep_id == -1);
+    CHECK(vocab->pad_id == -1);
+    CHECK(vocab->cls_id == -1);
+    CHECK(vocab->mask_id == -1);
+    CHECK(vocab->prefix_id == -1);
+    CHECK(vocab->suffix_id == -1);
+    CHECK(vocab->middle_id == -1);
+    CHECK(vocab->fim_pre_id == -1);
+    CHECK(vocab->fim_suf_id == -1);
+    CHECK(vocab->fim_mid_id == -1);
+    CHECK(vocab->fim_pad_id == -1);
+    CHECK(vocab->fim_rep_id == -1);
+    CHECK(vocab->fim_sep_id == -1);
+    CHECK_FALSE(vocab->add_bos);
+    CHECK_FALSE(vocab->add_eos);
+    CHECK_FALSE(vocab->add_sep);
+    CHECK_FALSE(vocab->add_space_prefix);
+    CHECK_FALSE(vocab->remove_extra_whitespaces);
+    CHECK(vocab->escape_whitespaces);
+    CHECK_FALSE(vocab->treat_whitespace_as_suffix);
+    CHECK_FALSE(vocab->ignore_merges);
     CHECK(machine.is(stateforward::sml::state<
                      emel::text::tokenizer::needle::state_errored>));
   }

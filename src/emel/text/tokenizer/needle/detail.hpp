@@ -76,6 +76,59 @@ inline int32_t compute_vocab_type(const uint8_t piece_type) noexcept {
   return mapping[piece_type];
 }
 
+// Restores the caller-owned vocab to its value-initialized state without
+// materializing the roughly 28 MiB aggregate as a stack temporary.
+inline void reset_vocab(emel::model::data::vocab &vocab) noexcept {
+  vocab.n_tokens = 0u;
+  vocab.n_token_types = 0u;
+  vocab.token_bytes_used = 0u;
+  vocab.n_merges = 0u;
+  vocab.merge_bytes_used = 0u;
+  vocab.precompiled_charsmap_size = 0u;
+
+  vocab.tokenizer_model_name.fill('\0');
+  vocab.tokenizer_pre_name.fill('\0');
+  vocab.token_storage.fill('\0');
+  vocab.merge_storage.fill('\0');
+  vocab.entries.fill({});
+  vocab.merge_offsets.fill(0u);
+  vocab.merge_lengths.fill(0u);
+  vocab.precompiled_charsmap.fill(0u);
+  vocab.lstrip_flags.fill(0u);
+  vocab.rstrip_flags.fill(0u);
+
+  vocab.tokenizer_model_id = emel::model::data::tokenizer_model::UNKNOWN;
+  vocab.tokenizer_pre_id = emel::model::data::tokenizer_pre::DEFAULT;
+
+  vocab.bos_id = -1;
+  vocab.eos_id = -1;
+  vocab.eot_id = -1;
+  vocab.eom_id = -1;
+  vocab.unk_id = -1;
+  vocab.sep_id = -1;
+  vocab.pad_id = -1;
+  vocab.cls_id = -1;
+  vocab.mask_id = -1;
+  vocab.prefix_id = -1;
+  vocab.suffix_id = -1;
+  vocab.middle_id = -1;
+  vocab.fim_pre_id = -1;
+  vocab.fim_suf_id = -1;
+  vocab.fim_mid_id = -1;
+  vocab.fim_pad_id = -1;
+  vocab.fim_rep_id = -1;
+  vocab.fim_sep_id = -1;
+
+  vocab.add_bos = false;
+  vocab.add_eos = false;
+  vocab.add_sep = false;
+  vocab.add_space_prefix = false;
+  vocab.remove_extra_whitespaces = false;
+  vocab.escape_whitespaces = true;
+  vocab.treat_whitespace_as_suffix = false;
+  vocab.ignore_merges = false;
+}
+
 // Parses the RAW SentencePiece-BPE dump into the caller-owned shared vocab.
 // Bulk data-plane iteration over a bounded piece count; every rejection is
 // folded into a single error code consumed by the owning machine's guards.
@@ -85,7 +138,7 @@ inline int32_t compute_vocab_type(const uint8_t piece_type) noexcept {
 inline emel::error::type
 parse_tokenizer_blob(const std::span<const uint8_t> blob,
                      emel::model::data::vocab &vocab_out) noexcept {
-  vocab_out = {};
+  reset_vocab(vocab_out);
 
   if (blob.size() < constants::header_bytes) {
     return cast_tokenizer_error(error::parse_failed);
