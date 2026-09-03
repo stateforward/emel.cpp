@@ -145,7 +145,7 @@ struct emel_session {
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
   emel::model::generation::contract generation_contract = {};
-  emel::kernel::matmul::lane_pool parallel_matmul_lanes = {};
+  emel::kernel::matmul::worker_pool parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   formatter_binding formatter = {};
   initialize_capture initialize = {};

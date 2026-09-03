@@ -43,7 +43,7 @@ using emel::text::generator::detail::quant::QK8_0;
 using emel::text::generator::detail::quant::QK_K;
 
 struct matmul_actor_fixture {
-  emel::kernel::matmul::lane_pool parallel_matmul_lanes = {};
+  emel::kernel::matmul::worker_pool parallel_matmul_lanes = {};
   emel::kernel::matmul::execution_policy policy =
       emel::kernel::matmul::make_auto_execution_policy(parallel_matmul_lanes);
   emel::kernel::matmul::sm actor{policy};

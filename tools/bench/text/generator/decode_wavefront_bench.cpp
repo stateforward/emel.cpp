@@ -334,7 +334,7 @@ struct decode_wavefront_fixture {
   int backend_tag = 2;
   std::array<std::unique_ptr<graph_lane_fixture>, lane_count> lanes{};
   std::vector<wavefront::event::lane> wavefront_lanes{};
-  wavefront::lane_pool pool{};
+  wavefront::worker_pool pool{};
   wavefront::sm machine{pool};
   volatile int32_t sink = 0;
 

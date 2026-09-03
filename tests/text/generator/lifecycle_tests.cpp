@@ -953,7 +953,7 @@ struct generator_fixture {
   prepared_model prepared = {};
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
-  emel::kernel::matmul::lane_pool parallel_matmul_lanes = {};
+  emel::kernel::matmul::worker_pool parallel_matmul_lanes = {};
   emel::model::generation::contract generation_contract = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   std::array<emel::logits::sampler::fn, 1> samplers = {
@@ -1328,7 +1328,7 @@ TEST_CASE("generator_requires_construction_time_dependencies") {
 TEST_CASE("generator_initialize_rejects_default_generation_contract") {
   emel::text::tokenizer::sm tokenizer{};
   emel::text::conditioner::sm conditioner{};
-  emel::kernel::matmul::lane_pool parallel_matmul_lanes = {};
+  emel::kernel::matmul::worker_pool parallel_matmul_lanes = {};
   const auto matmul_policy =
       emel::kernel::matmul::make_auto_execution_policy(parallel_matmul_lanes);
   emel::model::generation::contract generation_contract{};

@@ -10,7 +10,7 @@ namespace emel::text::generator::decode_wavefront {
 // Public alias for the lane thread pool the sm constructor requires, so callers
 // (integrators, benchmarks) can name it without reaching into the action
 // namespace.
-using lane_pool = action::lane_pool;
+using worker_pool = action::worker_pool;
 
 struct state_idle {};
 struct state_validation_decision {};
@@ -291,7 +291,7 @@ struct sm : public emel::co_sm<model, action::context, static_co_policy> {
   using base_type::visit_current_states;
 
   sm() = default;
-  explicit sm(action::lane_pool & pool) : base_type(action::context{.pool = &pool}) {}
+  explicit sm(action::worker_pool & pool) : base_type(action::context{.pool = &pool}) {}
 
   bool process_event(const event::run & ev) {
     return base_type::process_event(ev);

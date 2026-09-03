@@ -1,3 +1,3 @@
 set(EMEL_SML_GIT_REPOSITORY "https://github.com/stateforward/sml.cpp")
-# main: thread-pool coroutine scheduler fix (PR #17 merge).
-set(EMEL_SML_GIT_TAG "49207123cd3f39767764bae774932cb48623f92f")
+# main: upstream thread_pool_scheduler batch and worker-budget API.
+set(EMEL_SML_GIT_TAG "370488a40adf19b5ba1efe50e9325c4732414e24")

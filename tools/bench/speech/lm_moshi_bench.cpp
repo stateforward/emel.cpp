@@ -216,7 +216,14 @@ struct attention_executor_bench_fixture {
       depformer_layer_offsets[index] = index * depformer_per_layer_cache;
     }
     if (lane_count > 1u) {
-      attention_lanes.emplace(lane_count - 1u);
+      const auto budget = emel::kernel::matmul::worker_pool::try_worker_budget(
+          lane_count - 1u);
+      if (!budget) {
+        std::fprintf(stderr, "invalid attention worker budget: %zu\n",
+                     lane_count - 1u);
+        std::exit(2);
+      }
+      attention_lanes.emplace(budget);
     }
     for (std::size_t index = 0u; index < input_embedding.size(); ++index) {
       input_embedding[index] =
@@ -388,7 +395,7 @@ struct attention_executor_bench_fixture {
   emel::kernel::sm kernel = {};
   emel::kernel::matmul::execution_policy matmul_policy;
   emel::kernel::matmul::sm matmul;
-  std::optional<emel::kernel::matmul::lane_pool> attention_lanes = {};
+  std::optional<emel::kernel::matmul::worker_pool> attention_lanes = {};
   std::unique_ptr<emel::speech::predictor::moshi::executor::sm> executor = {};
 };
 

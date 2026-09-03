@@ -343,7 +343,7 @@ TEST_CASE("decode wavefront routes duplicate graph actors through serial path") 
   wavefront::event::dispatch_summary summary{};
   wavefront::event::run request{std::span<wavefront::event::lane>{lanes},
                                 summary};
-  wavefront::action::lane_pool pool{};
+  wavefront::action::worker_pool pool{};
   wavefront::sm machine{pool};
 
   CHECK(machine.process_event(request));
@@ -376,7 +376,7 @@ TEST_CASE("decode wavefront routes lanes sharing an outcome slot through serial 
   wavefront::event::dispatch_summary summary{};
   wavefront::event::run request{std::span<wavefront::event::lane>{lanes},
                                 summary};
-  wavefront::action::lane_pool pool{};
+  wavefront::action::worker_pool pool{};
   wavefront::sm machine{pool};
 
   CHECK(machine.process_event(request));
@@ -389,7 +389,7 @@ TEST_CASE("decode wavefront routes lanes sharing an outcome slot through serial 
   CHECK(fixtures[1].kernel_calls == 1);
 }
 
-TEST_CASE("decode wavefront lane pool dispatches compatible lanes concurrently") {
+TEST_CASE("decode wavefront worker pool dispatches compatible lanes concurrently") {
   int model_tag = 1;
   int backend_tag = 2;
   std::array<graph_lane_fixture, 2> fixtures{};
@@ -406,7 +406,7 @@ TEST_CASE("decode wavefront lane pool dispatches compatible lanes concurrently")
   wavefront::event::dispatch_summary summary{};
   wavefront::event::run request{std::span<wavefront::event::lane>{lanes},
                                 summary};
-  wavefront::action::lane_pool pool{};
+  wavefront::action::worker_pool pool{};
   wavefront::sm machine{pool};
   std::atomic<bool> dispatch_returned{false};
   bool accepted = false;
@@ -523,7 +523,7 @@ TEST_CASE("decode wavefront parallel dispatch reports first rejected lane after 
   wavefront::event::dispatch_summary summary{};
   wavefront::event::run request{std::span<wavefront::event::lane>{lanes},
                                 summary};
-  wavefront::action::lane_pool pool{};
+  wavefront::action::worker_pool pool{};
   wavefront::sm machine{pool};
 
   CHECK(machine.process_event(request));

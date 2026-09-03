@@ -57,7 +57,7 @@ enum class activation_route_kind : uint8_t {
 };
 enum class projection_route_kind : uint8_t { serial = 0, parallel4 = 3 };
 
-using projection_lane_pool = emel::policy::fork_join_lane_pool<3u, 256u>;
+using projection_worker_pool = emel::policy::thread_pool_scheduler<3u, 4u, 256u>;
 
 struct activation_payload {
   std::span<const float> values = {};
@@ -497,8 +497,12 @@ struct context {
       prepared.key_proj = make_prepared(site.key_proj);
       prepared.value_proj = make_prepared(site.value_proj);
     }
-    if (parallel_projection_wave)
-      projection_pool.emplace(3u);
+    if (parallel_projection_wave) {
+      const auto budget = projection_worker_pool::try_worker_budget(3u);
+      if (budget) {
+        projection_pool.emplace(budget);
+      }
+    }
   }
 
   context(const context &) = delete;
@@ -622,7 +626,7 @@ struct context {
   emel::kernel::mhc::sm mhc;
 
   // Last member: worker threads stop and join before actor/storage teardown.
-  std::optional<projection_lane_pool> projection_pool = std::nullopt;
+  std::optional<projection_worker_pool> projection_pool = std::nullopt;
 };
 
 } // namespace emel::model::needle::graph::action

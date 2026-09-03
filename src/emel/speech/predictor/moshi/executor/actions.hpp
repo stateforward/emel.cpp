@@ -680,32 +680,22 @@ inline void prepare_attention_lanes(
    ...);
 }
 
-template <std::size_t lane>
-inline bool submit_attention_lane(
-    context &ctx, emel::kernel::matmul::lane_pool::join_group &group,
+
+template <std::size_t lane_count, std::size_t... lane_offsets>
+inline std::size_t submit_attention_worker_lanes(
+    context &ctx, emel::kernel::matmul::worker_pool::join_group &group,
     emel::policy::fork_join_start_gate &gate,
-    attention_lane_dispatch &dispatch) noexcept {
-  dispatch.handled = false;
-  return ctx.attention_lanes->try_submit(
-      group, [&dispatch, &gate]() noexcept {
+    std::array<attention_lane_dispatch, lane_count> &dispatches,
+    std::index_sequence<lane_offsets...>) noexcept {
+  ((dispatches[lane_offsets + 1u].handled = false), ...);
+  return ctx.attention_lanes->try_submit_batch(
+      group,
+      ([&dispatch = dispatches[lane_offsets + 1u], &gate]() noexcept {
         gate.arrive_and_wait();
         const emel::kernel::attention::event::execute execute{
             *dispatch.request, *dispatch.result};
         dispatch.handled = dispatch.actor->process_event(execute);
-      });
-}
-
-template <std::size_t lane_count, std::size_t... lane_offsets>
-inline std::size_t submit_attention_worker_lanes(
-    context &ctx, emel::kernel::matmul::lane_pool::join_group &group,
-    emel::policy::fork_join_start_gate &gate,
-    std::array<attention_lane_dispatch, lane_count> &dispatches,
-    std::index_sequence<lane_offsets...>) noexcept {
-  std::size_t submitted = 0u;
-  ((submitted += static_cast<std::size_t>(submit_attention_lane<
-        lane_offsets + 1u>(ctx, group, gate, dispatches[lane_offsets + 1u]))),
-   ...);
-  return submitted;
+      })...);
 }
 
 template <std::size_t lane_count, std::size_t... lane_offsets>
@@ -741,7 +731,7 @@ struct effect_run_temporal_layer_attention {
       runtime_ev.ctx.temporal_layer_attention_ok =
           ctx.attention_actors->actors[0].process_event(execute);
     } else {
-      emel::kernel::matmul::lane_pool::join_group group{};
+      emel::kernel::matmul::worker_pool::join_group group{};
       emel::policy::fork_join_start_gate gate{};
       const std::size_t submitted = submit_attention_worker_lanes<lane_count>(
           ctx, group, gate, dispatches,

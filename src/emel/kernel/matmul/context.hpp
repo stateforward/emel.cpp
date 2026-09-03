@@ -45,7 +45,7 @@ struct context {
     }
   }
 
-  lane_pool *parallel_matmul_lanes = nullptr;
+  worker_pool *parallel_matmul_lanes = nullptr;
   emel::kernel::kernel_kind kernel_kind = emel::kernel::kernel_kind::x86_64;
   size_t active_lanes = 1u;
   emel::kernel::sm kernel = {};

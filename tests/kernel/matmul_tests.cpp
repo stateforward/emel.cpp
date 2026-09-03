@@ -179,7 +179,7 @@ TEST_CASE("parallel matmul sliced event offsets views by storage groups") {
 }
 
 TEST_CASE("parallel matmul storage guard rejects malformed parent requests") {
-  matmul::lane_pool lanes = {};
+  matmul::worker_pool lanes = {};
   matmul::action::context ctx = {};
   ctx.parallel_matmul_lanes = &lanes;
   ctx.active_lanes = 8u;
@@ -244,7 +244,7 @@ TEST_CASE("matmul actor guards and actions expose explicit rejection paths") {
   request.src0.ne[1] = 4u;
   CHECK(matmul::guard::guard_parallel_unavailable{}(parallel_event, ctx));
 
-  matmul::lane_pool parallel_lanes = {};
+  matmul::worker_pool parallel_lanes = {};
   ctx.parallel_matmul_lanes = &parallel_lanes;
   ctx.active_lanes = 8u;
   CHECK(matmul::guard::guard_parallel_request_invalid{}(parallel_event, ctx));
@@ -305,7 +305,7 @@ TEST_CASE("matmul actor guards and actions expose explicit rejection paths") {
 }
 
 TEST_CASE("parallel matmul guards select fixed lane and packed row groups") {
-  matmul::lane_pool lanes = {};
+  matmul::worker_pool lanes = {};
   matmul::action::context ctx = {};
   ctx.parallel_matmul_lanes = &lanes;
   ctx.active_lanes = 8u;
@@ -375,7 +375,7 @@ TEST_CASE("parallel matmul guards select fixed lane and packed row groups") {
 void exercise_fixed_packed_format(const dtype type, const uint64_t rows,
                                   const size_t expected_lanes,
                                   const size_t active_lanes) {
-  matmul::lane_pool pool = {};
+  matmul::worker_pool pool = {};
   const auto policy = matmul::make_execution_policy(
       pool, emel::kernel::detect_host_kind(), active_lanes);
   matmul::sm actor{policy};
@@ -406,8 +406,8 @@ TEST_CASE("parallel matmul dispatches explicit packed format lane bodies") {
   exercise_fixed_packed_format(dtype::q4_k_x8_bl8, 64u, 8u, 8u);
 }
 
-TEST_CASE("parallel matmul uses the concrete canonical lane pool") {
-  matmul::lane_pool pool = {};
+TEST_CASE("parallel matmul uses the concrete canonical worker pool") {
+  matmul::worker_pool pool = {};
   CHECK_FALSE(pool.is_current_thread_worker());
   const auto policy = matmul::make_auto_execution_policy(pool);
   CHECK(policy.parallel_matmul_lanes == &pool);
@@ -416,30 +416,22 @@ TEST_CASE("parallel matmul uses the concrete canonical lane pool") {
 
 TEST_CASE(
     "parallel matmul auto policy stays within the runtime worker budget") {
-  {
-    matmul::lane_pool pool{1u};
-    CHECK(matmul::make_auto_execution_policy(pool).active_lanes == 2u);
-  }
-  {
-    matmul::lane_pool pool{2u};
-    CHECK(matmul::make_auto_execution_policy(pool).active_lanes == 2u);
-  }
-  {
-    matmul::lane_pool pool{3u};
-    CHECK(matmul::make_auto_execution_policy(pool).active_lanes == 4u);
-  }
-  {
-    matmul::lane_pool pool{6u};
-    CHECK(matmul::make_auto_execution_policy(pool).active_lanes == 4u);
-  }
-  {
-    matmul::lane_pool pool{7u};
-    CHECK(matmul::make_auto_execution_policy(pool).active_lanes == 8u);
-  }
+  const auto active_lanes_for = [](const size_t workers) {
+    const auto budget = matmul::worker_pool::try_worker_budget(workers);
+    REQUIRE(budget);
+    matmul::worker_pool pool{budget};
+    return matmul::make_auto_execution_policy(pool).active_lanes;
+  };
+
+  CHECK(active_lanes_for(1u) == 2u);
+  CHECK(active_lanes_for(2u) == 2u);
+  CHECK(active_lanes_for(3u) == 4u);
+  CHECK(active_lanes_for(6u) == 4u);
+  CHECK(active_lanes_for(7u) == 8u);
 }
 
 struct parallel_backend_fixture {
-  emel::kernel::matmul::lane_pool parallel_matmul_lanes = {};
+  emel::kernel::matmul::worker_pool parallel_matmul_lanes = {};
   emel::kernel::matmul::execution_policy policy =
       emel::kernel::matmul::make_auto_execution_policy(parallel_matmul_lanes);
   emel::kernel::matmul::sm matmul_actor{policy};
@@ -475,7 +467,7 @@ void check_fixed_parallel_lane_count(const size_t expected_lanes) {
       .dst = gen_detail::make_dst_view(output.data(), 1u, output.size()),
   };
 
-  matmul::lane_pool pool = {};
+  matmul::worker_pool pool = {};
   const auto policy = matmul::make_execution_policy(
       pool, emel::kernel::detect_host_kind(), expected_lanes);
   matmul::sm actor{policy};
@@ -497,7 +489,7 @@ TEST_CASE("parallel matmul explicitly dispatches two and four lane bodies") {
 }
 
 TEST_CASE(
-    "parallel matmul partial submission rejection drains accepted workers") {
+    "parallel matmul busy pool rejects the whole worker batch") {
   constexpr int32_t rows = 8;
   constexpr int32_t cols = 1;
   std::array<float, static_cast<size_t>(rows * cols)> weights = {};
@@ -506,8 +498,8 @@ TEST_CASE(
   weights.fill(1.0f);
   output.fill(-1.0f);
 
-  matmul::lane_pool pool = {};
-  matmul::lane_pool::join_group blocker_group{};
+  matmul::worker_pool pool = {};
+  matmul::worker_pool::join_group blocker_group{};
   std::atomic<bool> blocker_entered = false;
   std::atomic<bool> release_blocker = false;
   REQUIRE(pool.try_submit(blocker_group, [&]() noexcept {
@@ -549,14 +541,14 @@ TEST_CASE(
   REQUIRE(dispatched);
   CHECK_FALSE(accepted);
   CHECK_FALSE(result.all_submitted);
-  CHECK(result.submitted_worker_lanes == 6u);
-  CHECK(result.drained_worker_lanes == result.submitted_worker_lanes);
+  CHECK(result.submitted_worker_lanes == 0u);
+  CHECK(result.drained_worker_lanes == 0u);
   CHECK_FALSE(result.all_lanes_accepted);
   CHECK(allocation_count == 0u);
-  for (size_t row = 0u; row < 7u; ++row) {
-    CHECK(output[row] == doctest::Approx(2.0f));
+  CHECK(output[0] == doctest::Approx(2.0f));
+  for (size_t row = 1u; row < output.size(); ++row) {
+    CHECK(output[row] == doctest::Approx(-1.0f));
   }
-  CHECK(output[7] == doctest::Approx(-1.0f));
 
   release_blocker.store(true, std::memory_order_release);
   CHECK(blocker_group.wait());
@@ -577,23 +569,23 @@ TEST_CASE(
 
 TEST_CASE(
     "parallel matmul capability accepts only supported fixed lane counts") {
-  matmul::lane_pool two_lane_pool = {};
+  matmul::worker_pool two_worker_pool = {};
   auto two_lane_policy = matmul::make_execution_policy(
-      two_lane_pool, emel::kernel::detect_host_kind(), 2u);
+      two_worker_pool, emel::kernel::detect_host_kind(), 2u);
   CHECK(two_lane_policy.mode == matmul::lane_mode::parallel);
   CHECK(matmul::guard::supports_parallel_execution(two_lane_policy));
   two_lane_policy.active_lanes = 1u;
   CHECK_FALSE(matmul::guard::supports_parallel_execution(two_lane_policy));
 
   auto three_lane_policy = matmul::make_execution_policy(
-      two_lane_pool, emel::kernel::detect_host_kind(), 3u);
+      two_worker_pool, emel::kernel::detect_host_kind(), 3u);
   CHECK(three_lane_policy.mode == matmul::lane_mode::serial);
   CHECK_FALSE(matmul::guard::supports_parallel_execution(three_lane_policy));
   three_lane_policy.active_lanes = 2u;
   CHECK_FALSE(matmul::guard::supports_parallel_execution(three_lane_policy));
 
   auto disengaged_policy = matmul::make_execution_policy(
-      two_lane_pool, emel::kernel::detect_host_kind(), 2u);
+      two_worker_pool, emel::kernel::detect_host_kind(), 2u);
   disengaged_policy.parallel_matmul_lanes = nullptr;
   CHECK_FALSE(matmul::guard::supports_parallel_execution(disengaged_policy));
 }
@@ -727,7 +719,7 @@ TEST_CASE("parallel matmul q8_0 gemv matches serial dispatch bit exact") {
                     out_serial.size() * sizeof(float)) == 0);
 }
 
-TEST_CASE("parallel matmul route guard rejects disengaged lane pool") {
+TEST_CASE("parallel matmul route guard rejects disengaged worker pool") {
   emel::text::generator::action::context ctx = {};
   ctx.compute.backend.n_embd =
       emel::text::generator::test::k_generation_route_policy
@@ -744,7 +736,7 @@ TEST_CASE("parallel matmul route guard rejects disengaged lane pool") {
   CHECK_FALSE(emel::text::generator::guard::guard_decode_parallel_lanes_ready{}(
       run, ctx));
 
-  emel::kernel::matmul::lane_pool serial_matmul_lanes = {};
+  emel::kernel::matmul::worker_pool serial_matmul_lanes = {};
   emel::kernel::matmul::execution_policy serial_policy{
       .parallel_matmul_lanes = &serial_matmul_lanes,
       .kernel_kind = emel::kernel::detect_host_kind(),
@@ -757,7 +749,7 @@ TEST_CASE("parallel matmul route guard rejects disengaged lane pool") {
   CHECK_FALSE(emel::text::generator::guard::guard_decode_parallel_lanes_ready{}(
       run, ctx));
 
-  emel::kernel::matmul::lane_pool parallel_matmul_lanes = {};
+  emel::kernel::matmul::worker_pool parallel_matmul_lanes = {};
   auto parallel_policy =
       emel::kernel::matmul::make_auto_execution_policy(parallel_matmul_lanes);
   emel::kernel::matmul::sm parallel_matmul_actor{parallel_policy};

@@ -85,7 +85,7 @@ inline void prepare_fixed_lanes(
 
 template <size_t lane_count, size_t... lane_offsets>
 inline size_t submit_fixed_worker_lanes(
-    context &ctx, lane_pool::join_group &group,
+    context &ctx, worker_pool::join_group &group,
     std::array<lane_dispatch, MAX_PARALLEL_LANES> &lane_dispatches,
     std::index_sequence<lane_offsets...>) noexcept {
   ((lane_dispatches[lane_offsets + 1u].accepted = false), ...);
@@ -118,7 +118,7 @@ struct effect_execute_parallel {
         ev, ctx, row_slices, lane_events, lane_dispatches,
         std::make_index_sequence<lane_count>{});
 
-    lane_pool::join_group group{};
+    worker_pool::join_group group{};
     ev.result.submitted_worker_lanes = submit_fixed_worker_lanes<lane_count>(
         ctx, group, lane_dispatches,
         std::make_index_sequence<lane_count - 1u>{});
@@ -126,10 +126,10 @@ struct effect_execute_parallel {
         ev.result.submitted_worker_lanes == lane_count - 1u;
     const bool owner_accepted =
         ctx.lanes->kernels[0].process_event(lane_events[0]);
-    (void)group.wait();
+    const bool workers_drained = group.wait();
     ev.result.drained_worker_lanes = ev.result.submitted_worker_lanes;
     ev.result.all_lanes_accepted =
-        owner_accepted &&
+        ev.result.all_submitted && workers_drained && owner_accepted &&
         fixed_worker_lanes_accepted(
             ctx, lane_dispatches, std::make_index_sequence<lane_count - 1u>{});
   }

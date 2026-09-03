@@ -248,7 +248,7 @@ TEST_CASE("personaplex compare keeps CPU and lane isolation explicit") {
         std::string::npos);
   CHECK(emel_source.find("state_wavefront_complete") != std::string::npos);
   CHECK(emel_source.find("sampling_seed = 1234") == std::string::npos);
-  CHECK(emel_source.find("std::optional<emel::kernel::matmul::lane_pool>") !=
+  CHECK(emel_source.find("std::optional<emel::kernel::matmul::worker_pool>") !=
         std::string::npos);
   CHECK(emel_source.find("stage_worker_count") != std::string::npos);
   CHECK(emel_source.find("matmul_lane_count") != std::string::npos);
@@ -261,7 +261,9 @@ TEST_CASE("personaplex compare keeps CPU and lane isolation explicit") {
   CHECK(emel_source.find("EMEL_OUTPUT frame=%llu text=%d codes=") !=
         std::string::npos);
   CHECK(emel_source.find(
-            "prediction_matmul_lanes.emplace(matmul_lane_count - 1u)") !=
+            "worker_pool::try_worker_budget(matmul_lane_count - 1u)") !=
+        std::string::npos);
+  CHECK(emel_source.find("prediction_matmul_lanes.emplace(budget)") !=
         std::string::npos);
   CHECK(emel_source.find("active_worker_count()") != std::string::npos);
   CHECK(compare_source.find("emel_stage_workers") != std::string::npos);

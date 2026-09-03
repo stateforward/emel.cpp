@@ -10,7 +10,7 @@
 
 namespace emel::kernel::matmul {
 
-using lane_pool = emel::policy::fork_join_lane_pool<7u, 128u>;
+using worker_pool = emel::policy::thread_pool_scheduler<7u, 8u, 128u>;
 
 enum class lane_mode : uint8_t {
   serial = 0,
@@ -18,7 +18,7 @@ enum class lane_mode : uint8_t {
 };
 
 struct execution_policy {
-  lane_pool *parallel_matmul_lanes;
+  worker_pool *parallel_matmul_lanes;
   emel::kernel::kernel_kind kernel_kind;
   size_t active_lanes;
   lane_mode mode = lane_mode::serial;

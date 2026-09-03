@@ -105,7 +105,7 @@ fork joins within the owning RTC dispatch, and none reorders a float reduction:
 1. **Kernel-owned row-sliced matmul**
    (`src/emel/kernel/matmul/**`). A logical `mul_mat` is routed by explicit
    state-machine guards to serial, 2-, 4-, or 8-lane effects. The owner runs
-   lane zero while a construction-time-sized `fork_join_lane_pool` runs the
+   lane zero while a construction-time-sized `thread_pool_scheduler` runs the
    remaining lanes. Slices are contiguous, aligned to the packed row group,
    write disjoint output rows, and share read-only operands. Each output
    element's reduction stays wholly within one lane in the kernel's fixed
@@ -122,7 +122,7 @@ fork joins within the owning RTC dispatch, and none reorders a float reduction:
 
 2. **Moshi temporal-attention head lanes**
    (`src/emel/speech/predictor/moshi/executor/actions.hpp`). The same budgeted
-   lane pool dispatches disjoint head ranges to independent attention actors.
+   worker pool dispatches disjoint head ranges to independent attention actors.
    Each head writes a disjoint output interval and performs its softmax and
    weighted-value reductions locally in fixed order. The 1/2/4/8-lane result
    and cache state are compared exactly by

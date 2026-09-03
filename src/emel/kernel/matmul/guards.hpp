@@ -18,7 +18,7 @@ inline lane_mode guard_policy_lane_mode(const size_t active_lanes) noexcept {
                                                   : lane_mode::serial;
 }
 
-inline size_t guard_auto_active_lane_count(const lane_pool &pool) noexcept {
+inline size_t guard_auto_active_lane_count(const worker_pool &pool) noexcept {
   const size_t active_workers = pool.active_worker_count();
   if (active_workers >= 7u) {
     return 8u;
@@ -34,7 +34,7 @@ inline size_t guard_auto_active_lane_count(const lane_pool &pool) noexcept {
 namespace emel::kernel::matmul {
 
 inline execution_policy
-make_execution_policy(lane_pool &parallel_matmul_lanes,
+make_execution_policy(worker_pool &parallel_matmul_lanes,
                       const emel::kernel::kernel_kind kernel_kind,
                       const size_t active_lanes) noexcept {
   return execution_policy{
@@ -46,7 +46,7 @@ make_execution_policy(lane_pool &parallel_matmul_lanes,
 }
 
 inline execution_policy
-make_auto_execution_policy(lane_pool &parallel_matmul_lanes) noexcept {
+make_auto_execution_policy(worker_pool &parallel_matmul_lanes) noexcept {
   return make_execution_policy(
       parallel_matmul_lanes, emel::kernel::detect_host_kind(),
       guard::guard_auto_active_lane_count(parallel_matmul_lanes));

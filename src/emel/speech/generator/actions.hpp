@@ -869,13 +869,42 @@ struct effect_execute_wavefront_phase_parallel {
       runtime_ev.request.complete_out = false;
     }
 
-    wavefront_stage_pool::join_group group{};
+    wavefront_stage_worker_pool::join_group group{};
     emel::policy::fork_join_start_gate gate{};
     size_t submitted_tasks = 0u;
-    bool all_submitted = true;
 
-    if constexpr (encode_active) {
-      const bool submitted = ctx.collaborators.stage_pool->try_submit(
+    if constexpr (encode_active && decode_active) {
+      submitted_tasks = ctx.collaborators.stage_pool->try_submit_batch(
+          group,
+          [&runtime_ev, &ctx, &gate]() noexcept {
+            effect_record_worker_entry(ctx);
+            gate.arrive_and_wait();
+            typename dependencies_type::wavefront_encode_event request{
+                runtime_ev.request.pcm_in, encoded_lane<encode_lane_type>(ctx)};
+            request.error_out = &runtime_ev.ctx.encode_err;
+            runtime_ev.ctx.encode_accepted =
+                ctx.collaborators.wavefront_encoder.process_event(request);
+            encoded_attribution<encode_lane_type>(ctx) =
+                runtime_ev.request.input_attribution;
+            effect_record_worker_exit(ctx);
+          },
+          [&runtime_ev, &ctx, &gate]() noexcept {
+            effect_record_worker_entry(ctx);
+            gate.arrive_and_wait();
+            typename dependencies_type::wavefront_decode_event request{
+                std::span<const int32_t>{generated_lane<decode_lane_type>(ctx)},
+                ctx.decoded_pcm()};
+            request.error_out = &runtime_ev.ctx.decode_err;
+            runtime_ev.ctx.decode_accepted =
+                ctx.collaborators.wavefront_decoder.process_event(request);
+            runtime_ev.ctx.decoded_attribution =
+                generated_attribution<decode_lane_type>(ctx);
+            runtime_ev.ctx.decoded_text_token =
+                generated_text_token<decode_lane_type>(ctx);
+            effect_record_worker_exit(ctx);
+          });
+    } else if constexpr (encode_active) {
+      submitted_tasks = ctx.collaborators.stage_pool->try_submit_batch(
           group, [&runtime_ev, &ctx, &gate]() noexcept {
             effect_record_worker_entry(ctx);
             gate.arrive_and_wait();
@@ -888,13 +917,8 @@ struct effect_execute_wavefront_phase_parallel {
                 runtime_ev.request.input_attribution;
             effect_record_worker_exit(ctx);
           });
-      submitted_tasks += static_cast<size_t>(submitted);
-      all_submitted = all_submitted && submitted;
-      effect_record_submission(ctx, submitted);
-    }
-
-    if constexpr (decode_active) {
-      const bool submitted = ctx.collaborators.stage_pool->try_submit(
+    } else if constexpr (decode_active) {
+      submitted_tasks = ctx.collaborators.stage_pool->try_submit_batch(
           group, [&runtime_ev, &ctx, &gate]() noexcept {
             effect_record_worker_entry(ctx);
             gate.arrive_and_wait();
@@ -910,11 +934,14 @@ struct effect_execute_wavefront_phase_parallel {
                 generated_text_token<decode_lane_type>(ctx);
             effect_record_worker_exit(ctx);
           });
-      submitted_tasks += static_cast<size_t>(submitted);
-      all_submitted = all_submitted && submitted;
-      effect_record_submission(ctx, submitted);
     }
 
+    const size_t requested_tasks = static_cast<size_t>(encode_active) +
+                                   static_cast<size_t>(decode_active);
+    for (size_t index = 0u; index < requested_tasks; ++index) {
+      effect_record_submission(ctx, index < submitted_tasks);
+    }
+    const bool all_submitted = submitted_tasks == requested_tasks;
     gate.open_after_arrivals(submitted_tasks);
 
     if constexpr (middle_active) {
@@ -929,7 +956,7 @@ struct effect_execute_wavefront_phase_parallel {
           encoded_attribution<middle_lane_type>(ctx);
     }
 
-    (void)group.wait();
+    const bool joined = group.wait();
     effect_record_joins(ctx, submitted_tasks);
     if constexpr (encode_active) {
       std::copy(encoded_lane<encode_lane_type>(ctx).begin(),
@@ -937,7 +964,7 @@ struct effect_execute_wavefront_phase_parallel {
                 runtime_ev.request.encoded_tokens_out.begin());
     }
     runtime_ev.ctx.all_submitted = all_submitted;
-    runtime_ev.ctx.joined = true;
+    runtime_ev.ctx.joined = joined;
   }
 };
 
@@ -1140,25 +1167,18 @@ struct effect_reset_wavefront_children_parallel {
   void operator()(const detail::event_wavefront_reset_run &runtime_ev,
                   context<dependencies_type> &ctx) const noexcept {
     runtime_ev.ctx = {};
-    wavefront_stage_pool::join_group group{};
-    size_t submitted_tasks = 0u;
-    bool all_submitted = true;
-
-    const bool encode_submitted = ctx.collaborators.stage_pool->try_submit(
-        group, [&runtime_ev, &ctx]() noexcept {
+    wavefront_stage_worker_pool::join_group group{};
+    const size_t submitted_tasks = ctx.collaborators.stage_pool->try_submit_batch(
+        group,
+        [&runtime_ev, &ctx]() noexcept {
           effect_record_worker_entry(ctx);
           typename dependencies_type::wavefront_encode_reset_event request{
               runtime_ev.ctx.encode_err};
           runtime_ev.ctx.encode_accepted =
               ctx.collaborators.wavefront_encoder.process_event(request);
           effect_record_worker_exit(ctx);
-        });
-    submitted_tasks += static_cast<size_t>(encode_submitted);
-    all_submitted = all_submitted && encode_submitted;
-    effect_record_submission(ctx, encode_submitted);
-
-    const bool decode_submitted = ctx.collaborators.stage_pool->try_submit(
-        group, [&runtime_ev, &ctx]() noexcept {
+        },
+        [&runtime_ev, &ctx]() noexcept {
           effect_record_worker_entry(ctx);
           typename dependencies_type::wavefront_decode_reset_event request{
               runtime_ev.ctx.decode_err};
@@ -1166,19 +1186,19 @@ struct effect_reset_wavefront_children_parallel {
               ctx.collaborators.wavefront_decoder.process_event(request);
           effect_record_worker_exit(ctx);
         });
-    submitted_tasks += static_cast<size_t>(decode_submitted);
-    all_submitted = all_submitted && decode_submitted;
-    effect_record_submission(ctx, decode_submitted);
+    effect_record_submission(ctx, submitted_tasks == 2u);
+    effect_record_submission(ctx, submitted_tasks == 2u);
+    const bool all_submitted = submitted_tasks == 2u;
 
     typename dependencies_type::wavefront_middle_reset_event middle_request{
         runtime_ev.ctx.middle_err};
     runtime_ev.ctx.middle_accepted =
         ctx.collaborators.wavefront_middle.process_event(middle_request);
 
-    (void)group.wait();
+    const bool joined = group.wait();
     effect_record_joins(ctx, submitted_tasks);
     runtime_ev.ctx.all_submitted = all_submitted;
-    runtime_ev.ctx.joined = true;
+    runtime_ev.ctx.joined = joined;
   }
 };
 

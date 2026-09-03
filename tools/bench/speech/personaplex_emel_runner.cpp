@@ -193,7 +193,7 @@ template <class middle_type> struct personaplex_wavefront_dependencies {
   mimi_wavefront_actor &wavefront_encoder;
   middle_type &wavefront_middle;
   mimi_wavefront_actor &wavefront_decoder;
-  generator::action::wavefront_stage_pool *stage_pool;
+  generator::action::wavefront_stage_worker_pool *stage_pool;
   generator::action::wavefront_diagnostics &stage_diagnostics;
   generator::action::wavefront_stage_mode stage_mode;
   int32_t frame_samples = 0;
@@ -610,21 +610,28 @@ int main(int argc, char **argv) {
   emel::kernel::sm prediction_kernel{};
   const size_t stage_worker_count =
       config.cpu_threads == 4u
-          ? generator::action::wavefront_stage_pool::static_worker_count
+          ? generator::action::wavefront_stage_worker_pool::static_worker_count
           : 0u;
   const size_t available_matmul_lanes = config.cpu_threads - stage_worker_count;
   const size_t matmul_lane_count = available_matmul_lanes >= 8u   ? 8u
                                    : available_matmul_lanes >= 4u ? 4u
                                    : available_matmul_lanes >= 2u ? 2u
                                                                   : 1u;
-  std::optional<generator::action::wavefront_stage_pool>
+  std::optional<generator::action::wavefront_stage_worker_pool>
       wavefront_stage_workers = {};
   if (stage_worker_count != 0u) {
     wavefront_stage_workers.emplace();
   }
-  std::optional<emel::kernel::matmul::lane_pool> prediction_matmul_lanes = {};
+  std::optional<emel::kernel::matmul::worker_pool> prediction_matmul_lanes = {};
   if (matmul_lane_count > 1u) {
-    prediction_matmul_lanes.emplace(matmul_lane_count - 1u);
+    const auto budget = emel::kernel::matmul::worker_pool::try_worker_budget(
+        matmul_lane_count - 1u);
+    if (!budget) {
+      std::fprintf(stderr, "invalid matmul worker budget: %zu\n",
+                   matmul_lane_count - 1u);
+      return 2;
+    }
+    prediction_matmul_lanes.emplace(budget);
   }
   const size_t matmul_worker_count =
       prediction_matmul_lanes ? prediction_matmul_lanes->active_worker_count()

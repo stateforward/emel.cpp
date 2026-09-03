@@ -53,7 +53,7 @@ struct dependencies {
   emel::kernel::matmul::sm &matmul;
   emel::kernel::matmul::lane_mode matmul_lane_mode =
       emel::kernel::matmul::lane_mode::serial;
-  emel::kernel::matmul::lane_pool *attention_lanes = nullptr;
+  emel::kernel::matmul::worker_pool *attention_lanes = nullptr;
   std::size_t active_attention_lanes = 1u;
   emel::logits::sampler::sm *sampler = nullptr;
   policies policy = {};
@@ -117,7 +117,7 @@ struct context {
   emel::kernel::sm &kernel;
   emel::kernel::matmul::sm &matmul;
   const emel::kernel::matmul::lane_mode matmul_lane_mode;
-  emel::kernel::matmul::lane_pool *attention_lanes = nullptr;
+  emel::kernel::matmul::worker_pool *attention_lanes = nullptr;
   const std::size_t active_attention_lanes;
   std::unique_ptr<attention_lane_storage> attention_actors = {};
   emel::logits::sampler::sm *sampler = nullptr;

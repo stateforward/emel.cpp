@@ -4,16 +4,10 @@
 #include <array>
 #include <atomic>
 #include <chrono>
-#include <fstream>
 #include <memory>
 #include <semaphore>
-#include <string>
 #include <thread>
 
-#if defined(__linux__)
-#include <sys/syscall.h>
-#include <unistd.h>
-#endif
 
 #include "../allocation_tracker.hpp"
 #include "emel/sm.hpp"
@@ -263,16 +257,6 @@ bool await_result(emel::bool_task & task) {
   return task.result();
 }
 
-#if defined(__linux__)
-uint64_t thread_runtime_nanoseconds(const int64_t tid) {
-  std::ifstream input{"/proc/self/task/" + std::to_string(tid) +
-                      "/schedstat"};
-  uint64_t runtime_nanoseconds = 0u;
-  input >> runtime_nanoseconds;
-  REQUIRE(input.good());
-  return runtime_nanoseconds;
-}
-#endif
 
 }  // namespace
 
@@ -736,8 +720,8 @@ TEST_CASE("thread_pool_scheduler_fork_join_survives_rapid_repeated_rounds") {
         static_cast<int64_t>(k_rounds) * k_lanes);
 }
 
-TEST_CASE("fork_join_lane_pool_wait_returns_after_worker_slot_reusable") {
-  using pool_type = emel::policy::fork_join_lane_pool<1u, 128u>;
+TEST_CASE("thread_pool_scheduler_wait_returns_after_worker_slot_reusable") {
+  using pool_type = emel::policy::thread_pool_scheduler<1u, 2u, 128u>;
   pool_type pool{};
   constexpr int32_t k_rounds = 20000;
   std::atomic<int64_t> ran{0};
@@ -757,68 +741,9 @@ TEST_CASE("fork_join_lane_pool_wait_returns_after_worker_slot_reusable") {
   CHECK(ran.load(std::memory_order_acquire) == k_rounds);
 }
 
-TEST_CASE("fork_join_lane_pool_blocks_instead_of_polling_while_idle") {
-#if defined(__linux__) && (defined(__x86_64__) || defined(__i386__))
-  using pool_type = emel::policy::fork_join_lane_pool<1u, 128u>;
-  pool_type pool{};
-  pool_type::join_group group{};
-  std::atomic<int64_t> worker_tid{0};
 
-  REQUIRE(pool.try_submit(group, [&]() noexcept {
-    worker_tid.store(static_cast<int64_t>(::syscall(SYS_gettid)),
-                     std::memory_order_release);
-  }));
-  REQUIRE(group.wait());
-  const int64_t tid = worker_tid.load(std::memory_order_acquire);
-  REQUIRE(tid > 0);
-
-  const uint64_t runtime_before = thread_runtime_nanoseconds(tid);
-  std::this_thread::sleep_for(std::chrono::milliseconds{50});
-  const uint64_t runtime_after = thread_runtime_nanoseconds(tid);
-
-  CHECK(runtime_after - runtime_before < 2'000'000u);
-#else
-  MESSAGE("idle worker CPU-time proof requires Linux x86 schedstat");
-#endif
-}
-
-TEST_CASE("fork_join_lane_pool_shutdown_wakes_blocked_workers") {
-  using pool_type = emel::policy::fork_join_lane_pool<2u, 128u>;
-  auto pool = std::make_unique<pool_type>();
-  pool_type::join_group group{};
-  std::atomic<bool> task_entered{false};
-  std::atomic<bool> release_task{false};
-  std::atomic<bool> shutdown_started{false};
-  std::atomic<bool> shutdown_finished{false};
-
-  REQUIRE(pool->try_submit(group, [&]() noexcept {
-    task_entered.store(true, std::memory_order_release);
-    while (!release_task.load(std::memory_order_acquire)) {
-      std::this_thread::yield();
-    }
-  }));
-  require_eventually("worker task did not enter", [&]() {
-    return task_entered.load(std::memory_order_acquire);
-  });
-
-  std::thread shutdown([&]() {
-    shutdown_started.store(true, std::memory_order_release);
-    pool.reset();
-    shutdown_finished.store(true, std::memory_order_release);
-  });
-  require_eventually("pool shutdown did not start", [&]() {
-    return shutdown_started.load(std::memory_order_acquire);
-  });
-  release_task.store(true, std::memory_order_release);
-  require_eventually("pool shutdown did not wake blocked workers", [&]() {
-    return shutdown_finished.load(std::memory_order_acquire);
-  });
-  shutdown.join();
-  CHECK(group.wait());
-}
-
-TEST_CASE("fork_join_lane_pool_batch_uses_distinct_workers_and_drains") {
-  using pool_type = emel::policy::fork_join_lane_pool<2u, 128u>;
+TEST_CASE("thread_pool_scheduler_batch_uses_distinct_workers_and_drains") {
+  using pool_type = emel::policy::thread_pool_scheduler<2u, 2u, 128u>;
   pool_type pool{};
   pool_type::join_group group{};
   std::atomic<int32_t> entered{0};
@@ -847,9 +772,11 @@ TEST_CASE("fork_join_lane_pool_batch_uses_distinct_workers_and_drains") {
   CHECK(group.wait());
 }
 
-TEST_CASE("fork_join_lane_pool_starts_only_the_runtime_worker_budget") {
-  using pool_type = emel::policy::fork_join_lane_pool<7u, 128u>;
-  pool_type pool{1u};
+TEST_CASE("thread_pool_scheduler_starts_only_the_runtime_worker_budget") {
+  using pool_type = emel::policy::thread_pool_scheduler<7u, 8u, 128u>;
+  const auto budget = pool_type::try_worker_budget(1u);
+  REQUIRE(budget);
+  pool_type pool{budget};
   CHECK(pool.active_worker_count() == 1u);
 
   pool_type::join_group group{};
@@ -859,49 +786,49 @@ TEST_CASE("fork_join_lane_pool_starts_only_the_runtime_worker_budget") {
       [&]() noexcept { ran.fetch_add(1, std::memory_order_relaxed); },
       [&]() noexcept { ran.fetch_add(1, std::memory_order_relaxed); });
 
-  CHECK(submitted == 1u);
+  CHECK(submitted == 0u);
   CHECK_FALSE(group.wait());
-  CHECK(ran.load(std::memory_order_acquire) == 1);
+  CHECK(ran.load(std::memory_order_acquire) == 0);
 }
 
-TEST_CASE("fork_join_lane_pool_runtime_budget_constructor is fallible") {
-  using pool_type = emel::policy::fork_join_lane_pool<7u, 128u>;
-  CHECK_FALSE(std::is_nothrow_default_constructible_v<pool_type>);
-  CHECK_FALSE(std::is_nothrow_constructible_v<pool_type, std::size_t>);
-  CHECK_THROWS_AS(pool_type{0u}, std::invalid_argument);
+TEST_CASE("thread_pool_scheduler_runtime_worker_budget_is_explicit") {
+  using pool_type = emel::policy::thread_pool_scheduler<7u, 8u, 128u>;
+  CHECK_FALSE(pool_type::try_worker_budget(0u));
+  CHECK_FALSE(pool_type::try_worker_budget(8u));
+  const auto budget = pool_type::try_worker_budget(3u);
+  REQUIRE(budget);
+  CHECK(budget.value() == 3u);
 }
 
-TEST_CASE("fork_join_lane_pool_batch_rejects_partial_claim_and_reuses_slots") {
-  using pool_type = emel::policy::fork_join_lane_pool<2u, 128u>;
+TEST_CASE("thread_pool_scheduler_batch_rejects_busy_pool_and_reuses_slots") {
+  using pool_type = emel::policy::thread_pool_scheduler<2u, 2u, 128u>;
   pool_type pool{};
-  pool_type::join_group partial_group{};
-  std::atomic<int32_t> entered{0};
-  std::atomic<bool> release{false};
-  std::atomic<bool> unclaimed_ran{false};
+  pool_type::join_group blocker_group{};
+  std::atomic<bool> blocker_entered{false};
+  std::atomic<bool> release_blocker{false};
 
-  const size_t submitted = pool.try_submit_batch(
-      partial_group,
-      [&]() noexcept {
-        entered.fetch_add(1, std::memory_order_release);
-        while (!release.load(std::memory_order_acquire)) {
-          std::this_thread::yield();
-        }
-      },
-      [&]() noexcept {
-        entered.fetch_add(1, std::memory_order_release);
-        while (!release.load(std::memory_order_acquire)) {
-          std::this_thread::yield();
-        }
-      },
-      [&]() noexcept { unclaimed_ran.store(true, std::memory_order_release); });
-
-  CHECK(submitted == 2u);
-  require_eventually("partial batch tasks did not enter", [&]() {
-    return entered.load(std::memory_order_acquire) == 2;
+  REQUIRE(pool.try_submit(blocker_group, [&]() noexcept {
+    blocker_entered.store(true, std::memory_order_release);
+    while (!release_blocker.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+  }));
+  require_eventually("blocking task did not enter", [&]() {
+    return blocker_entered.load(std::memory_order_acquire);
   });
-  CHECK_FALSE(unclaimed_ran.load(std::memory_order_acquire));
-  release.store(true, std::memory_order_release);
-  CHECK_FALSE(partial_group.wait());
+
+  pool_type::join_group rejected_group{};
+  std::atomic<int32_t> rejected_ran{0};
+  const size_t rejected_count = pool.try_submit_batch(
+      rejected_group,
+      [&]() noexcept { rejected_ran.fetch_add(1, std::memory_order_relaxed); },
+      [&]() noexcept { rejected_ran.fetch_add(1, std::memory_order_relaxed); });
+  CHECK(rejected_count == 0u);
+  CHECK_FALSE(rejected_group.wait());
+  CHECK(rejected_ran.load(std::memory_order_acquire) == 0);
+
+  release_blocker.store(true, std::memory_order_release);
+  CHECK(blocker_group.wait());
 
   pool_type::join_group reuse_group{};
   std::atomic<int32_t> reused{0};
@@ -923,8 +850,8 @@ TEST_CASE("fork_join_lane_pool_batch_rejects_partial_claim_and_reuses_slots") {
   CHECK(allocation_count == 0u);
 }
 
-TEST_CASE("fork_join_lane_pool_batch_rejects_same_pool_worker_submit") {
-  using pool_type = emel::policy::fork_join_lane_pool<1u, 128u>;
+TEST_CASE("thread_pool_scheduler_batch_rejects_same_pool_worker_submit") {
+  using pool_type = emel::policy::thread_pool_scheduler<1u, 2u, 128u>;
   pool_type pool{};
   pool_type::join_group outer_group{};
   std::atomic<size_t> nested_submitted{1u};

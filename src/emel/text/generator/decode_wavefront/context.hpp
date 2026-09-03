@@ -5,11 +5,11 @@
 
 namespace emel::text::generator::decode_wavefront::action {
 
-using lane_pool =
-    emel::policy::fork_join_lane_pool<event::k_max_lanes, 128u>;
+using worker_pool =
+    emel::policy::thread_pool_scheduler<event::k_max_lanes, 8u, 128u>;
 
 struct context {
-  lane_pool *pool = nullptr;
+  worker_pool *pool = nullptr;
 };
 
 } // namespace emel::text::generator::decode_wavefront::action

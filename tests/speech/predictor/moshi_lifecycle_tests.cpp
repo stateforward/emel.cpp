@@ -45,7 +45,7 @@ struct serial_matmul_fixture {
 };
 
 struct parallel_matmul_fixture {
-  emel::kernel::matmul::lane_pool pool = {};
+  emel::kernel::matmul::worker_pool pool = {};
   emel::kernel::matmul::execution_policy policy =
       emel::kernel::matmul::make_execution_policy(
           pool, emel::kernel::detect_host_kind(), 2u);
@@ -58,7 +58,7 @@ moshi_executor::dependencies make_executor_dependencies(
     emel::logits::sampler::sm *sampler = nullptr,
     const emel::kernel::matmul::lane_mode matmul_lane_mode =
         emel::kernel::matmul::lane_mode::serial,
-    emel::kernel::matmul::lane_pool *attention_lanes = nullptr,
+    emel::kernel::matmul::worker_pool *attention_lanes = nullptr,
     const std::size_t active_attention_lanes = 1u) noexcept {
   return moshi_executor::dependencies{
       .kv = kv,
@@ -1713,9 +1713,9 @@ TEST_CASE("speech Moshi attention benchmark binds temporal and depformer KV") {
   CHECK(source.find("depformer_key_cache") != std::string::npos);
   CHECK(source.find("depformer_value_cache") != std::string::npos);
   CHECK(source.find(".depformer =") != std::string::npos);
-  CHECK(source.find("attention_lanes.emplace(lane_count - 1u)") !=
-        std::string::npos);
-  CHECK(source.find("attention_lanes.emplace()") == std::string::npos);
+  CHECK(source.find("worker_pool::try_worker_budget(") != std::string::npos);
+  CHECK(source.find("lane_count - 1u") != std::string::npos);
+  CHECK(source.find("attention_lanes.emplace(budget)") != std::string::npos);
 }
 
 TEST_CASE("speech_moshi_generator_graph_outputs_use_explicit_transitions") {
@@ -2924,7 +2924,7 @@ struct attention_parent_fixture {
   std::unique_ptr<memory_streaming::sm> depformer_positions = {};
   std::unique_ptr<emel::kernel::sm> kernel = {};
   std::unique_ptr<serial_matmul_fixture> matmul = {};
-  std::unique_ptr<emel::kernel::matmul::lane_pool> pool = {};
+  std::unique_ptr<emel::kernel::matmul::worker_pool> pool = {};
   std::unique_ptr<moshi_executor::sm> executor = {};
   std::vector<int32_t> input = {};
   std::vector<float> input_embedding = {};
@@ -2955,7 +2955,7 @@ make_attention_parent_fixture(const std::size_t lanes,
   fixture->kernel = std::make_unique<emel::kernel::sm>();
   fixture->matmul = std::make_unique<serial_matmul_fixture>();
   if (lanes > 1u) {
-    fixture->pool = std::make_unique<emel::kernel::matmul::lane_pool>();
+    fixture->pool = std::make_unique<emel::kernel::matmul::worker_pool>();
   }
   const auto views = prepare_kv_views(model, fixture->temporal.get(), nullptr,
                                       fixture->temporal_positions.get(),
@@ -3110,13 +3110,13 @@ TEST_CASE(
   std::atomic<bool> release_blocker = false;
   std::atomic<std::size_t> drain_probe_entered = 0u;
   std::atomic<bool> release_drain_probes = false;
-  emel::kernel::matmul::lane_pool::join_group blocker_group{};
-  emel::kernel::matmul::lane_pool::join_group drain_probe_group{};
+  emel::kernel::matmul::worker_pool::join_group blocker_group{};
+  emel::kernel::matmul::worker_pool::join_group drain_probe_group{};
   struct release_tasks {
     std::atomic<bool> &release_blocker;
     std::atomic<bool> &release_drain_probes;
-    emel::kernel::matmul::lane_pool::join_group &blocker_group;
-    emel::kernel::matmul::lane_pool::join_group &drain_probe_group;
+    emel::kernel::matmul::worker_pool::join_group &blocker_group;
+    emel::kernel::matmul::worker_pool::join_group &drain_probe_group;
     ~release_tasks() {
       release_drain_probes.store(true, std::memory_order_release);
       (void)drain_probe_group.wait();

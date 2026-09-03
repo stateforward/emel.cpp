@@ -230,7 +230,7 @@ struct native_quantized_route_fixture {
 
 struct compute_guard_fixture {
   emel::text::generator::action::context context = {};
-  emel::kernel::matmul::lane_pool parallel_matmul_lanes = {};
+  emel::kernel::matmul::worker_pool parallel_matmul_lanes = {};
   emel::kernel::matmul::execution_policy matmul_policy =
       emel::kernel::matmul::make_auto_execution_policy(
           parallel_matmul_lanes);

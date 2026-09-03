@@ -101,7 +101,7 @@ includes both:
 Generated generation compare rows run two benchmark lanes by default: `single` and
 `multithreaded`. The `single` lane reports one EMEL serial matmul lane and a llama.cpp
 `n_threads=1,n_threads_batch=1` reference by default. The `multithreaded` lane reports EMEL's
-bounded parallel matmul lane pool (`thread_count=8`) and defaults the llama.cpp reference to
+bounded parallel matmul worker pool (`thread_count=8`) and defaults the llama.cpp reference to
 `n_threads=8,n_threads_batch=8` unless explicitly overridden.
 Preserved rows keep their previous snapshot provenance and are not covered by the current threading
 metadata. Use `EMEL_BENCH_GENERATION_LANE=single` or

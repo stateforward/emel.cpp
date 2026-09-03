@@ -48,7 +48,7 @@ constexpr size_t k_worker_lanes = k_lanes - 1u;
 constexpr int32_t k_dim = 2048;
 constexpr int32_t k_gemm_tokens = 8;
 
-using lane_pool = emel::kernel::matmul::lane_pool;
+using worker_pool = emel::kernel::matmul::worker_pool;
 
 uint64_t weight_group_rows(const dtype type) noexcept {
   if (emel::kernel::matmul::guard::guard_uses_x4_row_groups(type)) {
@@ -145,7 +145,7 @@ tensor_view_mut make_output_view(float *data, const int32_t tokens,
 }
 
 struct lane_fixture {
-  lane_pool pool = {};
+  worker_pool pool = {};
   emel::kernel::matmul::execution_policy policy =
       emel::kernel::matmul::make_execution_policy(pool, host_kernel_kind(),
                                                   k_lanes);
@@ -362,7 +362,7 @@ struct ggml_matmul_reference {
     ggml_build_forward_expand(graph, ggml_mul_mat(ctx, weights, activation));
     ggml_threadpool_params tp =
         ggml_threadpool_params_default(static_cast<int32_t>(k_lanes));
-    tp.poll = 100; // warm polling, matching EMEL's warm lane pool
+    tp.poll = 100; // warm polling, matching EMEL's warm worker pool
     threadpool = ggml_threadpool_new(&tp);
     plan = ggml_graph_plan(graph, static_cast<int32_t>(k_lanes), threadpool);
     work.resize(plan.work_size != 0u ? plan.work_size : 1u);

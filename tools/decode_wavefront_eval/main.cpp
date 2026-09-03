@@ -58,9 +58,9 @@
 
 namespace {
 
-// The wavefront's lane pool (same type as
+// The wavefront's worker pool (same type as
 // src/emel/text/generator/decode_wavefront/context.hpp).
-using lane_pool = emel::policy::thread_pool_scheduler<8u, 16u, 128u>;
+using worker_pool = emel::policy::thread_pool_scheduler<8u, 16u, 128u>;
 
 constexpr size_t k_output_capacity = 8192u;
 
@@ -124,7 +124,7 @@ struct lane_session {
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
   emel::model::generation::contract generation_contract = {};
-  emel::kernel::matmul::lane_pool parallel_matmul_lanes = {};
+  emel::kernel::matmul::worker_pool parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   initialize_capture initialize = {};
   generation_capture generation = {};
@@ -579,20 +579,40 @@ void run_sequential(const std::span<std::unique_ptr<lane_session>> active,
   }
 }
 
-void run_parallel(lane_pool &pool,
+void run_parallel(worker_pool &pool,
                   const std::span<std::unique_ptr<lane_session>> active,
                   const std::string_view prompt, int32_t tokens) {
-  lane_pool::join_group group{};
+  worker_pool::join_group group{};
   emel::policy::fork_join_start_gate gate{};
+  auto make_task = [prompt, tokens, &gate](std::unique_ptr<lane_session> &lane) {
+    return [session = lane.get(), prompt, tokens, &gate]() noexcept {
+      gate.arrive_and_wait();
+      run_generate(*session, prompt, tokens);
+    };
+  };
   size_t submitted_lanes = 0u;
-  for (auto &s : active) {
-    lane_session *lane = s.get();
-    const bool submitted =
-        pool.try_submit(group, [lane, prompt, tokens, &gate]() noexcept {
-          gate.arrive_and_wait();
-          run_generate(*lane, prompt, tokens);
-        });
-    submitted_lanes += submitted ? 1u : 0u;
+  switch (active.size()) {
+  case 1u:
+    submitted_lanes = pool.try_submit_batch(group, make_task(active[0]));
+    break;
+  case 2u:
+    submitted_lanes = pool.try_submit_batch(
+        group, make_task(active[0]), make_task(active[1]));
+    break;
+  case 4u:
+    submitted_lanes = pool.try_submit_batch(
+        group, make_task(active[0]), make_task(active[1]),
+        make_task(active[2]), make_task(active[3]));
+    break;
+  case 8u:
+    submitted_lanes = pool.try_submit_batch(
+        group, make_task(active[0]), make_task(active[1]),
+        make_task(active[2]), make_task(active[3]),
+        make_task(active[4]), make_task(active[5]),
+        make_task(active[6]), make_task(active[7]));
+    break;
+  default:
+    break;
   }
   gate.open_after_arrivals(submitted_lanes);
   (void)group.wait();
@@ -696,7 +716,7 @@ int main(int argc, char **argv) {
   std::printf("# (decode timing excludes model load + generator init; "
               "model weights shared read-only across lanes)\n");
 
-  lane_pool pool;
+  worker_pool pool;
   const std::array<int32_t, 4> lane_counts = {1, 2, 4, 8};
   for (const int32_t n : lane_counts) {
     if (n > max_lanes) {

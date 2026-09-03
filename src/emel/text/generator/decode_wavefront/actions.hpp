@@ -62,30 +62,71 @@ struct effect_dispatch_parallel_lanes {
       lane.accepted = false;
     }
 
-    // Fork/join over the already-selected lane group. Submission failure leaves
-    // the lane rejected; the explicit post-join guards route that outcome.
-    lane_pool::join_group group{};
+    // Fork/join over the already-selected lane group. The upstream batch API
+    // either publishes every lane or rejects the whole group before moving a
+    // callable, so post-join guards keep routing scheduler failures explicitly.
+    worker_pool::join_group group{};
     emel::policy::fork_join_start_gate gate{};
-    size_t submitted_lanes = 0u;
-    bool all_submitted = true;
-    for (auto & lane : ev.lanes) {
-      auto * lane_ptr = &lane;
-      const bool submitted =
-          ctx.pool->try_submit(group, [lane_ptr, &gate]() noexcept {
+    auto make_task = [&gate](event::lane &lane) noexcept {
+      auto *lane_ptr = &lane;
+      return [lane_ptr, &gate]() noexcept {
         gate.arrive_and_wait();
-        auto & current_lane = *lane_ptr;
+        auto &current_lane = *lane_ptr;
         const emel::graph::event::compute_reserved reserved_compute{
             current_lane.compute};
         current_lane.accepted =
             current_lane.graph.process_event(reserved_compute);
-      });
-      submitted_lanes += static_cast<size_t>(submitted);
-      all_submitted = all_submitted && submitted;
+      };
+    };
+    size_t submitted_lanes = 0u;
+    switch (ev.lanes.size()) {
+    case 2u:
+      submitted_lanes = ctx.pool->try_submit_batch(
+          group, make_task(ev.lanes[0]), make_task(ev.lanes[1]));
+      break;
+    case 3u:
+      submitted_lanes = ctx.pool->try_submit_batch(
+          group, make_task(ev.lanes[0]), make_task(ev.lanes[1]),
+          make_task(ev.lanes[2]));
+      break;
+    case 4u:
+      submitted_lanes = ctx.pool->try_submit_batch(
+          group, make_task(ev.lanes[0]), make_task(ev.lanes[1]),
+          make_task(ev.lanes[2]), make_task(ev.lanes[3]));
+      break;
+    case 5u:
+      submitted_lanes = ctx.pool->try_submit_batch(
+          group, make_task(ev.lanes[0]), make_task(ev.lanes[1]),
+          make_task(ev.lanes[2]), make_task(ev.lanes[3]),
+          make_task(ev.lanes[4]));
+      break;
+    case 6u:
+      submitted_lanes = ctx.pool->try_submit_batch(
+          group, make_task(ev.lanes[0]), make_task(ev.lanes[1]),
+          make_task(ev.lanes[2]), make_task(ev.lanes[3]),
+          make_task(ev.lanes[4]), make_task(ev.lanes[5]));
+      break;
+    case 7u:
+      submitted_lanes = ctx.pool->try_submit_batch(
+          group, make_task(ev.lanes[0]), make_task(ev.lanes[1]),
+          make_task(ev.lanes[2]), make_task(ev.lanes[3]),
+          make_task(ev.lanes[4]), make_task(ev.lanes[5]),
+          make_task(ev.lanes[6]));
+      break;
+    case 8u:
+      submitted_lanes = ctx.pool->try_submit_batch(
+          group, make_task(ev.lanes[0]), make_task(ev.lanes[1]),
+          make_task(ev.lanes[2]), make_task(ev.lanes[3]),
+          make_task(ev.lanes[4]), make_task(ev.lanes[5]),
+          make_task(ev.lanes[6]), make_task(ev.lanes[7]));
+      break;
+    default:
+      break;
     }
     gate.open_after_arrivals(submitted_lanes);
-    ev.out.all_submitted = all_submitted;
+    ev.out.all_submitted = submitted_lanes == ev.lanes.size();
     ev.out.joined = group.wait();
-    ev.out.dispatched_lanes = static_cast<int32_t>(ev.lanes.size());
+    ev.out.dispatched_lanes = static_cast<int32_t>(submitted_lanes);
   }
 };
 
