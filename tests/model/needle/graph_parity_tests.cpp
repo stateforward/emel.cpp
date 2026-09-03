@@ -279,6 +279,79 @@ TEST_CASE("needle request normalizes deterministic generated call envelopes") {
         "{\"error\":null,\"error_code\":null,\"function_calls\":[{\"name\":\"route\",\"arguments\":{\"domain\":\"other\",\"effort\":\"low\"}}],\"reason\":null,\"reasoning\":\"short reason\",\"success\":true,\"type\":\"call\",\"validation\":{\"negation\":false,\"ungrounded\":[]}}");
 }
 
+TEST_CASE("needle request rejects malformed tool-call JSON") {
+  auto fixture = load_contract_fixture();
+  emel::model::needle::request::action::context ctx{
+      emel::model::needle::request::action::dependencies{fixture.contract}};
+  constexpr std::array malformed = {
+      "<think>reason</think><tool_call>[not-json]</tool_call>",
+      "<tool_call>[{\"name\":\"route\",\"arguments\":{\"domain\":\"other\",\"effort\":\"low\",}}]</tool_call>",
+      "<tool_call>[{\"name\":\"route\",\"arguments\":{\"domain\":\"other\",\"effort\":\"low\"},}]</tool_call>",
+      "<tool_call>[{\"name\":\"route\",\"arguments\":{\"domain\":\"other\",\"effort\":\"low\"}},]</tool_call>",
+      "<tool_call>[{\"name\":\"route\",\"name\":\"route\",\"arguments\":{\"domain\":\"other\",\"effort\":\"low\"}}]</tool_call>",
+      "<tool_call>[{\"name\":\"route\",\"arguments\":{\"domain\":\"other\",\"domain\":\"chat\",\"effort\":\"low\"}}]</tool_call>",
+      "<tool_call>[{\"name\":\"route\",\"arguments\":{\"domain\":\"other\"}}]</tool_call>",
+      "<tool_call>[{\"name\":\"route\",\"arguments\":{\"domain\":\"other\",\"effort\":\"low\",\"extra\":\"x\"}}]</tool_call>",
+      "<tool_call>[{\"name\":\"ro\\ute\",\"arguments\":{\"domain\":\"other\",\"effort\":\"low\"}}]</tool_call>",
+  };
+  for (const std::string_view value : malformed) {
+    CAPTURE(value);
+    CHECK_FALSE(
+        emel::model::needle::request::action::normalize_generated_response(
+            ctx, value));
+    CHECK(ctx.normalized_envelope_size == 0u);
+  }
+}
+
+TEST_CASE("needle request rejects malformed configured tools JSON") {
+  auto fixture = load_contract_fixture();
+  const std::string_view prompt = first_request_prompts().front().prompt;
+  const size_t tools_at = prompt.find("<tools>") + 7u;
+  const size_t tools_end_at = prompt.find("</tools>", tools_at);
+  const std::string tools{prompt.substr(tools_at, tools_end_at - tools_at)};
+  constexpr std::array suffixes = {",]", "garbage", ""};
+  for (const std::string_view suffix : suffixes) {
+    emel::model::needle::request::sm request{fixture.contract};
+    std::string malformed = tools;
+    if (suffix == ",]") {
+      malformed.insert(malformed.size() - 1u, ",");
+    } else if (suffix.empty()) {
+      malformed = "{}";
+    } else {
+      malformed += suffix;
+    }
+    CAPTURE(malformed);
+    CHECK_FALSE(request.process_event(
+        emel::model::needle::request::event::configure{{}, malformed}));
+  }
+}
+
+TEST_CASE("needle request null timestamp dependency is safe") {
+  auto fixture = load_contract_fixture();
+  emel::model::needle::request::sm request{fixture.contract, nullptr};
+  constexpr std::string_view tools =
+      "[{\"name\":\"route\",\"parameters\":{\"type\":\"object\"}}]";
+  constexpr std::string_view query = "hello";
+  REQUIRE(request.process_event(
+      emel::model::needle::request::event::configure{{}, tools}));
+  REQUIRE(request.process_event(emel::model::needle::request::event::reset{}));
+  CHECK_FALSE(request.process_event(
+      emel::model::needle::request::event::complete{query, 1u}));
+}
+
+TEST_CASE("needle request invalid reconfigure clears prior reset state") {
+  auto fixture = load_contract_fixture();
+  emel::model::needle::request::sm request{fixture.contract};
+  constexpr std::string_view tools =
+      "[{\"name\":\"route\",\"parameters\":{\"type\":\"object\"}}]";
+  REQUIRE(request.process_event(
+      emel::model::needle::request::event::configure{{}, tools}));
+  REQUIRE(request.process_event(emel::model::needle::request::event::reset{}));
+  CHECK_FALSE(request.process_event(
+      emel::model::needle::request::event::configure{{}, "{}"}));
+  CHECK_FALSE(request.process_event(emel::model::needle::request::event::reset{}));
+}
+
 } // namespace
 
 uint64_t g_timing_clock = 0u;

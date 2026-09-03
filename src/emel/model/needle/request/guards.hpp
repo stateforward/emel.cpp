@@ -14,9 +14,10 @@ struct guard_configure_valid {
   bool operator()(const event::configure_run &ev,
                   const action::context &ctx) const noexcept {
     return ctx.bound.has_tokenizer && ev.request.system.size() <=
-                                          action::k_max_system_bytes &&
+                                      action::k_max_system_bytes &&
            !ev.request.tools_json.empty() &&
-           ev.request.tools_json.size() <= action::k_max_tools_bytes;
+           ev.request.tools_json.size() <= action::k_max_tools_bytes &&
+           action::validate_tools_json(ev.request.tools_json);
   }
 };
 

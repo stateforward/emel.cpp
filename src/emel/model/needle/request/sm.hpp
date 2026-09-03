@@ -145,8 +145,11 @@ struct sm : public emel::sm<model, action::context> {
               action::timestamp_now_fn timestamp_now =
                   &action::steady_timestamp_now)
       : base_type(std::in_place,
-                  action::dependencies{.bound = bound,
-                                       .timestamp_now = timestamp_now}) {}
+                  action::dependencies{
+                      .bound = bound,
+                      .timestamp_now = timestamp_now != nullptr
+                                           ? timestamp_now
+                                           : &action::steady_timestamp_now}) {}
 
   sm(const sm &) = delete;
   sm &operator=(const sm &) = delete;

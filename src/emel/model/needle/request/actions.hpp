@@ -114,6 +114,314 @@ inline bool append_json_literal(std::vector<char> &output, size_t &size,
   return true;
 }
 
+inline bool is_json_space(const char value) noexcept {
+  return value == ' ' || value == '\n' || value == '\r' || value == '\t';
+}
+
+struct json_cursor {
+  std::string_view input;
+  size_t offset = 0u;
+};
+
+inline void skip_json_space(json_cursor &cursor) noexcept {
+  while (cursor.offset < cursor.input.size() &&
+         is_json_space(cursor.input[cursor.offset]))
+    ++cursor.offset;
+}
+
+inline bool consume_json(json_cursor &cursor, const char expected) noexcept {
+  skip_json_space(cursor);
+  if (cursor.offset == cursor.input.size() ||
+      cursor.input[cursor.offset] != expected)
+    return false;
+  ++cursor.offset;
+  return true;
+}
+
+inline bool parse_json_string(json_cursor &cursor,
+                              std::string_view &unescaped) noexcept {
+  skip_json_space(cursor);
+  if (cursor.offset == cursor.input.size() ||
+      cursor.input[cursor.offset] != '"')
+    return false;
+  const size_t begin = ++cursor.offset;
+  bool escaped = false;
+  for (; cursor.offset < cursor.input.size(); ++cursor.offset) {
+    const unsigned char value =
+        static_cast<unsigned char>(cursor.input[cursor.offset]);
+    if (escaped) {
+      if (value == 'u') {
+        if (cursor.offset + 4u >= cursor.input.size()) return false;
+        for (size_t digit = 1u; digit <= 4u; ++digit) {
+          const char hex = cursor.input[cursor.offset + digit];
+          if (!((hex >= '0' && hex <= '9') || (hex >= 'a' && hex <= 'f') ||
+                (hex >= 'A' && hex <= 'F')))
+            return false;
+        }
+        cursor.offset += 4u;
+      } else if (value != '"' && value != '\\' && value != '/' &&
+                 value != 'b' && value != 'f' && value != 'n' &&
+                 value != 'r' && value != 't') {
+        return false;
+      }
+      escaped = false;
+      continue;
+    }
+    if (value == '\\') {
+      escaped = true;
+    } else if (value == '"') {
+      unescaped = cursor.input.substr(begin, cursor.offset - begin);
+      ++cursor.offset;
+      return unescaped.find('\\') == std::string_view::npos;
+    } else if (value < 0x20u) {
+      return false;
+    }
+  }
+  return false;
+}
+
+inline bool is_route_domain(const std::string_view value) noexcept {
+  return value == "agentic-coding" || value == "programming-qa" ||
+         value == "math" || value == "research" || value == "writing" ||
+         value == "extraction" || value == "chat" || value == "other";
+}
+
+inline bool is_route_effort(const std::string_view value) noexcept {
+  return value == "low" || value == "medium" || value == "high" ||
+         value == "xhigh";
+}
+
+inline bool parse_route_arguments(json_cursor &cursor) noexcept {
+  if (!consume_json(cursor, '{')) return false;
+  bool found_domain = false;
+  bool found_effort = false;
+  bool need_member = true;
+  for (;;) {
+    skip_json_space(cursor);
+    if (cursor.offset == cursor.input.size()) return false;
+    if (cursor.input[cursor.offset] == '}') {
+      if (need_member) return false;
+      ++cursor.offset;
+      return found_domain && found_effort;
+    }
+    std::string_view key = {};
+    std::string_view value = {};
+    if (!parse_json_string(cursor, key) || !consume_json(cursor, ':') ||
+        !parse_json_string(cursor, value))
+      return false;
+    if (key == "domain") {
+      if (found_domain || !is_route_domain(value)) return false;
+      found_domain = true;
+    } else if (key == "effort") {
+      if (found_effort || !is_route_effort(value)) return false;
+      found_effort = true;
+    } else {
+      return false;
+    }
+    need_member = false;
+    skip_json_space(cursor);
+    if (cursor.offset == cursor.input.size()) return false;
+    if (cursor.input[cursor.offset] == ',') {
+      ++cursor.offset;
+      need_member = true;
+      continue;
+    }
+    if (cursor.input[cursor.offset] != '}') return false;
+  }
+}
+
+inline bool parse_route_call_object(json_cursor &cursor) noexcept {
+  if (!consume_json(cursor, '{')) return false;
+  bool found_name = false;
+  bool found_arguments = false;
+  bool need_member = true;
+  for (;;) {
+    skip_json_space(cursor);
+    if (cursor.offset == cursor.input.size()) return false;
+    if (cursor.input[cursor.offset] == '}') {
+      if (need_member) return false;
+      ++cursor.offset;
+      return found_name && found_arguments;
+    }
+    std::string_view key = {};
+    if (!parse_json_string(cursor, key) || !consume_json(cursor, ':'))
+      return false;
+    if (key == "name") {
+      std::string_view name = {};
+      if (found_name || !parse_json_string(cursor, name) || name != "route")
+        return false;
+      found_name = true;
+    } else if (key == "arguments") {
+      if (found_arguments || !parse_route_arguments(cursor)) return false;
+      found_arguments = true;
+    } else {
+      return false;
+    }
+    need_member = false;
+    skip_json_space(cursor);
+    if (cursor.offset == cursor.input.size()) return false;
+    if (cursor.input[cursor.offset] == ',') {
+      ++cursor.offset;
+      need_member = true;
+      continue;
+    }
+    if (cursor.input[cursor.offset] != '}') return false;
+  }
+}
+
+inline bool validate_route_calls_json(const std::string_view calls) noexcept {
+  json_cursor cursor{calls};
+  if (!consume_json(cursor, '[')) return false;
+  bool need_element = true;
+  for (;;) {
+    skip_json_space(cursor);
+    if (cursor.offset == cursor.input.size()) return false;
+    if (cursor.input[cursor.offset] == ']') {
+      if (need_element) return false;
+      ++cursor.offset;
+      skip_json_space(cursor);
+      return cursor.offset == cursor.input.size();
+    }
+    if (!parse_route_call_object(cursor)) return false;
+    need_element = false;
+    skip_json_space(cursor);
+    if (cursor.offset == cursor.input.size()) return false;
+    if (cursor.input[cursor.offset] == ',') {
+      ++cursor.offset;
+      need_element = true;
+      continue;
+    }
+    if (cursor.input[cursor.offset] != ']') return false;
+  }
+}
+
+inline bool parse_json_value(json_cursor &cursor, uint32_t depth = 0u) noexcept {
+  if (depth > 32u) return false;
+  skip_json_space(cursor);
+  if (cursor.offset == cursor.input.size()) return false;
+  const char value = cursor.input[cursor.offset];
+  if (value == '"') {
+    std::string_view ignored = {};
+    return parse_json_string(cursor, ignored);
+  }
+  if (value == '{') {
+    ++cursor.offset;
+    bool need_member = true;
+    for (;;) {
+      skip_json_space(cursor);
+      if (cursor.offset == cursor.input.size()) return false;
+      if (cursor.input[cursor.offset] == '}') {
+        if (need_member) return false;
+        ++cursor.offset;
+        return true;
+      }
+      std::string_view key = {};
+      if (!parse_json_string(cursor, key) || !consume_json(cursor, ':') ||
+          !parse_json_value(cursor, depth + 1u)) return false;
+      need_member = false;
+      skip_json_space(cursor);
+      if (cursor.offset == cursor.input.size()) return false;
+      if (cursor.input[cursor.offset] == ',') {
+        ++cursor.offset;
+        need_member = true;
+        continue;
+      }
+      if (cursor.input[cursor.offset] != '}') return false;
+    }
+  }
+  if (value == '[') {
+    ++cursor.offset;
+    bool need_element = true;
+    for (;;) {
+      skip_json_space(cursor);
+      if (cursor.offset == cursor.input.size()) return false;
+      if (cursor.input[cursor.offset] == ']') {
+        if (need_element) return false;
+        ++cursor.offset;
+        return true;
+      }
+      if (!parse_json_value(cursor, depth + 1u)) return false;
+      need_element = false;
+      skip_json_space(cursor);
+      if (cursor.offset == cursor.input.size()) return false;
+      if (cursor.input[cursor.offset] == ',') {
+        ++cursor.offset;
+        need_element = true;
+        continue;
+      }
+      if (cursor.input[cursor.offset] != ']') return false;
+    }
+  }
+  const size_t begin = cursor.offset;
+  while (cursor.offset < cursor.input.size() &&
+         cursor.input[cursor.offset] != ',' && cursor.input[cursor.offset] != ']' &&
+         cursor.input[cursor.offset] != '}') ++cursor.offset;
+  if (begin == cursor.offset) return false;
+  const std::string_view literal = cursor.input.substr(begin, cursor.offset - begin);
+  return literal == "true" || literal == "false" || literal == "null" ||
+         (literal.front() == '-' || (literal.front() >= '0' && literal.front() <= '9'));
+}
+
+inline bool validate_tools_json(const std::string_view tools) noexcept {
+  json_cursor cursor{tools};
+  if (!consume_json(cursor, '[')) return false;
+  bool need_element = true;
+  bool found_route = false;
+  for (;;) {
+    skip_json_space(cursor);
+    if (cursor.offset == cursor.input.size()) return false;
+    if (cursor.input[cursor.offset] == ']') {
+      if (need_element || !found_route) return false;
+      ++cursor.offset;
+      skip_json_space(cursor);
+      return cursor.offset == cursor.input.size();
+    }
+    if (cursor.input[cursor.offset] != '{') return false;
+    ++cursor.offset;
+    bool need_member = true;
+    bool found_name = false;
+    bool object_route = false;
+    for (;;) {
+      skip_json_space(cursor);
+      if (cursor.offset == cursor.input.size()) return false;
+      if (cursor.input[cursor.offset] == '}') {
+        if (need_member || !found_name || !object_route) return false;
+        ++cursor.offset;
+        break;
+      }
+      std::string_view key = {};
+      if (!parse_json_string(cursor, key) || !consume_json(cursor, ':')) return false;
+      if (key == "name") {
+        std::string_view name = {};
+        if (found_name || !parse_json_string(cursor, name) || name != "route") return false;
+        found_name = true;
+        object_route = true;
+        found_route = true;
+      } else if (!parse_json_value(cursor)) {
+        return false;
+      }
+      need_member = false;
+      skip_json_space(cursor);
+      if (cursor.offset == cursor.input.size()) return false;
+      if (cursor.input[cursor.offset] == ',') {
+        ++cursor.offset;
+        need_member = true;
+        continue;
+      }
+      if (cursor.input[cursor.offset] != '}') return false;
+    }
+    need_element = false;
+    skip_json_space(cursor);
+    if (cursor.offset == cursor.input.size()) return false;
+    if (cursor.input[cursor.offset] == ',') {
+      ++cursor.offset;
+      need_element = true;
+      continue;
+    }
+    if (cursor.input[cursor.offset] != ']') return false;
+  }
+}
+
 inline bool parse_route_call(const std::string_view generated,
                              std::string_view &reasoning,
                              std::string_view &calls) noexcept {
@@ -136,7 +444,7 @@ inline bool parse_route_call(const std::string_view generated,
     return false;
   calls = generated.substr(call_begin + k_tool_call_start.size(),
                            call_end - call_begin - k_tool_call_start.size());
-  return !calls.empty() && calls.front() == '[' && calls.back() == ']';
+  return validate_route_calls_json(calls);
 }
 template <class runtime_event>
 inline const auto &origin_event(const runtime_event &ev) noexcept {
@@ -147,17 +455,23 @@ inline const auto &origin_event(const runtime_event &ev) noexcept {
 }
 
 struct effect_begin_configure {
-  void operator()(const event::configure_run &ev, context &) const noexcept {
+  void operator()(const event::configure_run &ev, context &ctx) const noexcept {
+    ctx.configured = false;
+    ctx.assets_ready = false;
+    ctx.reset_ready = false;
+    reset_outputs(ctx);
     ev.ctx.err = emel::error::cast(error::none);
   }
 };
+
+
 inline bool normalize_generated_response(context &ctx,
                                          const std::string_view generated) noexcept {
+  size_t &size = ctx.normalized_envelope_size;
+  size = 0u;
   std::string_view reasoning = {};
   std::string_view calls = {};
   if (!parse_route_call(generated, reasoning, calls)) return false;
-  size_t &size = ctx.normalized_envelope_size;
-  size = 0u;
   auto literal = [&](const std::string_view text) noexcept {
     return append_json_literal(ctx.normalized_envelope, size, text);
   };
@@ -166,33 +480,26 @@ inline bool normalize_generated_response(context &ctx,
          append_json_string(ctx.normalized_envelope, size, reasoning) &&
          literal(",\"success\":true,\"type\":\"call\",\"validation\":{\"negation\":false,\"ungrounded\":[]}}");
 }
-
 struct effect_initialize_assets {
   void operator()(const event::configure_run &ev, context &ctx) const noexcept {
-    const auto blob = std::span<const uint8_t>{
-        ctx.bound.tokenizer_blob.data,
-        static_cast<size_t>(ctx.bound.tokenizer_blob.nbytes)};
+    const auto blob = std::span<const uint8_t>{ctx.bound.tokenizer_blob.data,
+                                               static_cast<size_t>(ctx.bound.tokenizer_blob.nbytes)};
     emel::text::tokenizer::needle::sm loader{};
-    const bool loaded = loader.process_event(
-        emel::text::tokenizer::needle::event::load{
-            blob, *ctx.vocab, k_tokenizer_load_done, k_tokenizer_load_error});
-    int32_t tokenizer_error =
-        emel::text::tokenizer::error_code(emel::text::tokenizer::error::none);
+    const bool loaded = loader.process_event(emel::text::tokenizer::needle::event::load{
+        blob, *ctx.vocab, k_tokenizer_load_done, k_tokenizer_load_error});
+    int32_t tokenizer_error = emel::text::tokenizer::error_code(
+        emel::text::tokenizer::error::none);
     emel::text::tokenizer::event::bind tokenizer_bind{};
     tokenizer_bind.vocab = ctx.vocab.get();
-    tokenizer_bind.preprocessor_variant =
-        emel::text::tokenizer::preprocessor::preprocessor_kind::spm;
+    tokenizer_bind.preprocessor_variant = emel::text::tokenizer::preprocessor::preprocessor_kind::spm;
     tokenizer_bind.encoder_variant = emel::text::encoders::encoder_kind::spm;
     tokenizer_bind.error_out = &tokenizer_error;
     const bool tokenizer_bound = loaded && ctx.tokenizer->process_event(tokenizer_bind);
     int32_t detokenizer_error = emel::text::detokenizer::error_code(
         emel::text::detokenizer::error::none);
-    const bool detokenizer_bound =
-        tokenizer_bound && ctx.detokenizer->process_event(
-                               emel::text::detokenizer::event::bind{
-                                   *ctx.vocab, detokenizer_error});
-    ctx.assets_ready =
-        detokenizer_bound && ctx.vocab->bos_id >= 0 && ctx.vocab->eos_id >= 0;
+    const bool detokenizer_bound = tokenizer_bound && ctx.detokenizer->process_event(
+        emel::text::detokenizer::event::bind{*ctx.vocab, detokenizer_error});
+    ctx.assets_ready = detokenizer_bound && ctx.vocab->bos_id >= 0 && ctx.vocab->eos_id >= 0;
     ev.ctx.err = ctx.assets_ready ? emel::error::cast(error::none)
                                   : emel::error::cast(error::not_initialized);
   }
@@ -215,7 +522,6 @@ struct effect_begin_reset {
     reset_outputs(ctx);
   }
 };
-
 struct effect_exec_reset {
   void operator()(const event::reset_run &ev, context &ctx) const noexcept {
     ctx.reset_ready = ctx.graph->process_event(
@@ -376,6 +682,8 @@ struct effect_detokenize_generation {
       }
       pending_length = next_pending;
     }
+    if (pending_length != 0u)
+      ev.ctx.err = emel::error::cast(error::detokenizer_rejected);
   }
 };
 
