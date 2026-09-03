@@ -1392,6 +1392,31 @@ TEST_CASE("every native build or installer enters the hard envelope first") {
   }
 }
 
+TEST_CASE("direct check and lint gates enter the hard envelope first") {
+  const auto scripts = repo_root() / "scripts";
+  for (const auto &entry : std::filesystem::directory_iterator(scripts)) {
+    if (!entry.is_regular_file() || entry.path().extension() != ".sh") continue;
+    const std::string name = entry.path().filename().string();
+    if (!(name.starts_with("check_") || name.starts_with("lint_"))) continue;
+    const std::string text = read_file(entry.path());
+    CAPTURE(name);
+    const std::size_t source = text.find("build_jobs.sh");
+    CHECK(source != std::string::npos);
+    CHECK(source < text.find("if "));
+    CHECK(source < text.find("rg "));
+  }
+
+  for (const std::string name : {"quality_gates.sh", "build_with_zig.sh",
+                                 "test_with_coverage.sh",
+                                 "test_with_sanitizers.sh", "fuzz_smoke.sh",
+                                 "lint_snapshot.sh", "bench.sh",
+                                 "generate_docs.sh", "embedded_size.sh"}) {
+    const std::string text = read_file(scripts / name);
+    CAPTURE(name);
+    CHECK(text.find("build_jobs.sh") != std::string::npos);
+  }
+}
+
 TEST_CASE("removed memory bypasses and sampled watchdog stay absent") {
   const std::string helper =
       read_file(repo_root() / "scripts" / "build_jobs.sh");
