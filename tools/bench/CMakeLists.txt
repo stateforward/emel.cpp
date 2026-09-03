@@ -438,6 +438,10 @@ add_bench_runner_suite(weight_streaming model/tensor/window_streaming_bench.cpp
                        EMEL_BENCH_ENABLE_WEIGHT_STREAMING)
 add_bench_runner_suite(needle_graph model/needle/graph_bench.cpp
                        EMEL_BENCH_ENABLE_NEEDLE_GRAPH)
+if(TARGET bench_runner_suite_needle_graph)
+  target_sources(bench_runner_suite_needle_graph PRIVATE
+                 "${CMAKE_CURRENT_SOURCE_DIR}/../../src/emel/model/needle/request/sm.cpp")
+endif()
 if(EMEL_BENCH_SUITE_FILTER STREQUAL "needle_graph")
   if(EMEL_BENCH_NEEDLE_PYTHON STREQUAL "" AND
      DEFINED ENV{EMEL_BENCH_NEEDLE_PYTHON})

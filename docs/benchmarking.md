@@ -169,6 +169,27 @@ maintained examples are the Gemma4 single-lane workload family and the LFM2 sing
 proof workload, which stay available for the EMEL lane but are published as non-comparable instead
 of being presented as parity.
 
+## Needle/Cactus request parity
+
+The `needle_graph` request comparison runs the same four held-out requests through the
+public Cactus `complete(raw_query, max_new_tokens=80)` API and the EMEL-owned Needle
+request adapter. Model/tokenizer initialization and shared system/tools configuration are
+outside the measurement. Each request calls `reset` before the external wall timer, then
+times the complete raw-query path (rendering, tokenization, BOS handling, greedy EOS
+generation, detokenization, and envelope normalization).
+
+The comparator removes only confidence and engine telemetry (`prefill_tps`, `decode_tps`,
+and `peak_ram_mb`) from each final envelope, canonicalizes the remaining JSON, and
+requires all four envelopes to match exactly. A wall ratio is emitted with
+`comparable=true` only after this output parity check succeeds; contract or envelope
+mismatches produce `comparable=false` and never a ratio. The wall scope is therefore
+`reset_excluded_execute_raw_query_public_api`, not a pretokenized graph microbenchmark.
+
+Prefill and decode rates are diagnostic-only. The closed Cactus API does not expose the
+token counts and phase timestamps required for an honest phase comparison, so these rows
+always publish `comparable=false` with reason
+`closed_reference_phase_contract_missing_token_counts_and_timestamps`.
+
 ## phase 13 flash-evidence publication workflow
 
 phase 13 keeps flash-evidence publication on the existing benchmark surfaces only:

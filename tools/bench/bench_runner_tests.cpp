@@ -752,8 +752,8 @@ reference = {
     "thread_contract": module.THREAD_CONTRACT,
     "prompt_rows": module.PROMPT_ROWS,
     "max_new_tokens": module.MAX_NEW_TOKENS,
-    "sampling_id": "cactus_default_unverified",
-    "stop_id": "cactus_default_unverified",
+    "sampling_id": module.SAMPLING_ID,
+    "stop_id": module.STOP_ID,
     "warmup_iterations": 1,
     "warmup_runs": 1,
     "iterations": 1,
@@ -761,10 +761,11 @@ reference = {
     "wall_ns_per_request": 1.0,
     "prefill_tokens_per_second": 1.0,
     "decode_tokens_per_second": 1.0,
-    "phase_rate_semantics": "cactus_engine_reported_per_request_median_no_token_counts_noncomparable",
+    "phase_rate_semantics": module.PHASE_NONCOMPARABLE_REASON,
     "needle_package_version": module.NEEDLE_PACKAGE_VERSION,
     "needle_package_tree_sha256": module.NEEDLE_PACKAGE_TREE_SHA256,
     "needle_native_library_sha256": module.NEEDLE_NATIVE_LIBRARY_SHA256,
+    "normalized_envelopes": [{"success": True}] * module.PROMPT_ROWS,
 }
 module.validate_reference(reference)
 for key, value in (("runs", True), ("wall_ns_per_request", math.nan),
@@ -784,10 +785,14 @@ def emel_text(metric="1.0", runs="1"):
               "backend_id=emel_needle_request_serial route=serial "
               "fixture_id=tests/fixtures/cact/needle-heldout-prompts.tsv "
               "thread_count=1 thread_contract=single_thread "
-              "prompt_rows=4 max_new_tokens=80 sampling_id=greedy_argmax_v1 "
-              "stop_id=eos_v1 phase_tokens_per_batch=1 "
-              "warmup_iterations=1 warmup_runs=1 "
-              "phase_rate_semantics=token_weighted_native_graph_noncomparable")
+              "prompt_rows=4 max_new_tokens=80 sampling_id=" + module.SAMPLING_ID + " "
+              "stop_id=" + module.STOP_ID + " phase_tokens_per_batch=1 "
+              "warmup_iterations=1 warmup_runs=1 phase_rate_semantics=" +
+              module.PHASE_NONCOMPARABLE_REASON + " "
+              "envelope_0_hex=7b2273756363657373223a747275657d "
+              "envelope_1_hex=7b2273756363657373223a747275657d "
+              "envelope_2_hex=7b2273756363657373223a747275657d "
+              "envelope_3_hex=7b2273756363657373223a747275657d")
     for phase in ("wall", "prefill", "decode"):
         rows.append(f"# needle_graph: lane=emel case=x {common} phase={phase}")
         rows.append(f"x ns_per_op={metric} tokens_per_second={metric} iter=1 runs={runs}")

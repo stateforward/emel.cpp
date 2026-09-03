@@ -27,6 +27,8 @@ FIXTURE_ID = "tests/fixtures/cact/needle-heldout-prompts.tsv"
 WORKLOAD_ID = "needle_heldout_first4_greedy80_eos_v1"
 PROMPT_ROWS = 4
 MAX_NEW_TOKENS = 80
+SAMPLING_ID = "cactus_public_default_greedy_v1"
+STOP_ID = "cactus_public_default_eos_or_max80_v1"
 THREAD_COUNT = 1
 THREAD_CONTRACT = "single_thread"
 EMEL_THREAD_COUNT = THREAD_COUNT
@@ -40,6 +42,13 @@ FIXTURE_SHA256 = "2b7ce059b63fd029a684861439afb6e7f0a61e4c6790737e4cbd3ef602d65d
 NEEDLE_PACKAGE_VERSION = "2.0.8"
 NEEDLE_PACKAGE_TREE_SHA256 = "f7710b88d0a59c92f88a1fc2ce7f374633e15351bc731442900f4bf9763a5dd9"
 NEEDLE_PYTHON_SHA256 = "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"
+PHASE_NONCOMPARABLE_REASON = (
+    "closed_reference_phase_contract_missing_token_counts_and_timestamps"
+)
+EXCLUDED_ENVELOPE_KEYS = frozenset({
+    "confidence", "prefill_tps", "decode_tps", "peak_ram_mb",
+})
+
 
 NEEDLE_PACKAGE_INIT_SHA256 = "bf72ccda8516da3879a6c68b7df73607dc5386dd59e9ef03ef6141570e877cf0"
 NEEDLE_NATIVE_LIBRARY_SHA256 = "0d2e125f36269067407ca4460f2d01b9371887366e5949243de9f03d0d93bc78"
@@ -160,6 +169,57 @@ def required_string(record: dict[str, Any], name: str) -> str:
     if type(value) is not str or not value:
         fail(f"{name} must be a non-empty string")
     return value
+def normalize_envelope(response: Any) -> Any:
+    if type(response) is not dict:
+        fail("Needle complete returned a non-object envelope")
+    return {
+        key: value
+        for key, value in sorted(response.items())
+        if key not in EXCLUDED_ENVELOPE_KEYS
+    }
+
+
+def canonical_envelope(envelope: Any) -> str:
+    try:
+        return json.dumps(
+            envelope, ensure_ascii=False, sort_keys=True,
+            separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        fail(f"response envelope is not canonical JSON: {exc}")
+
+
+def validate_envelopes(value: Any, name: str) -> list[Any]:
+    if type(value) is not list or len(value) != PROMPT_ROWS:
+        fail(f"{name} must contain exactly {PROMPT_ROWS} envelopes")
+    canonical: list[str] = []
+    for index, envelope in enumerate(value):
+        if type(envelope) is not dict:
+            fail(f"{name}[{index}] must be an object")
+        canonical.append(canonical_envelope(envelope))
+    if len(canonical) != PROMPT_ROWS:
+        fail(f"{name} envelope count mismatch")
+    return value
+
+
+def verify_stable_envelopes(expected: list[str] | None,
+                            observed: list[Any]) -> list[str]:
+    current = [canonical_envelope(envelope) for envelope in observed]
+    if expected is not None and current != expected:
+        fail("Needle normalized envelopes changed across benchmark executions")
+    return current
+
+
+def decode_envelope_hex(value: str, name: str) -> Any:
+    try:
+        decoded = bytes.fromhex(value).decode("utf-8")
+        envelope = json.loads(decoded)
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        fail(f"{name} is not canonical UTF-8 JSON hex: {exc}")
+    if canonical_envelope(envelope) != decoded:
+        fail(f"{name} is not canonical JSON")
+    if type(envelope) is not dict:
+        fail(f"{name} must decode to an object")
+    return envelope
 
 def decode_tsv_prompt(line: str) -> str:
     fields = line.rstrip("\n").split("\t")
@@ -468,11 +528,13 @@ def run_reference(args: argparse.Namespace) -> dict[str, Any]:
         engine = needle.Needle(tools=tools, system=system, weights=str(model))
     except Exception as exc:
         fail(f"Needle initialization failed: {exc}")
+    stable_envelopes: list[str] | None = None
 
-    def execute() -> tuple[float, float, float]:
+    def execute() -> tuple[float, float, float, list[Any]]:
         batch_wall_ns = 0
         prefill: list[float] = []
         decode: list[float] = []
+        envelopes: list[Any] = []
         for _, _, query in requests:
             try:
                 engine.reset()
@@ -484,8 +546,7 @@ def run_reference(args: argparse.Namespace) -> dict[str, Any]:
             except Exception as exc:
                 fail(f"Needle complete failed: {exc}")
             batch_wall_ns += time.perf_counter_ns() - start
-            if type(response) is not dict or response.get("success") is not True:
-                fail("Needle complete returned failure or malformed response")
+            envelopes.append(normalize_envelope(response))
             prefill.append(positive_finite_number(
                 response.get("prefill_tps"), "Needle prefill_tps"))
             decode.append(positive_finite_number(
@@ -494,20 +555,31 @@ def run_reference(args: argparse.Namespace) -> dict[str, Any]:
             float(batch_wall_ns) / PROMPT_ROWS,
             statistics.fmean(prefill),
             statistics.fmean(decode),
+            envelopes,
         )
+
+    def execute_checked() -> tuple[float, float, float, list[Any]]:
+        nonlocal stable_envelopes
+        sample = execute()
+        stable_envelopes = verify_stable_envelopes(stable_envelopes, sample[3])
+        return sample
 
     for _ in range(warmup_runs):
         for _ in range(warmup_iterations):
-            execute()
+            execute_checked()
 
     wall_samples: list[list[float]] = []
     prefill_samples: list[list[float]] = []
     decode_samples: list[list[float]] = []
     for _ in range(runs):
-        run_samples = [execute() for _ in range(iterations)]
+        run_samples = [execute_checked() for _ in range(iterations)]
         wall_samples.append([sample[0] for sample in run_samples])
         prefill_samples.append([sample[1] for sample in run_samples])
         decode_samples.append([sample[2] for sample in run_samples])
+
+    if stable_envelopes is None:
+        fail("live response produced no normalized envelopes")
+    normalized_envelopes = [json.loads(value) for value in stable_envelopes]
 
     package_version = NEEDLE_PACKAGE_VERSION
     return {
@@ -517,15 +589,15 @@ def run_reference(args: argparse.Namespace) -> dict[str, Any]:
         "backend_language": "python_ctypes_native",
         "reference_source": "live",
         "model_id": MODEL_ID,
-        "model_path": MODEL_RELATIVE_PATH,
         "fixture_id": FIXTURE_ID,
         "workload_id": WORKLOAD_ID,
+        "model_path": MODEL_RELATIVE_PATH,
+        "sampling_id": SAMPLING_ID,
+        "stop_id": STOP_ID,
         "thread_count": THREAD_COUNT,
         "thread_contract": THREAD_CONTRACT,
         "prompt_rows": PROMPT_ROWS,
         "max_new_tokens": MAX_NEW_TOKENS,
-        "sampling_id": "cactus_default_unverified",
-        "stop_id": "cactus_default_unverified",
         "warmup_iterations": warmup_iterations,
         "warmup_runs": warmup_runs,
         "iterations": iterations,
@@ -535,10 +607,10 @@ def run_reference(args: argparse.Namespace) -> dict[str, Any]:
             prefill_samples, "prefill_tps"),
         "decode_tokens_per_second": median_run_means(
             decode_samples, "decode_tps"),
-        "phase_rate_semantics": "cactus_engine_reported_per_request_median_no_token_counts_noncomparable",
         "needle_package_version": package_version,
-        "needle_package_tree_sha256": NEEDLE_PACKAGE_TREE_SHA256,
+        "phase_rate_semantics": PHASE_NONCOMPARABLE_REASON,
         "needle_native_library_sha256": NEEDLE_NATIVE_LIBRARY_SHA256,
+        "normalized_envelopes": normalized_envelopes,
     }
 
 
@@ -578,11 +650,12 @@ def parse_emel(path: Path) -> dict[str, Any]:
             marker = None
     if set(phases) != {"wall", "prefill", "decode"}:
         fail("EMEL output does not contain canonical wall/prefill/decode request rows")
+    envelope_keys = {f"envelope_{index}_hex" for index in range(PROMPT_ROWS)}
     required_marker_keys = {
         "backend_id", "route", "model_id", "fixture_id", "workload_id",
         "thread_count", "thread_contract", "prompt_rows", "max_new_tokens",
         "sampling_id", "stop_id", "warmup_iterations", "warmup_runs",
-        "phase_rate_semantics",
+        "phase_rate_semantics", *envelope_keys,
     }
     required_metric_keys = {"ns_per_op", "tokens_per_second", "iter", "runs"}
     allowed_keys = required_marker_keys | required_metric_keys | {
@@ -604,8 +677,8 @@ def parse_emel(path: Path) -> dict[str, Any]:
         "thread_count": str(EMEL_THREAD_COUNT),
         "thread_contract": EMEL_THREAD_CONTRACT, "prompt_rows": str(PROMPT_ROWS),
         "max_new_tokens": str(MAX_NEW_TOKENS),
-        "sampling_id": "greedy_argmax_v1", "stop_id": "eos_v1",
-        "phase_rate_semantics": "token_weighted_native_graph_noncomparable",
+        "sampling_id": SAMPLING_ID, "stop_id": STOP_ID,
+        "phase_rate_semantics": PHASE_NONCOMPARABLE_REASON,
     }
     metadata_mismatches = [key for key, value in expected_emel.items()
                            if wall[key] != value]
@@ -617,6 +690,11 @@ def parse_emel(path: Path) -> dict[str, Any]:
         if mismatches:
             fail(f"EMEL {phase} row metadata mismatch: " +
                  ", ".join(sorted(mismatches)))
+    normalized_envelopes = [
+        decode_envelope_hex(wall[f"envelope_{index}_hex"],
+                            f"EMEL envelope {index}")
+        for index in range(PROMPT_ROWS)
+    ]
     try:
         return {
             "schema": SCHEMA,
@@ -645,6 +723,7 @@ def parse_emel(path: Path) -> dict[str, Any]:
             "decode_tokens_per_second": positive_finite_number(
                 float(phases["decode"]["tokens_per_second"]), "EMEL decode_tokens_per_second"),
             "phase_rate_semantics": required_string(wall, "phase_rate_semantics"),
+            "normalized_envelopes": normalized_envelopes,
         }
     except (KeyError, TypeError, ValueError) as exc:
         fail(f"EMEL output contains invalid typed values: {exc}")
@@ -665,6 +744,7 @@ def validate_reference(record: Any) -> dict[str, Any]:
         "thread_count", "prompt_rows", "max_new_tokens", "warmup_iterations",
         "warmup_runs", "iterations", "runs", "wall_ns_per_request",
         "prefill_tokens_per_second", "decode_tokens_per_second",
+        "normalized_envelopes",
     }
     extra = set(record) - allowed_keys
     if extra:
@@ -677,9 +757,9 @@ def validate_reference(record: Any) -> dict[str, Any]:
         "fixture_id": FIXTURE_ID, "workload_id": WORKLOAD_ID,
         "thread_contract": THREAD_CONTRACT,
         "thread_count": THREAD_COUNT,
-        "sampling_id": "cactus_default_unverified",
-        "stop_id": "cactus_default_unverified",
-        "phase_rate_semantics": "cactus_engine_reported_per_request_median_no_token_counts_noncomparable",
+        "sampling_id": SAMPLING_ID,
+        "stop_id": STOP_ID,
+        "phase_rate_semantics": PHASE_NONCOMPARABLE_REASON,
         "needle_package_version": NEEDLE_PACKAGE_VERSION,
         "needle_package_tree_sha256": NEEDLE_PACKAGE_TREE_SHA256,
         "needle_native_library_sha256": NEEDLE_NATIVE_LIBRARY_SHA256,
@@ -697,6 +777,8 @@ def validate_reference(record: Any) -> dict[str, Any]:
     for key in ("wall_ns_per_request", "prefill_tokens_per_second",
                 "decode_tokens_per_second"):
         positive_finite_number(record.get(key), f"reference {key}")
+    validate_envelopes(record.get("normalized_envelopes"),
+                       "reference normalized_envelopes")
     return record
 
 
@@ -710,53 +792,54 @@ def compare(args: argparse.Namespace) -> None:
     contract_keys = (
         "schema", "model_id", "model_path", "fixture_id", "workload_id",
         "thread_count", "thread_contract", "prompt_rows", "max_new_tokens",
-        "warmup_iterations", "warmup_runs", "iterations", "runs",
+        "sampling_id", "stop_id", "warmup_iterations", "warmup_runs",
+        "iterations", "runs",
     )
     mismatches = [key for key in contract_keys if emel.get(key) != reference.get(key)]
     if mismatches:
         fail("lane contract mismatch: " + ", ".join(mismatches))
+    emel_envelopes = [canonical_envelope(value)
+                      for value in emel["normalized_envelopes"]]
+    reference_envelopes = [canonical_envelope(value)
+                           for value in reference["normalized_envelopes"]]
+    if emel_envelopes != reference_envelopes:
+        print(
+            f"# needle_request_contract: reference=live_cactus_native "
+            f"model_id={MODEL_ID} fixture_id={FIXTURE_ID} "
+            f"workload_id={WORKLOAD_ID} output_parity=mismatch "
+            f"wall_comparison=noncomparable_output_mismatch "
+            f"reason=output_envelopes_differ"
+        )
+        return
+    ratio = emel["wall_ns_per_request"] / reference["wall_ns_per_request"]
     print(
-        f"needle/request/{WORKLOAD_ID}/emel_wall_diagnostic "
-        f"ns_per_request={emel['wall_ns_per_request']:.3f} "
-        "timed_scope=pretokenized_native_graph_init_excluded comparable=false"
+        f"needle/request/{WORKLOAD_ID}/wall "
+        f"emel_ns_per_request={emel['wall_ns_per_request']:.3f} "
+        f"cactus_ns_per_request={reference['wall_ns_per_request']:.3f} "
+        f"ratio={ratio:.6f} comparable=true "
+        "timed_scope=reset_excluded_execute_raw_query_public_api"
     )
-    print(
-        f"needle/request/{WORKLOAD_ID}/cactus_wall_diagnostic "
-        f"ns_per_request={reference['wall_ns_per_request']:.3f} "
-        "timed_scope=complete_raw_query_public_api comparable=false"
-    )
-    print(
-        f"needle/request/{WORKLOAD_ID}/emel_prefill_diagnostic "
-        f"tokens_per_second={emel['prefill_tokens_per_second']:.3f} "
-        f"semantics={emel['phase_rate_semantics']} comparable=false"
-    )
-    print(
-        f"needle/request/{WORKLOAD_ID}/cactus_prefill_diagnostic "
-        f"tokens_per_second={reference['prefill_tokens_per_second']:.3f} "
-        f"semantics={reference['phase_rate_semantics']} comparable=false"
-    )
-    print(
-        f"needle/request/{WORKLOAD_ID}/emel_decode_diagnostic "
-        f"tokens_per_second={emel['decode_tokens_per_second']:.3f} "
-        f"semantics={emel['phase_rate_semantics']} comparable=false"
-    )
-    print(
-        f"needle/request/{WORKLOAD_ID}/cactus_decode_diagnostic "
-        f"tokens_per_second={reference['decode_tokens_per_second']:.3f} "
-        f"semantics={reference['phase_rate_semantics']} comparable=false"
-    )
+    for lane, record in (("emel", emel), ("cactus", reference)):
+        print(
+            f"needle/request/{WORKLOAD_ID}/{lane}_prefill_diagnostic "
+            f"tokens_per_second={record['prefill_tokens_per_second']:.3f} "
+            f"semantics={PHASE_NONCOMPARABLE_REASON} comparable=false "
+            f"reason={PHASE_NONCOMPARABLE_REASON}"
+        )
+        print(
+            f"needle/request/{WORKLOAD_ID}/{lane}_decode_diagnostic "
+            f"tokens_per_second={record['decode_tokens_per_second']:.3f} "
+            f"semantics={PHASE_NONCOMPARABLE_REASON} comparable=false "
+            f"reason={PHASE_NONCOMPARABLE_REASON}"
+        )
     print(
         f"# needle_request_contract: reference=live_cactus_native "
         f"model_id={MODEL_ID} fixture_id={FIXTURE_ID} "
         f"workload_id={WORKLOAD_ID} thread_count={THREAD_COUNT} "
         f"thread_contract={THREAD_CONTRACT} max_new_tokens={MAX_NEW_TOKENS} "
-        f"needle_package_version={reference['needle_package_version']} "
-        f"needle_package_tree_sha256={reference['needle_package_tree_sha256']} "
-        f"needle_native_library_sha256={reference['needle_native_library_sha256']} "
-        "wall_comparison=noncomparable_public_api_boundary_mismatch "
-        "sampling_stop_output_equivalence=unverified_cactus_public_api "
-        f"emel_sampling_id={emel['sampling_id']} emel_stop_id={emel['stop_id']} "
-        f"cactus_sampling_id={reference['sampling_id']} cactus_stop_id={reference['stop_id']}"
+        f"output_parity=exact normalized_envelopes={PROMPT_ROWS} "
+        f"wall_comparison=comparable ratio={ratio:.6f} "
+        f"reason=output_envelopes_exact_match"
     )
 
 

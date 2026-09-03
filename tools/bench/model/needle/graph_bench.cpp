@@ -28,6 +28,8 @@
 #include "emel/model/data.hpp"
 #include "emel/model/needle/graph/sm.hpp"
 #include "emel/model/needle/sm.hpp"
+#include "emel/model/needle/request/events.hpp"
+#include "emel/model/needle/request/sm.hpp"
 #include "emel/text/tokenizer/sm.hpp"
 #include "emel/text/tokenizer/needle/sm.hpp"
 
@@ -377,7 +379,39 @@ std::vector<int32_t> parse_token_ids(const std::string_view text) {
 struct request_row {
   std::vector<int32_t> token_ids;
   std::string prompt;
+  std::string system;
+  std::string tools_json;
+  std::string query;
 };
+
+void split_request_prompt(request_row &row) {
+  constexpr std::string_view im_start = "<|im_start|>";
+  constexpr std::string_view im_end = "<|im_end|>";
+  constexpr std::string_view tools_start = "<tools>";
+  constexpr std::string_view tools_end = "</tools>";
+  const std::string system_prefix = std::string{im_start} + "system\n";
+  const std::string user_prefix = std::string{im_start} + "user\n" +
+                                  std::string{tools_start};
+  const std::string suffix = std::string{im_end} + "\n" +
+                             std::string{im_start} + "assistant\n";
+  size_t cursor = 0u;
+  if (row.prompt.rfind(system_prefix, 0u) == 0u) {
+    const size_t end = row.prompt.find(std::string{im_end}, system_prefix.size());
+    if (end == std::string::npos) fail_needle_setup("request_system");
+    row.system = row.prompt.substr(system_prefix.size(), end - system_prefix.size());
+    cursor = end + im_end.size() + 1u;
+  }
+  if (row.prompt.compare(cursor, user_prefix.size(), user_prefix) != 0 ||
+      row.prompt.size() < suffix.size() ||
+      row.prompt.compare(row.prompt.size() - suffix.size(), suffix.size(), suffix) != 0)
+    fail_needle_setup("request_template");
+  const size_t tools_begin = cursor + user_prefix.size();
+  const size_t tools_end_pos = row.prompt.find(std::string{tools_end}, tools_begin);
+  if (tools_end_pos == std::string::npos) fail_needle_setup("request_tools");
+  row.tools_json = row.prompt.substr(tools_begin, tools_end_pos - tools_begin);
+  const size_t query_begin = tools_end_pos + tools_end.size() + 1u;
+  row.query = row.prompt.substr(query_begin, row.prompt.size() - suffix.size() - query_begin);
+}
 
 std::vector<request_row> read_request_rows() {
   std::ifstream input(resolve_request_fixture_path());
@@ -418,6 +452,16 @@ uint32_t argmax(const std::span<const float> logits) noexcept {
   for (uint32_t index = 1u; index < logits.size(); ++index)
     best = logits[index] > logits[best] ? index : best;
   return best;
+}
+std::string hex_encode(const std::string_view value) {
+  constexpr char digits[] = "0123456789abcdef";
+  std::string result;
+  result.reserve(value.size() * 2u);
+  for (const unsigned char byte : value) {
+    result.push_back(digits[byte >> 4u]);
+    result.push_back(digits[byte & 0x0fu]);
+  }
+  return result;
 }
 
 std::vector<uint8_t> read_file_bytes(const std::filesystem::path &path) {
@@ -727,90 +771,79 @@ struct request_measurement {
   double decode_ns = 0.0;
   std::uint64_t prompt_tokens = 0u;
   std::uint64_t decode_tokens = 0u;
+  std::vector<std::string> envelopes;
 };
-template <class graph_type>
-request_measurement run_request_batch(const graph_fixture &base,
+
+void on_request_configured(const needle::request::events::configured &) noexcept {}
+void on_request_reset(const needle::request::events::reset_done &) noexcept {}
+void on_request_completed(const needle::request::events::completed &) noexcept {}
+void on_request_error(const needle::request::events::request_error &) noexcept {}
+
+request_measurement run_request_batch(needle::request::sm &adapter,
                                       const std::vector<request_row> &rows) {
-  graph_type graph{base.contract};
-  std::vector<float> logits(base.contract.geo.vocab_size);
   request_measurement measured;
+  measured.envelopes.reserve(rows.size());
   for (const request_row &row : rows) {
-    if (row.token_ids.size() + 1u + k_request_max_new_tokens >
-        base.contract.geo.max_seq_len)
-      fail_needle_setup("request_context_limit");
-    std::vector<int32_t> prompt_ids;
-    prompt_ids.reserve(row.token_ids.size() + 1u);
-    prompt_ids.push_back(base.vocab->bos_id);
-    prompt_ids.insert(prompt_ids.end(), row.token_ids.begin(),
-                      row.token_ids.end());
-    if (!graph.process_event(needle::graph::event::init{}))
-      fail_needle_setup("request_graph_init");
+    if (!adapter.process_event(needle::request::event::reset{
+            &on_request_reset, &on_request_error}))
+      fail_needle_setup("request_reset");
     const auto request_begin = std::chrono::steady_clock::now();
-    if (!graph.process_event(needle::graph::event::prefill{
-            std::span<const int32_t>{prompt_ids}, std::span<float>{logits}}))
-      fail_needle_setup("request_graph_prefill");
-    const auto prefill_end = std::chrono::steady_clock::now();
-    measured.prefill_ns += static_cast<double>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(prefill_end -
-                                                             request_begin)
-            .count());
-    measured.prompt_tokens += prompt_ids.size();
-    for (uint32_t step = 0u; step < k_request_max_new_tokens; ++step) {
-      const int32_t next = static_cast<int32_t>(
-          argmax(std::span<const float>{logits.data(), logits.size()}));
-      if (next == base.vocab->eos_id) break;
-      if (!graph.process_event(needle::graph::event::decode{
-              next, std::span<float>{logits}}))
-        fail_needle_setup("request_graph_decode");
-      ++measured.decode_tokens;
-    }
+    if (!adapter.process_event(needle::request::event::complete{
+            row.query, k_request_max_new_tokens, &on_request_completed,
+            &on_request_error}))
+      fail_needle_setup("request_complete");
     const auto request_end = std::chrono::steady_clock::now();
-    measured.decode_ns += static_cast<double>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(request_end -
-                                                             prefill_end)
-            .count());
     measured.wall_ns += static_cast<double>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(request_end -
-                                                             request_begin)
+                                                               request_begin)
             .count());
+    measured.prefill_ns += static_cast<double>(adapter.prefill_nanoseconds());
+    measured.decode_ns += static_cast<double>(adapter.decode_nanoseconds());
+    measured.prompt_tokens += adapter.prompt_tokens();
+    measured.decode_tokens += adapter.generated_tokens();
+    measured.envelopes.emplace_back(adapter.normalized_envelope());
   }
   return measured;
 }
+
 request_measurement measure_request_workload(const graph_fixture &fixture,
                                              const std::vector<request_row> &rows,
                                              const emel::bench::config &cfg) {
+  needle::request::sm adapter{fixture.contract};
+  if (!adapter.process_event(needle::request::event::configure{
+          rows.front().system, rows.front().tools_json, &on_request_configured,
+          &on_request_error}))
+    fail_needle_setup("request_configure");
   for (std::size_t run = 0u; run < cfg.warmup_runs; ++run)
     for (std::uint64_t iteration = 0u; iteration < cfg.warmup_iterations;
          ++iteration)
-      (void)run_request_batch<needle::graph::serial_sm>(fixture, rows);
+      (void)run_request_batch(adapter, rows);
   const std::size_t run_count = std::max<std::size_t>(cfg.runs, 1u);
-  const std::uint64_t iteration_count =
-      std::max<std::uint64_t>(cfg.iterations, 1u);
+  const std::uint64_t iteration_count = std::max<std::uint64_t>(cfg.iterations, 1u);
   std::vector<request_measurement> samples;
   samples.reserve(run_count);
   for (std::size_t run = 0u; run < run_count; ++run) {
     request_measurement total;
     for (std::uint64_t iteration = 0u; iteration < iteration_count; ++iteration) {
-      const request_measurement sample =
-          run_request_batch<needle::graph::serial_sm>(fixture, rows);
+      const request_measurement sample = run_request_batch(adapter, rows);
       total.wall_ns += sample.wall_ns;
       total.prefill_ns += sample.prefill_ns;
       total.decode_ns += sample.decode_ns;
       total.prompt_tokens += sample.prompt_tokens;
       total.decode_tokens += sample.decode_tokens;
+      if (iteration + 1u == iteration_count) total.envelopes = sample.envelopes;
     }
     total.wall_ns /= static_cast<double>(iteration_count);
     total.prefill_ns /= static_cast<double>(iteration_count);
     total.decode_ns /= static_cast<double>(iteration_count);
-    total.prompt_tokens =
-        (total.prompt_tokens + iteration_count / 2u) / iteration_count;
-    total.decode_tokens =
-        (total.decode_tokens + iteration_count / 2u) / iteration_count;
-    samples.push_back(total);
+    total.prompt_tokens = (total.prompt_tokens + iteration_count / 2u) /
+                          iteration_count;
+    total.decode_tokens = (total.decode_tokens + iteration_count / 2u) /
+                          iteration_count;
+    samples.push_back(std::move(total));
   }
   std::sort(samples.begin(), samples.end(),
-            [](const request_measurement &left,
-               const request_measurement &right) {
+            [](const request_measurement &left, const request_measurement &right) {
               return left.wall_ns < right.wall_ns;
             });
   return samples[samples.size() / 2u];
@@ -819,7 +852,8 @@ request_measurement measure_request_workload(const graph_fixture &fixture,
 emel::bench::result make_request_row(const char *name, const char *phase,
                                      const emel::bench::config &cfg,
                                      const double ns_per_batch,
-                                     const std::uint64_t tokens_per_batch) {
+                                     const std::uint64_t tokens_per_batch,
+                                     const std::vector<std::string> &envelopes) {
   emel::bench::result out;
   out.name = name;
   out.compare_group = k_request_workload_id;
@@ -832,8 +866,8 @@ emel::bench::result make_request_row(const char *name, const char *phase,
   out.comparison_mode = "live_cactus_request";
   out.model_id = k_model_id;
   out.fixture_id = k_request_fixture_relative_path;
-  out.sampling_id = "greedy_argmax_v1";
-  out.stop_id = "eos_v1";
+  out.sampling_id = "cactus_public_default_greedy_v1";
+  out.stop_id = "cactus_public_default_eos_or_max80_v1";
   out.max_output_tokens = k_request_max_new_tokens;
   out.comparable = false;
   out.ns_per_op = ns_per_batch / static_cast<double>(k_request_rows);
@@ -842,40 +876,37 @@ emel::bench::result make_request_row(const char *name, const char *phase,
   out.ns_max_per_op = out.ns_per_op;
   out.iterations = std::max<std::uint64_t>(cfg.iterations, 1u);
   out.runs = std::max<std::size_t>(cfg.runs, 1u);
-  out.output_tokens =
-      (tokens_per_batch + static_cast<std::uint64_t>(k_request_rows) / 2u) /
-      static_cast<std::uint64_t>(k_request_rows);
+  out.output_tokens = (tokens_per_batch + k_request_rows / 2u) / k_request_rows;
   out.tokens_per_second = emel::bench::compute_tokens_per_second(
       tokens_per_batch, ns_per_batch);
   out.note = std::string{"reference=live_cactus_native phase="} + phase +
-             " backend_id=emel_needle_request_serial route=serial"
-             " fixture_id=" + k_request_fixture_relative_path +
-             " thread_count=1"
-             " thread_contract=single_thread"
-             " prompt_rows=4 max_new_tokens=80"
-             " sampling_id=greedy_argmax_v1 stop_id=eos_v1"
-             " phase_tokens_per_batch=" + std::to_string(tokens_per_batch) +
-             " warmup_iterations=" +
+             " backend_id=emel_needle_request_serial route=serial fixture_id=" +
+             k_request_fixture_relative_path + " thread_count=1 thread_contract=single_thread"
+             " prompt_rows=4 max_new_tokens=80 sampling_id=cactus_public_default_greedy_v1"
+             " stop_id=cactus_public_default_eos_or_max80_v1 phase_tokens_per_batch=" +
+             std::to_string(tokens_per_batch) + " warmup_iterations=" +
              std::to_string(cfg.warmup_iterations) + " warmup_runs=" +
              std::to_string(cfg.warmup_runs) +
-             " phase_rate_semantics=token_weighted_native_graph_noncomparable";
+             " phase_rate_semantics=closed_reference_phase_contract_missing_token_counts_and_timestamps";
+  for (std::size_t index = 0u; index < envelopes.size(); ++index)
+    out.note += " envelope_" + std::to_string(index) + "_hex=" + hex_encode(envelopes[index]);
   return out;
 }
+
 void append_request_cases(std::vector<emel::bench::result> &results,
                           const emel::bench::config &cfg,
                           graph_fixture &fixture) {
-  const std::vector<request_row> rows = read_request_rows();
-  fixture.verify_request_rows(rows);
-  const request_measurement measured =
-      measure_request_workload(fixture, rows, cfg);
+  std::vector<request_row> rows = read_request_rows();
+  for (request_row &row : rows) split_request_prompt(row);
+  const request_measurement measured = measure_request_workload(fixture, rows, cfg);
   results.push_back(make_request_row(k_request_wall_case_name, "wall", cfg,
-                                     measured.wall_ns, 0u));
+                                     measured.wall_ns, 0u, measured.envelopes));
   results.push_back(make_request_row(k_request_prefill_case_name, "prefill", cfg,
-                                     measured.prefill_ns,
-                                     measured.prompt_tokens));
+                                     measured.prefill_ns, measured.prompt_tokens,
+                                     measured.envelopes));
   results.push_back(make_request_row(k_request_decode_case_name, "decode", cfg,
-                                     measured.decode_ns,
-                                     measured.decode_tokens));
+                                     measured.decode_ns, measured.decode_tokens,
+                                     measured.envelopes));
 }
 
 } // namespace
