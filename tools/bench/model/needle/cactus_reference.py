@@ -94,6 +94,11 @@ WORKER_ENVIRONMENT_ALLOWLIST = (
     "LC_IDENTIFICATION",
     "NEEDLE_THREADS",
 )
+FORCED_WORKER_ENVIRONMENT = {
+    "NEEDLE_TELEMETRY": "0",
+    "DO_NOT_TRACK": "1",
+}
+
 
 
 
@@ -903,6 +908,8 @@ def worker_environment(extra: dict[str, str] | None = None) -> dict[str, str]:
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
     if extra:
         environment.update(extra)
+    environment.update(FORCED_WORKER_ENVIRONMENT)
+    environment.pop("NEEDLE_TELEMETRY_URL", None)
     return environment
 
 
@@ -945,6 +952,8 @@ def run_forked_reference(
             try:
                 os.environ.clear()
                 os.environ.update(environment)
+                os.environ.update(FORCED_WORKER_ENVIRONMENT)
+                os.environ.pop("NEEDLE_TELEMETRY_URL", None)
                 record = run_reference(argparse.Namespace(
                     model=str(staged_model), fixture=str(staged_fixture),
                     needle_root=str(staged_needle_root),

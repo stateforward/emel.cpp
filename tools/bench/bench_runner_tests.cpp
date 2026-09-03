@@ -1012,6 +1012,9 @@ module.NEEDLE_PACKAGE_INIT_SHA256 = sha256(init_bytes)
 module.NEEDLE_PACKAGE_TREE_SHA256 = module.sha256_python_tree(package_root)
 module.NEEDLE_NATIVE_LIBRARY_SHA256 = sha256(library_bytes)
 module.validate_canonical_path = lambda path, expected, name: None
+os.environ["NEEDLE_TELEMETRY"] = "1"
+os.environ["NEEDLE_TELEMETRY_URL"] = "https://attacker.invalid/collect"
+os.environ.pop("DO_NOT_TRACK", None)
 
 captured = {}
 def fake_fork(args, staged_model, staged_fixture, staged_root,
@@ -1034,6 +1037,9 @@ def fake_fork(args, staged_model, staged_fixture, staged_root,
     ) == module.NEEDLE_PACKAGE_TREE_SHA256
     assert module.sha256_file(staged_library) == module.NEEDLE_NATIVE_LIBRARY_SHA256
     assert environment["NEEDLE_LIB_PATH"] == str(staged_library)
+    assert environment["NEEDLE_TELEMETRY"] == "0"
+    assert environment["DO_NOT_TRACK"] == "1"
+    assert "NEEDLE_TELEMETRY_URL" not in environment
     assert not (set(module.INJECTION_ENVIRONMENT_VARIABLES) &
                 (set(environment) - {"NEEDLE_LIB_PATH"}))
     captured["stage"] = staged_root.parent
@@ -1062,6 +1068,66 @@ assert not captured["stage"].exists()
   CHECK(capture.stderr_text.empty());
 #endif
 }
+
+TEST_CASE("needle cactus authenticated child forces telemetry off") {
+#if !defined(_WIN32)
+  const std::string program = R"PY(
+import argparse
+import importlib.util
+import json
+import os
+import pathlib
+import sys
+import tempfile
+
+spec = importlib.util.spec_from_file_location("cactus_reference", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+root = pathlib.Path(tempfile.mkdtemp())
+output = root / "output.json"
+args = argparse.Namespace(warmup_iterations=0, warmup_runs=0, iterations=1,
+                          runs=1, output=str(output))
+paths = [root / name for name in ("model", "fixture", "package", "library")]
+for path in paths:
+    path.mkdir() if path.name == "package" else path.write_bytes(b"x")
+
+def capture_environment(_args):
+    return {
+        "needle_telemetry": os.environ.get("NEEDLE_TELEMETRY"),
+        "do_not_track": os.environ.get("DO_NOT_TRACK"),
+        "telemetry_url_present": "NEEDLE_TELEMETRY_URL" in os.environ,
+    }
+
+module.run_reference = capture_environment
+module.run_forked_reference(
+    args, paths[0], paths[1], paths[2], paths[3], 10,
+    {"NEEDLE_TELEMETRY": "1", "DO_NOT_TRACK": "",
+     "NEEDLE_TELEMETRY_URL": "https://attacker.invalid/collect"})
+record = json.loads(output.read_text())
+assert record == {
+    "needle_telemetry": "0",
+    "do_not_track": "1",
+    "telemetry_url_present": False,
+}
+)PY";
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-telemetry-isolation";
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::string command =
+      "python3 -I -S -B -c " + quote_arg_posix(program) + " " +
+      quote_arg_posix(cactus_reference_driver_path().string()) + " > " +
+      quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+  const process_capture capture =
+      run_command_capture(command, stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+#endif
+}
+
 
 TEST_CASE("needle cactus supervisor reaps live child on timeout exception and signal") {
 #if !defined(_WIN32)
