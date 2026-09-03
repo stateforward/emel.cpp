@@ -1221,7 +1221,9 @@ TEST_CASE("memory envelope computes half of effective total memory") {
   const auto script = repo_root() / "scripts" / "build_jobs.sh";
   const command_result result = run_command(
       "env EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
-      "EMEL_MEMORY_TEST_CGROUP_MAX=max EMEL_MEMORY_TEST_CORES=64 bash " +
+      "EMEL_MEMORY_TEST_ANCESTOR_MAXES=max "
+      "EMEL_MEMORY_TEST_CURRENT_MAX=max EMEL_MEMORY_TEST_CURRENT_SWAP=max "
+      "EMEL_MEMORY_TEST_CORES=64 bash " +
           shell_quote(script.string()) + " --memory-cap-check",
       output);
   CHECK(result.status == 0);
@@ -1253,7 +1255,9 @@ TEST_CASE("memory overrides validate and build jobs clamp to the cap") {
   const auto script = repo_root() / "scripts" / "build_jobs.sh";
   const std::string base =
       "env EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
-      "EMEL_MEMORY_TEST_CGROUP_MAX=max EMEL_MEMORY_TEST_CORES=64 ";
+      "EMEL_MEMORY_TEST_ANCESTOR_MAXES=max "
+      "EMEL_MEMORY_TEST_CURRENT_MAX=max EMEL_MEMORY_TEST_CURRENT_SWAP=max "
+      "EMEL_MEMORY_TEST_CORES=64 ";
 
   command_result result = run_command(
       base + "EMEL_MEMORY_CAP_PERCENT=51 bash " +
@@ -1288,6 +1292,8 @@ TEST_CASE("memory envelope constructs Linux scope and fails closed on Darwin") {
   const auto script = repo_root() / "scripts" / "build_jobs.sh";
   const std::string base =
       "env EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "EMEL_MEMORY_TEST_ANCESTOR_MAXES=max "
+      "EMEL_MEMORY_TEST_CURRENT_MAX=max EMEL_MEMORY_TEST_CURRENT_SWAP=max "
       "EMEL_MEMORY_TEST_CORES=64 ";
 
   command_result result = run_command(
@@ -1319,7 +1325,7 @@ TEST_CASE("memory envelope marker requires observable cgroup limits") {
   const std::string base =
       "env EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
       "EMEL_MEMORY_TEST_CORES=64 EMEL_MEMORY_TEST_OWNED_SCOPE=1 "
-      "EMEL_MEMORY_TEST_PARENT_MAX=107374182400 ";
+      "EMEL_MEMORY_TEST_ANCESTOR_MAXES=max ";
 
   command_result result = run_command(
       base + "EMEL_MEMORY_TEST_CURRENT_MAX=53687091200 "
@@ -1461,15 +1467,6 @@ TEST_CASE("removed memory bypasses and sampled watchdog stay absent") {
   CHECK(helper.find("verified systemd --user scopes") != std::string::npos);
 }
 
-TEST_CASE("pure help bypass precedes memory initialization") {
-  const std::string helper =
-      read_file(repo_root() / "scripts" / "build_jobs.sh");
-  const std::size_t help = helper.find("${1:-}\" == \"--help\"");
-  const std::size_t initialize = helper.find("emel_initialize_build_memory ||");
-  REQUIRE(help != std::string::npos);
-  REQUIRE(initialize != std::string::npos);
-  CHECK(help < initialize);
-}
 
 TEST_CASE("CMake presets expose configuration only") {
   const std::string presets = read_file(repo_root() / "CMakePresets.json");

@@ -102,7 +102,7 @@ and `scripts/bench.sh`.
 Repository build and gate scripts require a kernel-enforced aggregate process-tree memory
 envelope. Linux uses a verified systemd user scope capped at 50% of effective memory with swap
 disabled. These scripts intentionally fail closed on macOS because macOS provides no supported
-native aggregate descendant memory controller; pure `--help` queries remain available.
+native aggregate descendant memory controller.
 
 ### Why Zig for builds
 

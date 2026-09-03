@@ -10,9 +10,6 @@ fi
 emel_memory_error() { printf 'error: %s\n' "$*" >&2; }
 emel_is_uint() { [[ "$1" =~ ^[0-9]+$ ]]; }
 
-if [[ "${BASH_SOURCE[0]}" != "$0" && ( "${1:-}" == "--help" || "${1:-}" == "-h" ) ]]; then
-  return 0
-fi
 
 emel_physical_memory_bytes() {
   if [[ "${EMEL_MEMORY_TEST_MODE:-0}" == 1 && -n "${EMEL_MEMORY_TEST_PHYSICAL_BYTES:-}" ]]; then
