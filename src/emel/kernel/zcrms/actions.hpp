@@ -38,10 +38,9 @@ struct effect_execute_norm_rows {
       const __m256 one = _mm256_set1_ps(1.0f);
       const __m256 inv = _mm256_set1_ps(inv_rms);
       for (; i + 8u <= request.dim; i += 8u) {
-        const __m256 scale = _mm256_add_ps(
-            one, _mm256_loadu_ps(request.scale.data() + i));
-        const __m256 input =
-            _mm256_loadu_ps(request.input.data() + base + i);
+        const __m256 scale =
+            _mm256_add_ps(one, _mm256_loadu_ps(request.scale.data() + i));
+        const __m256 input = _mm256_loadu_ps(request.input.data() + base + i);
         _mm256_storeu_ps(request.output.data() + base + i,
                          _mm256_mul_ps(_mm256_mul_ps(scale, input), inv));
       }

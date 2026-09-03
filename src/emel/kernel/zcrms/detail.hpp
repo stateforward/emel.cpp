@@ -44,8 +44,7 @@ compute_inv_rms(const float *values, const uint32_t dim) noexcept {
   for (uint32_t i = 0u; i < dim; ++i)
     sum_squares += values[i] * values[i];
 #endif
-  return 1.0f /
-         std::sqrt(sum_squares / static_cast<float>(dim) + k_epsilon);
+  return 1.0f / std::sqrt(sum_squares / static_cast<float>(dim) + k_epsilon);
 }
 
 } // namespace emel::kernel::zcrms::detail

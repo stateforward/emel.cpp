@@ -1,11 +1,11 @@
+#include "emel/kernel/hadamard/sm.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
-#include <vector>
 #include <doctest/doctest.h>
-#include "emel/kernel/hadamard/sm.hpp"
+#include <vector>
 
 namespace {
 
@@ -18,7 +18,8 @@ static_assert(!emel::kernel::hadamard::guard::fits_size_capacity<
 static_assert(emel::kernel::hadamard::guard::fits_size_capacity<
               sizeof(uint16_t), UINT32_MAX>(UINT32_MAX / sizeof(uint16_t)));
 static_assert(!emel::kernel::hadamard::guard::fits_size_capacity<
-              sizeof(uint16_t), UINT32_MAX>(UINT32_MAX / sizeof(uint16_t) + 1u));
+              sizeof(uint16_t), UINT32_MAX>(UINT32_MAX / sizeof(uint16_t) +
+                                            1u));
 
 std::array<uint8_t, 8> pack_f16_bits(const std::array<uint16_t, 4> &bits) {
   std::array<uint8_t, 8> bytes{};
@@ -114,8 +115,7 @@ TEST_CASE("hadamard AVX2 512 route matches scalar arbitrary fp16 diagonals") {
     skip[i] = static_cast<float>(static_cast<int32_t>((i * 19u) % 83u) - 41) *
               0.015625f;
     d1_values[i] =
-        static_cast<float>(static_cast<int32_t>((i * 13u) % 29u) - 14) *
-        0.125f;
+        static_cast<float>(static_cast<int32_t>((i * 13u) % 29u) - 14) * 0.125f;
     d2_values[i] =
         static_cast<float>(static_cast<int32_t>((i * 17u) % 31u) - 15) *
         0.09375f;
@@ -137,21 +137,20 @@ TEST_CASE("hadamard AVX2 512 route matches scalar arbitrary fp16 diagonals") {
   emel::kernel::hadamard::sm machine;
   dispatch_result scalar_result{};
   dispatch_result avx2_result{};
-  REQUIRE(machine.process_event(
-      emel::kernel::hadamard::event::execute_mlp_row{scalar_request,
-                                                      scalar_result}));
-  REQUIRE(machine.process_event(
-      emel::kernel::hadamard::event::execute_mlp_row_avx2{avx2_request,
-                                                           avx2_result}));
+  REQUIRE(machine.process_event(emel::kernel::hadamard::event::execute_mlp_row{
+      scalar_request, scalar_result}));
+  REQUIRE(
+      machine.process_event(emel::kernel::hadamard::event::execute_mlp_row_avx2{
+          avx2_request, avx2_result}));
   float max_abs = 0.0f;
   float max_rel = 0.0f;
   for (uint32_t i = 0u; i < n; ++i) {
     const float diff = std::abs(scalar_output[i] - avx2_output[i]);
     max_abs = std::max(max_abs, diff);
-    max_rel = std::max(max_rel, diff / std::max(std::abs(scalar_output[i]), 1.0f));
+    max_rel =
+        std::max(max_rel, diff / std::max(std::abs(scalar_output[i]), 1.0f));
   }
-  MESSAGE("Hadamard AVX2 vs scalar max_abs=", max_abs,
-          " max_rel=", max_rel);
+  MESSAGE("Hadamard AVX2 vs scalar max_abs=", max_abs, " max_rel=", max_rel);
   CHECK(max_abs <= 2.0e-5f);
   CHECK(max_rel <= 2.0e-5f);
 }
@@ -193,15 +192,22 @@ TEST_CASE("hadamard rejects writable aliases without writes") {
   dispatch_result result{};
   SUBCASE("output aliases workspace") {
     const emel::kernel::hadamard::event::mlp_row_request request{
-        input, skip, d, d, d, n, n, std::span<float>{storage}.first(n),
+        input,
+        skip,
+        d,
+        d,
+        d,
+        n,
+        n,
+        std::span<float>{storage}.first(n),
         std::span<float>{storage}.first(n)};
     CHECK_FALSE(machine.process_event(
         emel::kernel::hadamard::event::execute_mlp_row_avx2{request, result}));
   }
   SUBCASE("workspace aliases input") {
     const emel::kernel::hadamard::event::mlp_row_request request{
-        std::span<const float>{storage}.first(n), skip, d, d, d, n, n,
-        std::span<float>{storage}.first(n), output};
+        std::span<const float>{storage}.first(n), skip,  d, d, d, n, n,
+        std::span<float>{storage}.first(n),       output};
     CHECK_FALSE(machine.process_event(
         emel::kernel::hadamard::event::execute_mlp_row{request, result}));
   }
@@ -209,7 +215,8 @@ TEST_CASE("hadamard rejects writable aliases without writes") {
   CHECK(output == output_before);
 }
 
-TEST_CASE("hadamard rejects every writable and read-only alias without writes") {
+TEST_CASE(
+    "hadamard rejects every writable and read-only alias without writes") {
   constexpr uint32_t n = 512u;
   std::vector<float> float_storage(n * 4u, 0.25f);
   std::vector<uint8_t> byte_storage(n * sizeof(uint16_t), 0u);
@@ -281,7 +288,8 @@ TEST_CASE("hadamard rejects every writable and read-only alias without writes") 
   CHECK(separate == separate_before);
 }
 
-TEST_CASE("hadamard AVX2 invalid geometry rejects while scalar fallback accepts") {
+TEST_CASE(
+    "hadamard AVX2 invalid geometry rejects while scalar fallback accepts") {
   constexpr uint32_t d_model = 256u;
   constexpr uint32_t n = 512u;
   std::vector<float> input(d_model, 0.25f);
@@ -294,13 +302,12 @@ TEST_CASE("hadamard AVX2 invalid geometry rejects while scalar fallback accepts"
       input, skip, d, d, d, d_model, n, workspace, output};
   emel::kernel::hadamard::sm machine;
   dispatch_result avx2_result{};
-  CHECK_FALSE(machine.process_event(
-      emel::kernel::hadamard::event::execute_mlp_row_avx2{request,
-                                                           avx2_result}));
+  CHECK_FALSE(
+      machine.process_event(emel::kernel::hadamard::event::execute_mlp_row_avx2{
+          request, avx2_result}));
   dispatch_result scalar_result{};
   CHECK(machine.process_event(
-      emel::kernel::hadamard::event::execute_mlp_row{request,
-                                                      scalar_result}));
+      emel::kernel::hadamard::event::execute_mlp_row{request, scalar_result}));
 }
 
 TEST_CASE("hadamard accepts byte-aligned fp16 diagonal payloads") {

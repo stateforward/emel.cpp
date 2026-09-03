@@ -359,8 +359,7 @@ struct basic_sm
     if (geometry_err != emel::error::cast(error::none))
       return {.machine = {}, .err = geometry_err};
     if (construct == nullptr)
-      return {.machine = {},
-              .err = emel::error::cast(error::internal_error)};
+      return {.machine = {}, .err = emel::error::cast(error::internal_error)};
     construction_result result = construct(contract_in);
     const auto none = emel::error::cast(error::none);
     if ((result.machine == nullptr) == (result.err == none))
@@ -369,13 +368,15 @@ struct basic_sm
   }
   explicit basic_sm(const needle::contract &contract_in)
       : base_type(std::in_place, contract_in,
-                  projection_route == action::projection_route_kind::parallel4) {}
+                  projection_route ==
+                      action::projection_route_kind::parallel4) {}
   basic_sm(const basic_sm &) = delete;
   basic_sm &operator=(const basic_sm &) = delete;
   class dispatch_scope {
   public:
     explicit dispatch_scope(std::atomic_flag &gate) noexcept
-        : gate_(gate), acquired_(!gate_.test_and_set(std::memory_order_acquire)) {}
+        : gate_(gate),
+          acquired_(!gate_.test_and_set(std::memory_order_acquire)) {}
     ~dispatch_scope() {
       if (acquired_)
         gate_.clear(std::memory_order_release);
@@ -386,7 +387,6 @@ struct basic_sm
     std::atomic_flag &gate_;
     bool acquired_ = false;
   };
-
 
   bool process_event(const event::init &ev) {
     dispatch_scope dispatch{dispatch_gate_};
@@ -440,8 +440,8 @@ struct basic_sm
     uint64_t owner_prepare = 0u;
     uint64_t owner_prepared = 0u;
     bool handled = this->context_.cq.process_event(
-        emel::kernel::cq::event::capture_prepared_diagnostics{
-            owner_prepare, owner_prepared});
+        emel::kernel::cq::event::capture_prepared_diagnostics{owner_prepare,
+                                                              owner_prepared});
     ev.prepare_calls = owner_prepare;
     ev.prepared_calls = owner_prepared;
     for (auto &actor : this->context_.worker_cq) {
@@ -457,8 +457,7 @@ struct basic_sm
     ev.prepared_index_bytes = this->context_.prepared_index_bytes;
     ev.prepared_input32_bytes = this->context_.prepared_input32_bytes;
     ev.prepared_norm_bytes = this->context_.prepared_norm_bytes;
-    ev.prepared_group32_norm_bytes =
-        this->context_.prepared_group32_norm_bytes;
+    ev.prepared_group32_norm_bytes = this->context_.prepared_group32_norm_bytes;
     return handled;
   }
 
@@ -552,7 +551,8 @@ private:
 #if EMEL_NEEDLE_GRAPH_EXCEPTIONS
     try {
 #endif
-      std::unique_ptr<basic_sm> machine{new (std::nothrow) basic_sm{contract_in}};
+      std::unique_ptr<basic_sm> machine{new (std::nothrow)
+                                            basic_sm{contract_in}};
       if (machine == nullptr)
         return {.machine = {},
                 .err = emel::error::cast(error::capacity_exceeded)};
@@ -563,11 +563,9 @@ private:
       return {.machine = {},
               .err = emel::error::cast(error::capacity_exceeded)};
     } catch (const std::system_error &) {
-      return {.machine = {},
-              .err = emel::error::cast(error::internal_error)};
+      return {.machine = {}, .err = emel::error::cast(error::internal_error)};
     } catch (...) {
-      return {.machine = {},
-              .err = emel::error::cast(error::internal_error)};
+      return {.machine = {}, .err = emel::error::cast(error::internal_error)};
     }
 #endif
   }
@@ -578,8 +576,7 @@ private:
 using serial_sm = basic_sm<true, action::projection_route_kind::serial>;
 using parallel4_sm = basic_sm<true, action::projection_route_kind::parallel4>;
 using sm = parallel4_sm;
-using scalar_exp_sm =
-    basic_sm<false, action::projection_route_kind::serial>;
+using scalar_exp_sm = basic_sm<false, action::projection_route_kind::serial>;
 using NeedleGraph = sm;
 
 } // namespace emel::model::needle::graph

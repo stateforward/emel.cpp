@@ -4,8 +4,8 @@
 #include <cstdint>
 #include <span>
 
-#include "emel/kernel/cq/events.hpp"
 #include "emel/error/error.hpp"
+#include "emel/kernel/cq/events.hpp"
 #include "emel/model/needle/events.hpp"
 #include "emel/model/needle/graph/errors.hpp"
 

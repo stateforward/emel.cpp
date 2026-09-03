@@ -1,8 +1,8 @@
 #pragma once
 
-#include <limits>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 
 #include "emel/kernel/cq/actions.hpp"
 #include "emel/kernel/x86_64/context.hpp"
@@ -38,7 +38,6 @@ inline bool span_has_data(const std::span<T> values) noexcept {
   return values.empty() || values.data() != nullptr;
 }
 
-
 inline bool finite_values(const std::span<const float> values,
                           const size_t count) noexcept {
   if (count > values.size() || !span_has_data(values))
@@ -67,9 +66,8 @@ inline bool generic_ranges_supported(const event::gemv_request &request,
   size_t output_bytes = 0u;
   size_t workspace_bytes = 0u;
   size_t codebook_bytes = 0u;
-  if (!span_has_data(request.codebook) ||
-      !span_has_data(request.activation) || !span_has_data(request.output) ||
-      !span_has_data(request.workspace) ||
+  if (!span_has_data(request.codebook) || !span_has_data(request.activation) ||
+      !span_has_data(request.output) || !span_has_data(request.workspace) ||
       layout.total_bytes > std::numeric_limits<size_t>::max() ||
       !checked_bytes(request.weights.shape[1], sizeof(float),
                      activation_bytes) ||
@@ -95,10 +93,11 @@ inline bool generic_ranges_supported(const event::gemv_request &request,
                          activation_bytes);
 }
 
-inline bool prepared_read_ranges_disjoint(
-    const event::prepared_q4_view &view,
-    const event::prepared_codebook_q4 &codebook, const void *write,
-    const size_t write_bytes) noexcept {
+inline bool
+prepared_read_ranges_disjoint(const event::prepared_q4_view &view,
+                              const event::prepared_codebook_q4 &codebook,
+                              const void *write,
+                              const size_t write_bytes) noexcept {
   size_t indices_bytes = 0u;
   size_t blocked_indices_bytes = 0u;
   size_t norms_bytes = 0u;
@@ -116,7 +115,8 @@ inline bool prepared_read_ranges_disjoint(
                          indices_bytes) &&
          ranges_disjoint(write, write_bytes, view.indices_by_input32().data(),
                          blocked_indices_bytes) &&
-         ranges_disjoint(write, write_bytes, view.norms().data(), norms_bytes) &&
+         ranges_disjoint(write, write_bytes, view.norms().data(),
+                         norms_bytes) &&
          ranges_disjoint(write, write_bytes, view.norms_by_group32().data(),
                          blocked_norms_bytes) &&
          ranges_disjoint(write, write_bytes, codebook.values().data(),
@@ -204,9 +204,8 @@ inline bool rows_supported(const event::gemv_rows_request &request) noexcept {
   size_t output_bytes = 0u;
   size_t workspace_bytes = 0u;
   size_t codebook_bytes = 0u;
-  if (!span_has_data(request.codebook) ||
-      !span_has_data(request.activation) || !span_has_data(request.output) ||
-      !span_has_data(request.workspace) ||
+  if (!span_has_data(request.codebook) || !span_has_data(request.activation) ||
+      !span_has_data(request.output) || !span_has_data(request.workspace) ||
       !detail::valid_packed_view<Bits>(request.weights, request.codebook) ||
       !detail::checked_layout<Bits>(request.weights.shape[0],
                                     request.weights.shape[1],
@@ -260,8 +259,8 @@ dequant_rows_supported(const event::dequant_rows_request &request) noexcept {
       request.row_count == 0u ||
       static_cast<uint64_t>(request.row_begin) + request.row_count >
           request.weights.shape[0] ||
-      !detail::checked_multiply_u64(request.row_count,
-                                    request.weights.shape[1], output_count) ||
+      !detail::checked_multiply_u64(request.row_count, request.weights.shape[1],
+                                    output_count) ||
       request.output.size() < output_count || !std::isfinite(request.scale) ||
       !finite_values(request.codebook,
                      Bits == detail::k_ternary_record_bits ? 0u : 28u) ||
@@ -276,7 +275,6 @@ dequant_rows_supported(const event::dequant_rows_request &request) noexcept {
          ranges_disjoint(request.output.data(), output_bytes,
                          request.codebook.data(), codebook_bytes);
 }
-
 
 inline bool
 prepare_supported(const event::prepare_q4_request &request) noexcept {
@@ -296,8 +294,7 @@ prepare_supported(const event::prepare_q4_request &request) noexcept {
                                     index_count) ||
       !detail::checked_multiply_u64(blocked_rows, layout.in_pad,
                                     blocked_count) ||
-      !detail::checked_multiply_u64(blocked_rows,
-                                    layout.in_pad / view.group,
+      !detail::checked_multiply_u64(blocked_rows, layout.in_pad / view.group,
                                     blocked_norm_count) ||
       layout.total_bytes > view.nbytes ||
       layout.total_bytes > std::numeric_limits<size_t>::max())
@@ -336,8 +333,8 @@ struct guard_prepare_codebook_q4 {
                          emel::cact::loader::k_codebook_len);
   }
 };
-inline bool prepared_structure_supported(
-    const event::prepared_q4_view &view) noexcept {
+inline bool
+prepared_structure_supported(const event::prepared_q4_view &view) noexcept {
   detail::layout layout{};
   uint64_t index_count = 0u;
   uint64_t blocked_count = 0u;
@@ -382,13 +379,14 @@ struct guard_execute_prepared_avx2_q4 {
         !std::isfinite(request.output_scale) ||
         !checked_bytes(request.weights.in(), sizeof(float), activation_bytes) ||
         !checked_bytes(request.weights.out(), sizeof(float), output_bytes) ||
-        !checked_bytes(request.weights.in_pad(), sizeof(float), workspace_bytes))
+        !checked_bytes(request.weights.in_pad(), sizeof(float),
+                       workspace_bytes))
       return false;
     return prepared_read_ranges_disjoint(request.weights, request.codebook,
-                                          request.output.data(), output_bytes) &&
+                                         request.output.data(), output_bytes) &&
            prepared_read_ranges_disjoint(request.weights, request.codebook,
-                                          request.workspace.data(),
-                                          workspace_bytes) &&
+                                         request.workspace.data(),
+                                         workspace_bytes) &&
            ranges_disjoint(request.output.data(), output_bytes,
                            request.activation.data(), activation_bytes) &&
            ranges_disjoint(request.output.data(), output_bytes,
@@ -422,7 +420,7 @@ struct guard_execute_prepared_avx2_dot_q4 {
         !checked_bytes(request.weights.out(), sizeof(float), output_bytes))
       return false;
     return prepared_read_ranges_disjoint(request.weights, request.codebook,
-                                          request.output.data(), output_bytes) &&
+                                         request.output.data(), output_bytes) &&
            ranges_disjoint(request.output.data(), output_bytes,
                            request.activation_fwht.data(), activation_bytes);
 #else
@@ -511,13 +509,14 @@ struct guard_execute_prepared_avx2_rows_q4 {
         !std::isfinite(request.output_scale) ||
         !checked_bytes(request.weights.in(), sizeof(float), activation_bytes) ||
         !checked_bytes(request.row_count, sizeof(float), output_bytes) ||
-        !checked_bytes(request.weights.in_pad(), sizeof(float), workspace_bytes))
+        !checked_bytes(request.weights.in_pad(), sizeof(float),
+                       workspace_bytes))
       return false;
     return prepared_read_ranges_disjoint(request.weights, request.codebook,
-                                          request.output.data(), output_bytes) &&
+                                         request.output.data(), output_bytes) &&
            prepared_read_ranges_disjoint(request.weights, request.codebook,
-                                          request.workspace.data(),
-                                          workspace_bytes) &&
+                                         request.workspace.data(),
+                                         workspace_bytes) &&
            ranges_disjoint(request.output.data(), output_bytes,
                            request.activation.data(), activation_bytes) &&
            ranges_disjoint(request.output.data(), output_bytes,
@@ -549,7 +548,7 @@ struct guard_execute_prepared_dequant_q4 {
            checked_bytes(output_count, sizeof(float), output_bytes) &&
            std::isfinite(request.scale) &&
            prepared_read_ranges_disjoint(request.weights, request.codebook,
-                                          request.output.data(), output_bytes);
+                                         request.output.data(), output_bytes);
   }
 };
 template <uint32_t Bits> struct guard_execute_scalar {

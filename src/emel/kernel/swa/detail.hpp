@@ -28,12 +28,11 @@ namespace emel::kernel::swa::detail {
 EMEL_KERNEL_SWA_DETAIL_AVX2_TARGET inline __m256
 expf8_approx_avx2(const __m256 x) noexcept {
   const __m256 r = _mm256_set1_ps(0x1.8p23f);
-  const __m256 z =
-      _mm256_fmadd_ps(x, _mm256_set1_ps(0x1.715476p+0f), r);
+  const __m256 z = _mm256_fmadd_ps(x, _mm256_set1_ps(0x1.715476p+0f), r);
   const __m256 n = _mm256_sub_ps(z, r);
-  const __m256 b = _mm256_fnmadd_ps(
-      n, _mm256_set1_ps(0x1.7f7d1cp-20f),
-      _mm256_fnmadd_ps(n, _mm256_set1_ps(0x1.62e4p-1f), x));
+  const __m256 b =
+      _mm256_fnmadd_ps(n, _mm256_set1_ps(0x1.7f7d1cp-20f),
+                       _mm256_fnmadd_ps(n, _mm256_set1_ps(0x1.62e4p-1f), x));
   const __m256i e = _mm256_slli_epi32(_mm256_castps_si256(z), 23);
   const __m256 k = _mm256_castsi256_ps(
       _mm256_add_epi32(e, _mm256_castps_si256(_mm256_set1_ps(1.0f))));
@@ -42,22 +41,20 @@ expf8_approx_avx2(const __m256 x) noexcept {
                     _mm256_set1_ps(126.0f), _CMP_GT_OQ));
   const __m256 u = _mm256_mul_ps(b, b);
   const __m256 j = _mm256_fmadd_ps(
-      _mm256_fmadd_ps(
-          _mm256_fmadd_ps(_mm256_set1_ps(0x1.0e4020p-7f), b,
-                          _mm256_set1_ps(0x1.573e2ep-5f)),
-          u,
-          _mm256_fmadd_ps(_mm256_set1_ps(0x1.555e66p-3f), b,
-                          _mm256_set1_ps(0x1.fffdb6p-2f))),
+      _mm256_fmadd_ps(_mm256_fmadd_ps(_mm256_set1_ps(0x1.0e4020p-7f), b,
+                                      _mm256_set1_ps(0x1.573e2ep-5f)),
+                      u,
+                      _mm256_fmadd_ps(_mm256_set1_ps(0x1.555e66p-3f), b,
+                                      _mm256_set1_ps(0x1.fffdb6p-2f))),
       u, _mm256_mul_ps(_mm256_set1_ps(0x1.ffffecp-1f), b));
   if (_mm256_movemask_ps(_mm256_castsi256_ps(c)) == 0)
     return _mm256_fmadd_ps(j, k, k);
 
   const __m256i g = _mm256_and_si256(
-      _mm256_castps_si256(
-          _mm256_cmp_ps(n, _mm256_setzero_ps(), _CMP_LE_OQ)),
+      _mm256_castps_si256(_mm256_cmp_ps(n, _mm256_setzero_ps(), _CMP_LE_OQ)),
       _mm256_set1_epi32(static_cast<int32_t>(0x82000000u)));
-  const __m256 s1 = _mm256_castsi256_ps(
-      _mm256_add_epi32(g, _mm256_set1_epi32(0x7f000000)));
+  const __m256 s1 =
+      _mm256_castsi256_ps(_mm256_add_epi32(g, _mm256_set1_epi32(0x7f000000)));
   const __m256 s2 = _mm256_castsi256_ps(_mm256_sub_epi32(e, g));
   const __m256i d = _mm256_castps_si256(
       _mm256_cmp_ps(_mm256_andnot_ps(_mm256_set1_ps(-0.0f), n),

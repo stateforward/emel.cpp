@@ -38,7 +38,8 @@ struct loader_scope {
   ~loader_scope() { g_loader_state = nullptr; }
 };
 
-void on_load_done(const emel::text::tokenizer::needle::events::load_done &) noexcept {
+void on_load_done(
+    const emel::text::tokenizer::needle::events::load_done &) noexcept {
   if (g_loader_state != nullptr) {
     ++g_loader_state->done_count;
   }
@@ -58,12 +59,18 @@ const emel::text::tokenizer::needle::event::load_done_fn k_load_done_cb =
 const emel::text::tokenizer::needle::event::load_error_fn k_load_error_cb =
     emel::text::tokenizer::needle::event::load_error_fn::from<&on_load_error>();
 
-void on_cact_probe_done(const emel::cact::loader::events::probe_done &) noexcept {}
-void on_cact_probe_error(const emel::cact::loader::events::probe_error &) noexcept {}
-void on_cact_bind_done(const emel::cact::loader::events::bind_done &) noexcept {}
-void on_cact_bind_error(const emel::cact::loader::events::bind_error &) noexcept {}
-void on_cact_parse_done(const emel::cact::loader::events::parse_done &) noexcept {}
-void on_cact_parse_error(const emel::cact::loader::events::parse_error &) noexcept {}
+void on_cact_probe_done(
+    const emel::cact::loader::events::probe_done &) noexcept {}
+void on_cact_probe_error(
+    const emel::cact::loader::events::probe_error &) noexcept {}
+void on_cact_bind_done(const emel::cact::loader::events::bind_done &) noexcept {
+}
+void on_cact_bind_error(
+    const emel::cact::loader::events::bind_error &) noexcept {}
+void on_cact_parse_done(
+    const emel::cact::loader::events::parse_done &) noexcept {}
+void on_cact_parse_error(
+    const emel::cact::loader::events::parse_error &) noexcept {}
 
 const emel::cact::loader::event::probe_done_fn k_cact_probe_done_cb =
     emel::cact::loader::event::probe_done_fn::from<&on_cact_probe_done>();
@@ -78,8 +85,10 @@ const emel::cact::loader::event::parse_done_fn k_cact_parse_done_cb =
 const emel::cact::loader::event::parse_error_fn k_cact_parse_error_cb =
     emel::cact::loader::event::parse_error_fn::from<&on_cact_parse_error>();
 
-void on_needle_bind_done(const emel::model::needle::events::bind_done &) noexcept {}
-void on_needle_bind_error(const emel::model::needle::events::bind_error &) noexcept {}
+void on_needle_bind_done(
+    const emel::model::needle::events::bind_done &) noexcept {}
+void on_needle_bind_error(
+    const emel::model::needle::events::bind_error &) noexcept {}
 
 const emel::model::needle::event::bind_done_fn k_needle_bind_done_cb =
     emel::model::needle::event::bind_done_fn::from<&on_needle_bind_done>();
@@ -595,8 +604,8 @@ TEST_CASE("needle tokenizer loader handles empty public callbacks explicitly") {
     CHECK(state.err ==
           emel::error::cast(
               emel::text::tokenizer::needle::error::invalid_request));
-    CHECK(machine.is(
-        stateforward::sml::state<emel::text::tokenizer::needle::state_errored>));
+    CHECK(machine.is(stateforward::sml::state<
+                     emel::text::tokenizer::needle::state_errored>));
   }
 
   SUBCASE("an invalid load allows the optional error callback to be absent") {
@@ -606,8 +615,8 @@ TEST_CASE("needle tokenizer loader handles empty public callbacks explicitly") {
         std::span<const uint8_t>{}, *vocab, k_load_done_cb, empty_error};
 
     CHECK_FALSE(machine.process_event(load));
-    CHECK(machine.is(
-        stateforward::sml::state<emel::text::tokenizer::needle::state_errored>));
+    CHECK(machine.is(stateforward::sml::state<
+                     emel::text::tokenizer::needle::state_errored>));
   }
 }
 
@@ -689,7 +698,8 @@ TEST_CASE("needle tokenizer loader rejects malformed blobs") {
   }
 }
 
-TEST_CASE("needle tokenizer loader rejects non-finite piece scores before publication") {
+TEST_CASE("needle tokenizer loader rejects non-finite piece scores before "
+          "publication") {
   const std::vector<uint8_t> file_bytes =
       read_file_bytes(repo_relative("tests/models/route-w4-qat.cact"));
   std::vector<emel::cact::loader::tensor_view> tensors;
@@ -725,8 +735,9 @@ TEST_CASE("needle tokenizer loader rejects non-finite piece scores before public
     CHECK_FALSE(machine.process_event(load));
     CHECK(state.done_count == 0u);
     CHECK(state.error_count == 1u);
-    CHECK(state.err == emel::error::cast(
-                           emel::text::tokenizer::needle::error::model_invalid));
+    CHECK(
+        state.err ==
+        emel::error::cast(emel::text::tokenizer::needle::error::model_invalid));
     CHECK(vocab->n_tokens == 0u);
     CHECK(vocab->token_bytes_used == 0u);
     CHECK(vocab->entries[0].text_length == 0u);

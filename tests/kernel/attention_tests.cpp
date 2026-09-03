@@ -69,11 +69,13 @@ struct outcome_counts {
   int error = 0;
 };
 
-void count_done(void *object, const attention::events::execute_done &) noexcept {
+void count_done(void *object,
+                const attention::events::execute_done &) noexcept {
   ++static_cast<outcome_counts *>(object)->done;
 }
 
-void count_error(void *object, const attention::events::execute_error &) noexcept {
+void count_error(void *object,
+                 const attention::events::execute_error &) noexcept {
   ++static_cast<outcome_counts *>(object)->error;
 }
 

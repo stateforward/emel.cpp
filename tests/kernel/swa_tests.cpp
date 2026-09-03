@@ -1,10 +1,10 @@
 #include <algorithm>
-#include <cmath>
 #include <array>
+#include <cmath>
 #include <cstring>
-#include <vector>
 #include <limits>
 #include <span>
+#include <vector>
 
 #include <doctest/doctest.h>
 
@@ -14,7 +14,6 @@
 namespace {
 
 using emel::kernel::swa::event::dispatch_result;
-
 
 void fill_gqa2_fixture(std::vector<float> &query, std::vector<float> &key_cache,
                        std::vector<float> &value_cache,
@@ -35,14 +34,12 @@ void fill_gqa2_fixture(std::vector<float> &query, std::vector<float> &key_cache,
       for (uint32_t col = 0u; col < head_dim; ++col) {
         const size_t index =
             (static_cast<size_t>(head) * capacity + slot) * head_dim + col;
-        const int32_t key_value = static_cast<int32_t>(
-                                      (head * 29u + slot * 7u + col * 17u) %
-                                      83u) -
-                                  41;
-        const int32_t value_value = static_cast<int32_t>(
-                                        (head * 31u + slot * 19u + col * 5u) %
-                                        97u) -
-                                    48;
+        const int32_t key_value =
+            static_cast<int32_t>((head * 29u + slot * 7u + col * 17u) % 83u) -
+            41;
+        const int32_t value_value =
+            static_cast<int32_t>((head * 31u + slot * 19u + col * 5u) % 97u) -
+            48;
         key_cache[index] = static_cast<float>(key_value) * 0.015625f;
         value_cache[index] = static_cast<float>(value_value) * 0.0078125f;
       }
@@ -97,9 +94,9 @@ void check_gqa2_matches_generic(const uint32_t capacity,
   emel::kernel::swa::sm fused_machine;
   dispatch_result generic_result{};
   dispatch_result fused_result{};
-  REQUIRE(generic_machine.process_event(
-      emel::kernel::swa::event::execute_attend{generic_request,
-                                               generic_result}));
+  REQUIRE(
+      generic_machine.process_event(emel::kernel::swa::event::execute_attend{
+          generic_request, generic_result}));
   REQUIRE(fused_machine.process_event(
       emel::kernel::swa::event::execute_attend_gqa2_avx2{fused_request,
                                                          fused_result}));
@@ -113,7 +110,6 @@ void check_gqa2_matches_generic(const uint32_t capacity,
 }
 
 } // namespace
-
 
 void check_vector_exp_matches_scalar(const uint32_t capacity,
                                      const uint32_t window_begin,
@@ -135,18 +131,18 @@ void check_vector_exp_matches_scalar(const uint32_t capacity,
   std::vector<float> vector_output(scalar_output.size());
   const auto make_request = [&](std::span<float> workspace,
                                 std::span<float> output) {
-    return emel::kernel::swa::event::attend_request{
-        .query = query,
-        .key_cache = key_cache,
-        .value_cache = value_cache,
-        .position = position,
-        .window_begin = window_begin,
-        .capacity = capacity,
-        .heads = heads,
-        .kv_heads = kv_heads,
-        .head_dim = head_dim,
-        .workspace = workspace,
-        .output = output};
+    return emel::kernel::swa::event::attend_request{.query = query,
+                                                    .key_cache = key_cache,
+                                                    .value_cache = value_cache,
+                                                    .position = position,
+                                                    .window_begin =
+                                                        window_begin,
+                                                    .capacity = capacity,
+                                                    .heads = heads,
+                                                    .kv_heads = kv_heads,
+                                                    .head_dim = head_dim,
+                                                    .workspace = workspace,
+                                                    .output = output};
   };
   const auto scalar_request = make_request(scalar_workspace, scalar_output);
   const auto vector_request = make_request(vector_workspace, vector_output);
@@ -206,11 +202,11 @@ TEST_CASE("swa vector exp approximation is finite monotonic and accurate") {
     }
   }
 
-  std::array<float, 17u> scores{-100.0f, -31.0f, -8.0f, -4.0f, -2.0f,
-                                -1.0f,   -0.5f,  -0.25f, -0.125f, -0.0625f,
-                                -0.03125f, -0.015625f, -0.0078125f,
-                                -0.00390625f, -0.001953125f, -0.0009765625f,
-                                0.0f};
+  std::array<float, 17u> scores{
+      -100.0f,        -31.0f,     -8.0f,       -4.0f,        -2.0f,
+      -1.0f,          -0.5f,      -0.25f,      -0.125f,      -0.0625f,
+      -0.03125f,      -0.015625f, -0.0078125f, -0.00390625f, -0.001953125f,
+      -0.0009765625f, 0.0f};
   const float sum = emel::kernel::swa::detail::exp_sum_avx2(
       scores.data(), static_cast<uint32_t>(scores.size()), 0.0f);
   float normalized_sum = 0.0f;
@@ -226,7 +222,6 @@ TEST_CASE("swa vector exp GQA2 route tracks scalar stable attention") {
   SUBCASE("span 704") { check_vector_exp_matches_scalar(704u, 0u, 703u); }
   SUBCASE("ring wrap") { check_vector_exp_matches_scalar(8u, 6u, 10u); }
 }
-
 
 TEST_CASE("swa attend computes grouped sliding-window softmax attention") {
   // heads=2, kv_heads=1, head_dim=2, capacity=4, positions 0..2 valid.
@@ -302,9 +297,9 @@ TEST_CASE("swa GQA2 route rejects reps mismatch and short workspace") {
       .output = output};
   emel::kernel::swa::sm machine;
   dispatch_result result{};
-  CHECK_FALSE(machine.process_event(
-      emel::kernel::swa::event::execute_attend_gqa2_avx2{mismatch_request,
-                                                         result}));
+  CHECK_FALSE(
+      machine.process_event(emel::kernel::swa::event::execute_attend_gqa2_avx2{
+          mismatch_request, result}));
 
   auto generic_request = mismatch_request;
   generic_request.workspace = generic_workspace;
@@ -328,9 +323,9 @@ TEST_CASE("swa GQA2 route rejects reps mismatch and short workspace") {
       .workspace = short_workspace,
       .output = output_gqa2};
   dispatch_result short_result{};
-  CHECK_FALSE(machine.process_event(
-      emel::kernel::swa::event::execute_attend_gqa2_avx2{short_request,
-                                                         short_result}));
+  CHECK_FALSE(
+      machine.process_event(emel::kernel::swa::event::execute_attend_gqa2_avx2{
+          short_request, short_result}));
   dispatch_result vector_short_result{};
   CHECK_FALSE(machine.process_event(
       emel::kernel::swa::event::execute_attend_gqa2_avx2_vector_exp{
@@ -423,8 +418,7 @@ TEST_CASE("swa GQA2 rejects writable range aliasing before writes") {
   }
 
   SUBCASE("workspace and output partially overlap") {
-    std::array<float, 6> writable{17.0f, 19.0f, 23.0f,
-                                  29.0f, 31.0f, 37.0f};
+    std::array<float, 6> writable{17.0f, 19.0f, 23.0f, 29.0f, 31.0f, 37.0f};
     const auto before = writable;
     const emel::kernel::swa::event::attend_request request{
         .query = query,
@@ -469,7 +463,7 @@ TEST_CASE("swa GQA2 rejects writable range aliasing before writes") {
   }
 
   SUBCASE("workspace overlaps value input") {
-    std::array<float, 6> value_and_workspace{2.0f, 3.0f, 5.0f,
+    std::array<float, 6> value_and_workspace{2.0f, 3.0f,  5.0f,
                                              7.0f, 11.0f, 13.0f};
     const auto before = value_and_workspace;
     std::array<float, 4> output{};
@@ -548,8 +542,7 @@ TEST_CASE("swa cache write rejects aliased ranges before writes") {
   }
 
   SUBCASE("key and value caches partially overlap") {
-    std::array<float, 6> caches{11.0f, 13.0f, 17.0f,
-                                19.0f, 23.0f, 29.0f};
+    std::array<float, 6> caches{11.0f, 13.0f, 17.0f, 19.0f, 23.0f, 29.0f};
     const auto before = caches;
     const std::array<float, 2> key_rows{5.0f, 6.0f};
     const std::array<float, 2> value_rows{7.0f, 8.0f};
@@ -559,8 +552,7 @@ TEST_CASE("swa cache write rejects aliased ranges before writes") {
   }
 
   SUBCASE("key cache overlaps key rows") {
-    std::array<float, 6> key_storage{5.0f, 6.0f, 11.0f,
-                                     13.0f, 17.0f, 19.0f};
+    std::array<float, 6> key_storage{5.0f, 6.0f, 11.0f, 13.0f, 17.0f, 19.0f};
     const auto before = key_storage;
     const std::array<float, 2> value_rows{7.0f, 8.0f};
     std::array<float, 4> value_cache{23.0f, 29.0f, 31.0f, 37.0f};
@@ -573,8 +565,7 @@ TEST_CASE("swa cache write rejects aliased ranges before writes") {
 
   SUBCASE("value cache overlaps value rows") {
     const std::array<float, 2> key_rows{5.0f, 6.0f};
-    std::array<float, 6> value_storage{7.0f, 8.0f, 11.0f,
-                                       13.0f, 17.0f, 19.0f};
+    std::array<float, 6> value_storage{7.0f, 8.0f, 11.0f, 13.0f, 17.0f, 19.0f};
     const auto before = value_storage;
     std::array<float, 4> key_cache{23.0f, 29.0f, 31.0f, 37.0f};
     const auto key_before = key_cache;
@@ -586,8 +577,7 @@ TEST_CASE("swa cache write rejects aliased ranges before writes") {
 
   SUBCASE("key cache overlaps value rows") {
     const std::array<float, 2> key_rows{5.0f, 6.0f};
-    std::array<float, 6> key_storage{7.0f, 8.0f, 11.0f,
-                                     13.0f, 17.0f, 19.0f};
+    std::array<float, 6> key_storage{7.0f, 8.0f, 11.0f, 13.0f, 17.0f, 19.0f};
     const auto before = key_storage;
     std::array<float, 4> value_cache{23.0f, 29.0f, 31.0f, 37.0f};
     const auto value_before = value_cache;
@@ -598,8 +588,7 @@ TEST_CASE("swa cache write rejects aliased ranges before writes") {
   }
 
   SUBCASE("value cache overlaps key rows") {
-    std::array<float, 6> value_storage{5.0f, 6.0f, 11.0f,
-                                       13.0f, 17.0f, 19.0f};
+    std::array<float, 6> value_storage{5.0f, 6.0f, 11.0f, 13.0f, 17.0f, 19.0f};
     const auto before = value_storage;
     const std::array<float, 2> value_rows{7.0f, 8.0f};
     std::array<float, 4> key_cache{23.0f, 29.0f, 31.0f, 37.0f};

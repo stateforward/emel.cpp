@@ -4,8 +4,8 @@
 #include <cstdint>
 #include <limits>
 #include <span>
-#include <vector>
 #include <utility>
+#include <vector>
 
 #include "emel/kernel/cq/detail.hpp"
 
@@ -29,8 +29,7 @@ struct dispatch_result {
 // payload is copied into this object before publication.
 class alignas(32) prepared_codebook_q4 {
 public:
-  using values_type =
-      std::array<float, emel::cact::loader::k_codebook_len>;
+  using values_type = std::array<float, emel::cact::loader::k_codebook_len>;
   using byte_planes_type = std::array<std::array<uint8_t, 32u>, 4u>;
 
   prepared_codebook_q4() noexcept = default;
@@ -116,7 +115,6 @@ struct execute_fwht_avx2 {
   dispatch_result &result;
 };
 
-
 struct gemv_request {
   const emel::cact::loader::tensor_view &weights;
   std::span<const float> codebook;
@@ -197,8 +195,7 @@ public:
   }
   // 32-row output blocks, input-major within each block. Tail rows remain in
   // row-major indices(); the blocked layout exists only for hot full GEMV.
-  [[nodiscard]] std::span<const uint8_t>
-  indices_by_input32() const noexcept {
+  [[nodiscard]] std::span<const uint8_t> indices_by_input32() const noexcept {
     return published_ ? std::span<const uint8_t>{indices_by_input32_}
                       : std::span<const uint8_t>{};
   }

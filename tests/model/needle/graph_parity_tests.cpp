@@ -1,12 +1,12 @@
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
-#include <atomic>
 #include <cstring>
 #include <filesystem>
-#include <memory>
 #include <fstream>
+#include <memory>
 #include <span>
 #include <string_view>
 #include <thread>
@@ -46,14 +46,22 @@ const parity_case k_a8_cases[3] = {
     {{2, 7551}, {8097, 2730, 8097}, "route-w4-qat-a8.logits.case2.bin"},
 };
 
-void on_loader_probe_done(const emel::cact::loader::events::probe_done &) noexcept {}
-void on_loader_probe_error(const emel::cact::loader::events::probe_error &) noexcept {}
-void on_loader_bind_done(const emel::cact::loader::events::bind_done &) noexcept {}
-void on_loader_bind_error(const emel::cact::loader::events::bind_error &) noexcept {}
-void on_loader_parse_done(const emel::cact::loader::events::parse_done &) noexcept {}
-void on_loader_parse_error(const emel::cact::loader::events::parse_error &) noexcept {}
-void on_needle_bind_done(const emel::model::needle::events::bind_done &) noexcept {}
-void on_needle_bind_error(const emel::model::needle::events::bind_error &) noexcept {}
+void on_loader_probe_done(
+    const emel::cact::loader::events::probe_done &) noexcept {}
+void on_loader_probe_error(
+    const emel::cact::loader::events::probe_error &) noexcept {}
+void on_loader_bind_done(
+    const emel::cact::loader::events::bind_done &) noexcept {}
+void on_loader_bind_error(
+    const emel::cact::loader::events::bind_error &) noexcept {}
+void on_loader_parse_done(
+    const emel::cact::loader::events::parse_done &) noexcept {}
+void on_loader_parse_error(
+    const emel::cact::loader::events::parse_error &) noexcept {}
+void on_needle_bind_done(
+    const emel::model::needle::events::bind_done &) noexcept {}
+void on_needle_bind_error(
+    const emel::model::needle::events::bind_error &) noexcept {}
 
 const emel::cact::loader::event::probe_done_fn k_probe_done =
     emel::cact::loader::event::probe_done_fn::from<&on_loader_probe_done>();
@@ -168,7 +176,6 @@ uint64_t fake_timestamp_now() noexcept {
   return g_timing_clock;
 }
 
-
 emel::model::needle::graph::sm *g_reentrant_graph = nullptr;
 std::atomic<bool> g_reentrant_attempted = false;
 std::atomic<bool> g_reentrant_accepted = false;
@@ -189,7 +196,8 @@ std::atomic<bool> g_release_blocking_clock = false;
 
 uint64_t blocking_timestamp_now() noexcept {
   if (!g_blocking_clock_entered.exchange(true, std::memory_order_acq_rel))
-    while (!g_release_blocking_clock.load(std::memory_order_acquire)) {}
+    while (!g_release_blocking_clock.load(std::memory_order_acquire)) {
+    }
   return fake_timestamp_now();
 }
 TEST_CASE("needle graph default f32 route matches the committed JAX logits "
@@ -405,7 +413,8 @@ TEST_CASE("needle graph prepares CQ4 storage once and selects prepared route") {
       emel::model::needle::graph::event::decode{2, std::span<float>{logits}}));
 }
 
-TEST_CASE("needle graph component timing is explicit, resettable, and reconciled") {
+TEST_CASE(
+    "needle graph component timing is explicit, resettable, and reconciled") {
   const auto model_path = std::filesystem::path{EMEL_TEST_REPO_ROOT} /
                           "tests/models/route-w4-qat.cact";
   const std::vector<uint8_t> file_bytes = read_file_bytes(model_path);
@@ -430,10 +439,11 @@ TEST_CASE("needle graph component timing is explicit, resettable, and reconciled
   std::vector<float> logits(k_vocab);
   REQUIRE(graph.process_event(emel::model::needle::graph::event::init{}));
   g_timing_clock = 0u;
-  REQUIRE(graph.process_event(emel::model::needle::graph::event::configure_timing{
-      true, &fake_timestamp_now}));
-  REQUIRE(graph.process_event(emel::model::needle::graph::event::decode{
-      2, std::span<float>{logits}}));
+  REQUIRE(
+      graph.process_event(emel::model::needle::graph::event::configure_timing{
+          true, &fake_timestamp_now}));
+  REQUIRE(graph.process_event(
+      emel::model::needle::graph::event::decode{2, std::span<float>{logits}}));
   emel::model::needle::graph::event::timing_breakdown timing{};
   REQUIRE(graph.process_event(
       emel::model::needle::graph::event::capture_timing{timing}));
@@ -448,13 +458,14 @@ TEST_CASE("needle graph component timing is explicit, resettable, and reconciled
       timing.hadamard_nanoseconds + timing.lane_copy_mean_nanoseconds +
       timing.sampling_nanoseconds;
   CHECK(split == timing.total_nanoseconds);
-  REQUIRE(graph.process_event(emel::model::needle::graph::event::reset_timing{}));
+  REQUIRE(
+      graph.process_event(emel::model::needle::graph::event::reset_timing{}));
   REQUIRE(graph.process_event(
       emel::model::needle::graph::event::capture_timing{timing}));
   CHECK(timing.steps == 0u);
   CHECK(timing.total_nanoseconds == 0u);
-  REQUIRE(graph.process_event(emel::model::needle::graph::event::configure_timing{
-      false, nullptr}));
+  REQUIRE(graph.process_event(
+      emel::model::needle::graph::event::configure_timing{false, nullptr}));
 }
 
 TEST_CASE("needle graph AVX2 route requires every CQ tensor group to be 128") {
@@ -506,8 +517,8 @@ TEST_CASE("needle graph AVX2 route requires every CQ tensor group to be 128") {
   contract.geo.d_model = 256u;
   emel::model::needle::graph::action::context geometry_ctx{contract};
   geometry_ctx.storage_valid = true;
-  CHECK_FALSE(emel::model::needle::graph::guard::guard_route_avx2{}(
-      run, geometry_ctx));
+  CHECK_FALSE(
+      emel::model::needle::graph::guard::guard_route_avx2{}(run, geometry_ctx));
   CHECK(emel::model::needle::graph::guard::guard_route_scalar{}(run,
                                                                 geometry_ctx));
 }
@@ -550,7 +561,8 @@ TEST_CASE("needle graph rejects an out-of-vocab step token") {
       stateforward::sml::state<emel::model::needle::graph::state_ready>));
 }
 
-TEST_CASE("needle graph serial and parallel4 routes are exact deterministic peers") {
+TEST_CASE(
+    "needle graph serial and parallel4 routes are exact deterministic peers") {
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(__AVX2__) &&           \
     defined(__FMA__) && defined(__F16C__)
   const auto model_path = std::filesystem::path{EMEL_TEST_REPO_ROOT} /
@@ -582,16 +594,16 @@ TEST_CASE("needle graph serial and parallel4 routes are exact deterministic peer
     std::vector<float> serial_logits(k_vocab);
     std::vector<float> parallel4_logits(k_vocab);
     const std::array<int32_t, 4u> prompt = {2, 1544, 1663, 2328};
-    REQUIRE(serial.process_event(emel::model::needle::graph::event::prefill{
-        prompt, serial_logits}));
-    REQUIRE(parallel4.process_event(emel::model::needle::graph::event::prefill{
-        prompt, parallel4_logits}));
+    REQUIRE(serial.process_event(
+        emel::model::needle::graph::event::prefill{prompt, serial_logits}));
+    REQUIRE(parallel4.process_event(
+        emel::model::needle::graph::event::prefill{prompt, parallel4_logits}));
     CHECK(parallel4_logits == serial_logits);
     const int32_t next = static_cast<int32_t>(argmax(serial_logits));
-    REQUIRE(serial.process_event(emel::model::needle::graph::event::decode{
-        next, serial_logits}));
-    REQUIRE(parallel4.process_event(emel::model::needle::graph::event::decode{
-        next, parallel4_logits}));
+    REQUIRE(serial.process_event(
+        emel::model::needle::graph::event::decode{next, serial_logits}));
+    REQUIRE(parallel4.process_event(
+        emel::model::needle::graph::event::decode{next, parallel4_logits}));
     CHECK(parallel4_logits == serial_logits);
     std::array<uint64_t, 3u> calls{};
     uint64_t submitted = 0u;
@@ -615,8 +627,8 @@ TEST_CASE("needle graph rejects work before init without writing outputs") {
   std::vector<float> logits(k_vocab, 17.0f);
   const std::array<int32_t, 1u> prompt = {2};
 
-  CHECK_FALSE(graph.process_event(emel::model::needle::graph::event::decode{
-      2, std::span<float>{logits}}));
+  CHECK_FALSE(graph.process_event(
+      emel::model::needle::graph::event::decode{2, std::span<float>{logits}}));
   check_all_equal(logits, 17.0f);
   CHECK(graph.is(
       stateforward::sml::state<emel::model::needle::graph::state_errored>));
@@ -634,7 +646,8 @@ TEST_CASE("needle graph rejects work before init without writing outputs") {
       prompt, std::span<float>{logits}}));
 }
 
-TEST_CASE("needle graph invalid requests are fail-closed and reinit clears them") {
+TEST_CASE(
+    "needle graph invalid requests are fail-closed and reinit clears them") {
   auto fixture = load_contract_fixture();
 
   SUBCASE("negative token preserves caller logits") {
@@ -678,8 +691,8 @@ TEST_CASE("needle graph enforces sequence capacity before any output write") {
       prompt, std::span<float>{logits}}));
 
   std::fill(logits.begin(), logits.end(), 41.0f);
-  CHECK_FALSE(graph.process_event(emel::model::needle::graph::event::decode{
-      2, std::span<float>{logits}}));
+  CHECK_FALSE(graph.process_event(
+      emel::model::needle::graph::event::decode{2, std::span<float>{logits}}));
   check_all_equal(logits, 41.0f);
   CHECK(graph.is(
       stateforward::sml::state<emel::model::needle::graph::state_errored>));
@@ -688,11 +701,11 @@ TEST_CASE("needle graph enforces sequence capacity before any output write") {
 TEST_CASE("needle graph rejects unsupported construction geometry") {
   auto fixture = load_contract_fixture();
   fixture.contract.geo.hada_n = 384u;
-  const auto result =
-      emel::model::needle::graph::sm::create(fixture.contract);
+  const auto result = emel::model::needle::graph::sm::create(fixture.contract);
   CHECK(result.machine == nullptr);
-  CHECK(result.err == emel::error::cast(
-                          emel::model::needle::graph::error::geometry_unsupported));
+  CHECK(result.err ==
+        emel::error::cast(
+            emel::model::needle::graph::error::geometry_unsupported));
 }
 
 TEST_CASE("needle graph scalar route covers guards and activation phases") {
@@ -732,11 +745,10 @@ TEST_CASE("needle graph construction factory returns typed failure") {
                 emel::model::needle::graph::error::internal_error)};
   };
 
-  const auto result =
-      graph_type::create(fixture.contract, fail_construction);
+  const auto result = graph_type::create(fixture.contract, fail_construction);
   CHECK(result.machine == nullptr);
-  CHECK(result.err == emel::error::cast(
-                          emel::model::needle::graph::error::internal_error));
+  CHECK(result.err ==
+        emel::error::cast(emel::model::needle::graph::error::internal_error));
 }
 
 TEST_CASE("needle graph construction factory rejects inconsistent result") {
@@ -749,11 +761,12 @@ TEST_CASE("needle graph construction factory rejects inconsistent result") {
   const auto result =
       graph_type::create(fixture.contract, inconsistent_construction);
   CHECK(result.machine == nullptr);
-  CHECK(result.err == emel::error::cast(
-                          emel::model::needle::graph::error::internal_error));
+  CHECK(result.err ==
+        emel::error::cast(emel::model::needle::graph::error::internal_error));
 }
 
-TEST_CASE("needle graph construction factory preserves explicit capacity failure") {
+TEST_CASE(
+    "needle graph construction factory preserves explicit capacity failure") {
   auto fixture = load_contract_fixture();
   using graph_type = emel::model::needle::graph::sm;
   const graph_type::construction_factory fail_construction =
@@ -764,18 +777,17 @@ TEST_CASE("needle graph construction factory preserves explicit capacity failure
                 emel::model::needle::graph::error::capacity_exceeded)};
   };
 
-  const auto result =
-      graph_type::create(fixture.contract, fail_construction);
+  const auto result = graph_type::create(fixture.contract, fail_construction);
   CHECK(result.machine == nullptr);
-  CHECK(result.err == emel::error::cast(
-                          emel::model::needle::graph::error::capacity_exceeded));
+  CHECK(
+      result.err ==
+      emel::error::cast(emel::model::needle::graph::error::capacity_exceeded));
 }
 
 TEST_CASE("needle graph construction factory preserves normal creation") {
   auto fixture = load_contract_fixture();
 
-  const auto result =
-      emel::model::needle::graph::sm::create(fixture.contract);
+  const auto result = emel::model::needle::graph::sm::create(fixture.contract);
   REQUIRE(result.machine != nullptr);
   CHECK(result.err ==
         emel::error::cast(emel::model::needle::graph::error::none));
@@ -785,22 +797,23 @@ TEST_CASE("needle graph bounded construction rejects extreme geometry typed") {
   auto fixture = load_contract_fixture();
   fixture.contract.geo.max_seq_len = UINT32_MAX;
 
-  const auto result =
-      emel::model::needle::graph::sm::create(fixture.contract);
+  const auto result = emel::model::needle::graph::sm::create(fixture.contract);
   CHECK(result.machine == nullptr);
-  CHECK(result.err == emel::error::cast(
-                          emel::model::needle::graph::error::geometry_unsupported));
+  CHECK(result.err ==
+        emel::error::cast(
+            emel::model::needle::graph::error::geometry_unsupported));
 }
 
-TEST_CASE("needle graph bounded construction rejects practical allocation cap") {
+TEST_CASE(
+    "needle graph bounded construction rejects practical allocation cap") {
   auto fixture = load_contract_fixture();
   fixture.contract.geo.kv_window = 65536u;
 
-  const auto result =
-      emel::model::needle::graph::sm::create(fixture.contract);
+  const auto result = emel::model::needle::graph::sm::create(fixture.contract);
   CHECK(result.machine == nullptr);
-  CHECK(result.err == emel::error::cast(
-                          emel::model::needle::graph::error::geometry_unsupported));
+  CHECK(result.err ==
+        emel::error::cast(
+            emel::model::needle::graph::error::geometry_unsupported));
 }
 
 TEST_CASE("needle graph GQA2 route falls back when runtime AVX2 is disabled") {
@@ -810,8 +823,7 @@ TEST_CASE("needle graph GQA2 route falls back when runtime AVX2 is disabled") {
   emel::model::needle::graph::event::step_ctx step{};
   const emel::model::needle::graph::event::step_run run{step};
 
-  CHECK_FALSE(
-      emel::model::needle::graph::guard::guard_attend_gqa2{}(run, ctx));
+  CHECK_FALSE(emel::model::needle::graph::guard::guard_attend_gqa2{}(run, ctx));
   CHECK(emel::model::needle::graph::guard::guard_attend_generic{}(run, ctx));
 }
 
@@ -825,7 +837,8 @@ TEST_CASE("needle graph engram dilation gathers exact dilated tap positions") {
   CHECK(gathered == std::array<uint32_t, 4u>{11u, 8u, 5u, 2u});
 }
 
-TEST_CASE("needle graph pinned engram sites retain exact layer-to-site mapping") {
+TEST_CASE(
+    "needle graph pinned engram sites retain exact layer-to-site mapping") {
   const auto fixture = load_contract_fixture();
   const auto &geo = fixture.contract.geo;
   REQUIRE(geo.num_engram_sites == fixture.contract.engram_site_count);
@@ -835,9 +848,9 @@ TEST_CASE("needle graph pinned engram sites retain exact layer-to-site mapping")
 
   uint32_t expected_max_order = 0u;
   for (uint32_t i = 0u; i < geo.num_engram_orders; ++i) {
-    expected_max_order =
-        geo.engram_orders[i] > expected_max_order ? geo.engram_orders[i]
-                                                  : expected_max_order;
+    expected_max_order = geo.engram_orders[i] > expected_max_order
+                             ? geo.engram_orders[i]
+                             : expected_max_order;
   }
   const uint32_t expected_history_extent =
       (geo.engram_conv_taps - 1u) * geo.engram_conv_dilation;
@@ -861,18 +874,18 @@ TEST_CASE("needle graph pinned engram sites retain exact layer-to-site mapping")
 
   for (uint32_t layer = 0u; layer < geo.num_layers; ++layer) {
     uint32_t site = emel::model::needle::k_max_engram_sites;
-    const bool found = emel::model::needle::detail::find_engram_site_index(
-        geo, layer, site);
-    CHECK(found == emel::model::needle::graph::guard::layer_is_engram_site(
-                       geo, layer));
+    const bool found =
+        emel::model::needle::detail::find_engram_site_index(geo, layer, site);
+    CHECK(found ==
+          emel::model::needle::graph::guard::layer_is_engram_site(geo, layer));
     if (!found) {
       CHECK(site == emel::model::needle::k_max_engram_sites);
     }
   }
 }
 
-
-TEST_CASE("needle graph diagnostics reject invalid clocks and stay observational") {
+TEST_CASE(
+    "needle graph diagnostics reject invalid clocks and stay observational") {
   auto fixture = load_contract_fixture();
   emel::model::needle::graph::sm graph{fixture.contract};
   REQUIRE(graph.process_event(
@@ -894,23 +907,25 @@ TEST_CASE("needle graph diagnostics reject invalid clocks and stay observational
   CHECK(graph.is(
       stateforward::sml::state<emel::model::needle::graph::state_ready>));
 
-  REQUIRE(graph.process_event(
-      emel::model::needle::graph::event::reset_timing{}));
+  REQUIRE(
+      graph.process_event(emel::model::needle::graph::event::reset_timing{}));
   CHECK(graph.is(
       stateforward::sml::state<emel::model::needle::graph::state_ready>));
 }
 
-TEST_CASE("needle graph owns contract metadata while borrowing tensor payloads") {
+TEST_CASE(
+    "needle graph owns contract metadata while borrowing tensor payloads") {
   auto fixture = load_contract_fixture();
   const uint8_t *const borrowed_embedding = fixture.contract.embedding.data;
-  auto graph = std::make_unique<emel::model::needle::graph::sm>(fixture.contract);
+  auto graph =
+      std::make_unique<emel::model::needle::graph::sm>(fixture.contract);
   fixture.contract = {};
 
   REQUIRE(graph->process_event(
       emel::model::needle::graph::event::init{.activation_quant = false}));
   std::vector<float> logits(k_vocab);
-  REQUIRE(graph->process_event(emel::model::needle::graph::event::decode{
-      2, std::span<float>{logits}}));
+  REQUIRE(graph->process_event(
+      emel::model::needle::graph::event::decode{2, std::span<float>{logits}}));
   CHECK(borrowed_embedding != nullptr);
 }
 
@@ -953,12 +968,13 @@ TEST_CASE("needle graph rejects callback-reentrant decode and diagnostics") {
   g_reentrant_graph = &graph;
   g_reentrant_attempted.store(false, std::memory_order_release);
   g_reentrant_accepted.store(true, std::memory_order_release);
-  REQUIRE(graph.process_event(emel::model::needle::graph::event::configure_timing{
-      true, &reentrant_timestamp_now}));
+  REQUIRE(
+      graph.process_event(emel::model::needle::graph::event::configure_timing{
+          true, &reentrant_timestamp_now}));
 
   std::vector<float> logits(k_vocab);
-  REQUIRE(graph.process_event(emel::model::needle::graph::event::decode{
-      2, std::span<float>{logits}}));
+  REQUIRE(graph.process_event(
+      emel::model::needle::graph::event::decode{2, std::span<float>{logits}}));
   CHECK(g_reentrant_attempted.load(std::memory_order_acquire));
   CHECK_FALSE(g_reentrant_accepted.load(std::memory_order_acquire));
   g_reentrant_graph = nullptr;
@@ -971,8 +987,9 @@ TEST_CASE("needle graph decode rejects concurrent decode and diagnostics") {
       emel::model::needle::graph::event::init{.activation_quant = false}));
   g_blocking_clock_entered.store(false, std::memory_order_release);
   g_release_blocking_clock.store(false, std::memory_order_release);
-  REQUIRE(graph.process_event(emel::model::needle::graph::event::configure_timing{
-      true, &blocking_timestamp_now}));
+  REQUIRE(
+      graph.process_event(emel::model::needle::graph::event::configure_timing{
+          true, &blocking_timestamp_now}));
 
   std::vector<float> first(k_vocab);
   std::atomic<bool> decode_accepted = false;
@@ -982,7 +999,8 @@ TEST_CASE("needle graph decode rejects concurrent decode and diagnostics") {
             2, std::span<float>{first}}),
         std::memory_order_release);
   });
-  while (!g_blocking_clock_entered.load(std::memory_order_acquire)) {}
+  while (!g_blocking_clock_entered.load(std::memory_order_acquire)) {
+  }
 
   std::vector<float> rejected(k_vocab, 73.0f);
   CHECK_FALSE(graph.process_event(emel::model::needle::graph::event::decode{

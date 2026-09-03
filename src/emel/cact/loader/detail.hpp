@@ -2,8 +2,8 @@
 
 #include <array>
 #include <bit>
-#include <cstddef>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <span>
@@ -137,9 +137,10 @@ struct bounded_reader {
   }
 };
 
-inline bool compute_raw_expected_bytes(
-    const std::span<const uint8_t> &file_image, const uint64_t offset,
-    uint64_t &expected_bytes_out) noexcept {
+inline bool
+compute_raw_expected_bytes(const std::span<const uint8_t> &file_image,
+                           const uint64_t offset,
+                           uint64_t &expected_bytes_out) noexcept {
   if (offset > file_image.size()) {
     return false;
   }
@@ -280,8 +281,8 @@ inline bool compute_cq_expected_bytes(const uint32_t out_rows,
   }
 
   uint64_t rounded_in = 0u;
-  if (!add_u64(static_cast<uint64_t>(in_dim),
-               static_cast<uint64_t>(group) - 1u, rounded_in)) {
+  if (!add_u64(static_cast<uint64_t>(in_dim), static_cast<uint64_t>(group) - 1u,
+               rounded_in)) {
     return false;
   }
   const uint64_t groups_per_row = rounded_in / group;
@@ -339,11 +340,12 @@ inline bool compute_dense_expected_bytes(
          expected_bytes_out != 0u;
 }
 
-inline bool compute_expected_bytes(
-    const std::span<const uint8_t> &file_image, const uint64_t offset,
-    const uint8_t dtype, const uint8_t ndim,
-    const std::array<uint32_t, 4> &shape, const uint32_t group,
-    const uint32_t bits, uint64_t &expected_bytes_out) noexcept {
+inline bool compute_expected_bytes(const std::span<const uint8_t> &file_image,
+                                   const uint64_t offset, const uint8_t dtype,
+                                   const uint8_t ndim,
+                                   const std::array<uint32_t, 4> &shape,
+                                   const uint32_t group, const uint32_t bits,
+                                   uint64_t &expected_bytes_out) noexcept {
   if (dtype == constants::dtype_fp16) {
     return group == 0u && bits == 0u &&
            compute_dense_expected_bytes(ndim, shape, 2u, expected_bytes_out);
@@ -359,8 +361,8 @@ inline bool compute_expected_bytes(
            expected_bytes_out != 0u;
   }
   if (dtype == constants::dtype_raw) {
-    return ndim == 0u && shape[0] == 0u && shape[1] == 0u &&
-           shape[2] == 0u && shape[3] == 0u && group == 0u && bits == 0u &&
+    return ndim == 0u && shape[0] == 0u && shape[1] == 0u && shape[2] == 0u &&
+           shape[3] == 0u && group == 0u && bits == 0u &&
            compute_raw_expected_bytes(file_image, offset, expected_bytes_out);
   }
   return false;
@@ -398,11 +400,9 @@ locate_directory(const std::span<const uint8_t> &file_image,
 // fields into `view_out`. Shared by probe_geometry (discards the view) and
 // parse_directory (keeps it), so the per-record validation lives in exactly
 // one place.
-inline emel::error::type
-scan_directory_record(bounded_reader &reader,
-                      const std::span<const uint8_t> &file_image,
-                      const uint64_t metadata_end,
-                      tensor_view &view_out) noexcept {
+inline emel::error::type scan_directory_record(
+    bounded_reader &reader, const std::span<const uint8_t> &file_image,
+    const uint64_t metadata_end, tensor_view &view_out) noexcept {
   uint8_t dtype = 0u;
   uint8_t ndim = 0u;
   uint16_t pad = 0u;
@@ -477,14 +477,13 @@ parse_directory(const std::span<const uint8_t> &file_image,
   reader.offset = directory_offset;
   uint64_t previous_end = metadata_end;
   for (uint32_t i = 0u; i < geometry_in.num_tensors; ++i) {
-    const emel::error::type record_err = scan_directory_record(
-        reader, file_image, metadata_end, tensors_out[i]);
+    const emel::error::type record_err =
+        scan_directory_record(reader, file_image, metadata_end, tensors_out[i]);
     if (record_err != cast_loader_error(error::none)) {
       return record_err;
     }
     if (tensors_out[i].offset < previous_end ||
-        !add_u64(tensors_out[i].offset, tensors_out[i].nbytes,
-                 previous_end)) {
+        !add_u64(tensors_out[i].offset, tensors_out[i].nbytes, previous_end)) {
       return cast_loader_error(error::model_invalid);
     }
   }
@@ -520,8 +519,8 @@ probe_geometry(const std::span<const uint8_t> &file_image,
   uint64_t previous_end = metadata_end;
   for (uint32_t i = 0u; i < candidate.num_tensors; ++i) {
     tensor_view current = {};
-    const emel::error::type record_err = scan_directory_record(
-        dir_reader, file_image, metadata_end, current);
+    const emel::error::type record_err =
+        scan_directory_record(dir_reader, file_image, metadata_end, current);
     if (record_err != cast_loader_error(error::none)) {
       return record_err;
     }

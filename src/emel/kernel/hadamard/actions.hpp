@@ -20,7 +20,7 @@ namespace detail {
 
 #if defined(__x86_64__) || defined(_M_X64)
 #if defined(__GNUC__) || defined(__clang__)
-#define EMEL_KERNEL_HADAMARD_AVX2_TARGET                                      \
+#define EMEL_KERNEL_HADAMARD_AVX2_TARGET                                       \
   __attribute__((target("avx2,fma,f16c")))
 #else
 #define EMEL_KERNEL_HADAMARD_AVX2_TARGET
@@ -29,13 +29,13 @@ namespace detail {
 #define EMEL_KERNEL_HADAMARD_AVX2_TARGET
 #endif
 inline uint16_t load_fp16(const uint8_t *bytes) noexcept {
-  return static_cast<uint16_t>(bytes[0]) |
-         static_cast<uint16_t>(bytes[1]) << 8u;
+  return static_cast<uint16_t>(bytes[0]) | static_cast<uint16_t>(bytes[1])
+                                               << 8u;
 }
 
 EMEL_KERNEL_HADAMARD_AVX2_TARGET inline void
 fwht512_avx2(float *values) noexcept {
-#if (defined(__x86_64__) || defined(_M_X64)) &&                               \
+#if (defined(__x86_64__) || defined(_M_X64)) &&                                \
     ((defined(__AVX2__) && defined(__FMA__) && defined(__F16C__)) ||           \
      defined(__GNUC__) || defined(__clang__))
   const __m256 sign1 =
@@ -52,15 +52,12 @@ fwht512_avx2(float *values) noexcept {
     const __m256 stage1 = _mm256_blend_ps(sums1, diffs1, 0xaau);
     const __m256 swapped2 = _mm256_permute_ps(stage1, 0x4e);
     const __m256 sums2 = _mm256_add_ps(stage1, swapped2);
-    const __m256 diffs2 =
-        _mm256_mul_ps(_mm256_sub_ps(stage1, swapped2), sign2);
+    const __m256 diffs2 = _mm256_mul_ps(_mm256_sub_ps(stage1, swapped2), sign2);
     const __m256 stage2 = _mm256_blend_ps(sums2, diffs2, 0xccu);
     const __m256 swapped4 = _mm256_permute2f128_ps(stage2, stage2, 0x01);
     const __m256 sums4 = _mm256_add_ps(stage2, swapped4);
-    const __m256 diffs4 =
-        _mm256_mul_ps(_mm256_sub_ps(stage2, swapped4), sign4);
-    _mm256_storeu_ps(values + base,
-                     _mm256_blend_ps(sums4, diffs4, 0xf0u));
+    const __m256 diffs4 = _mm256_mul_ps(_mm256_sub_ps(stage2, swapped4), sign4);
+    _mm256_storeu_ps(values + base, _mm256_blend_ps(sums4, diffs4, 0xf0u));
   }
   for (uint32_t step = 8u; step < 512u; step <<= 1u)
     for (uint32_t base = 0u; base < 512u; base += step << 1u)
@@ -81,13 +78,13 @@ fwht512_avx2(float *values) noexcept {
 
 EMEL_KERNEL_HADAMARD_AVX2_TARGET inline void
 silu512_avx2(const float *input, const uint8_t *d2, float *output) noexcept {
-#if (defined(__x86_64__) || defined(_M_X64)) &&                               \
+#if (defined(__x86_64__) || defined(_M_X64)) &&                                \
     ((defined(__AVX2__) && defined(__FMA__) && defined(__F16C__)) ||           \
      defined(__GNUC__) || defined(__clang__))
   alignas(32) float silu_lanes[8];
   for (uint32_t i = 0u; i < 512u; i += 8u) {
-    const __m256 diagonal = _mm256_cvtph_ps(_mm_loadu_si128(
-        reinterpret_cast<const __m128i *>(d2 + i * 2u)));
+    const __m256 diagonal = _mm256_cvtph_ps(
+        _mm_loadu_si128(reinterpret_cast<const __m128i *>(d2 + i * 2u)));
     const __m256 values = _mm256_mul_ps(diagonal, _mm256_loadu_ps(input + i));
     _mm256_store_ps(silu_lanes, values);
     for (float &value : silu_lanes)
@@ -97,16 +94,16 @@ silu512_avx2(const float *input, const uint8_t *d2, float *output) noexcept {
 #else
   namespace quant = emel::kernel::detail::quant;
   for (uint32_t i = 0u; i < 512u; ++i) {
-    const float value = emel::kernel::detail::quant::fp16_to_fp32(
-                            load_fp16(d2 + i * 2u)) *
-                        input[i];
+    const float value =
+        emel::kernel::detail::quant::fp16_to_fp32(load_fp16(d2 + i * 2u)) *
+        input[i];
     output[i] = value / (1.0f + std::exp(-value));
   }
 #endif
 }
 EMEL_KERNEL_HADAMARD_AVX2_TARGET inline void
 execute_mlp_row_avx2(const event::mlp_row_request &request) noexcept {
-#if (defined(__x86_64__) || defined(_M_X64)) &&                               \
+#if (defined(__x86_64__) || defined(_M_X64)) &&                                \
     ((defined(__AVX2__) && defined(__FMA__) && defined(__F16C__)) ||           \
      defined(__GNUC__) || defined(__clang__))
   const auto d1 = request.d1.data();
@@ -114,8 +111,8 @@ execute_mlp_row_avx2(const event::mlp_row_request &request) noexcept {
   float *lane = request.workspace.data();
   for (uint32_t i = 0u; i < 512u; i += 8u) {
     const __m256 input = _mm256_loadu_ps(request.input.data() + i);
-    const __m256 diagonal = _mm256_cvtph_ps(_mm_loadu_si128(
-        reinterpret_cast<const __m128i *>(d1 + i * 2u)));
+    const __m256 diagonal = _mm256_cvtph_ps(
+        _mm_loadu_si128(reinterpret_cast<const __m128i *>(d1 + i * 2u)));
     _mm256_storeu_ps(lane + i, _mm256_mul_ps(diagonal, input));
   }
   fwht512_avx2(lane);
@@ -123,8 +120,8 @@ execute_mlp_row_avx2(const event::mlp_row_request &request) noexcept {
   fwht512_avx2(lane);
   for (uint32_t i = 0u; i < 512u; i += 8u) {
     const __m256 skip = _mm256_loadu_ps(request.skip.data() + i);
-    const __m256 diagonal = _mm256_cvtph_ps(_mm_loadu_si128(
-        reinterpret_cast<const __m128i *>(d3 + i * 2u)));
+    const __m256 diagonal = _mm256_cvtph_ps(
+        _mm_loadu_si128(reinterpret_cast<const __m128i *>(d3 + i * 2u)));
     const __m256 output =
         _mm256_fmadd_ps(diagonal, _mm256_loadu_ps(lane + i), skip);
     _mm256_storeu_ps(request.output.data() + i, output);

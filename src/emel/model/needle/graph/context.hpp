@@ -4,12 +4,13 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <utility>
-#include <limits>
 
 #include <vector>
 
+#include "emel/kernel/cq/detail.hpp"
 #include "emel/kernel/cq/sm.hpp"
 #include "emel/kernel/engram/sm.hpp"
 #include "emel/kernel/hadamard/sm.hpp"
@@ -17,12 +18,10 @@
 #include "emel/kernel/rope/sm.hpp"
 #include "emel/kernel/swa/sm.hpp"
 #include "emel/kernel/zcrms/sm.hpp"
-#include "emel/model/needle/graph/events.hpp"
-#include "emel/model/needle/graph/errors.hpp"
-#include "emel/model/needle/events.hpp"
 #include "emel/model/needle/detail.hpp"
-#include "emel/kernel/cq/detail.hpp"
-
+#include "emel/model/needle/events.hpp"
+#include "emel/model/needle/graph/errors.hpp"
+#include "emel/model/needle/graph/events.hpp"
 
 namespace emel::model::needle::graph::action {
 
@@ -110,16 +109,15 @@ inline bool add_storage(uint64_t elements, const uint64_t element_bytes,
                         uint64_t &total) noexcept {
   uint64_t bytes = 0u;
   return checked_mul(elements, element_bytes, bytes) &&
-         checked_add(total, bytes, total) &&
-         total <= k_max_graph_storage_bytes;
+         checked_add(total, bytes, total) && total <= k_max_graph_storage_bytes;
 }
 
-inline uint64_t compute_max_order(
-    const emel::cact::loader::geometry &geo) noexcept {
+inline uint64_t
+compute_max_order(const emel::cact::loader::geometry &geo) noexcept {
   uint64_t max_order = 1u;
   for (uint32_t i = 0u; i < geo.num_engram_orders; ++i)
-    max_order = geo.engram_orders[i] > max_order ? geo.engram_orders[i]
-                                                   : max_order;
+    max_order =
+        geo.engram_orders[i] > max_order ? geo.engram_orders[i] : max_order;
   return max_order;
 }
 
@@ -139,16 +137,16 @@ inline bool validate_cq4_payload(const tensor_view &view,
                                  const needle::geometry &geo) noexcept {
   return emel::kernel::cq::detail::valid_packed_view<4u>(
       view, std::span<const float>{geo.codebook.data(),
-                                  emel::cact::loader::k_codebook_len});
+                                   emel::cact::loader::k_codebook_len});
 }
 
 inline bool validate_layer_views(const needle::layer_views &layer,
                                  const needle::geometry &geo) noexcept {
   const std::array<tensor_view, needle::k_layer_tensor_count> views = {
-      layer.norm_in,   layer.q_proj,   layer.k_proj,  layer.v_proj,
-      layer.q_norm,    layer.k_norm,   layer.gate_proj,
-      layer.out_proj,  layer.post_norm, layer.attn_gate,
-      layer.pre_hada,  layer.d1,       layer.d2,      layer.d3,
+      layer.norm_in,   layer.q_proj,    layer.k_proj,    layer.v_proj,
+      layer.q_norm,    layer.k_norm,    layer.gate_proj, layer.out_proj,
+      layer.post_norm, layer.attn_gate, layer.pre_hada,  layer.d1,
+      layer.d2,        layer.d3,
   };
   needle::layer_views validated{};
   if (needle::detail::bind_layer(views, geo, validated) !=
@@ -173,7 +171,7 @@ inline bool validate_layer_views(const needle::layer_views &layer,
 inline bool validate_mhc_views(const needle::mhc_views &mhc,
                                const needle::geometry &geo) noexcept {
   const std::array<tensor_view, needle::k_mhc_tensor_count> views = {
-      mhc.a_pre, mhc.a_post, mhc.a_res, mhc.b_pre, mhc.b_post,
+      mhc.a_pre, mhc.a_post,  mhc.a_res,    mhc.b_pre,   mhc.b_post,
       mhc.b_res, mhc.phi_pre, mhc.phi_post, mhc.phi_res,
   };
   needle::mhc_views validated{};
@@ -224,7 +222,8 @@ inline bool validate_graph_contract(const needle::contract &bound) noexcept {
     if (!std::isfinite(value))
       return false;
   const needle::detail::role_spec embedding_spec = {
-      needle::detail::constants::dtype_cq, 2u,
+      needle::detail::constants::dtype_cq,
+      2u,
       {geo.vocab_size, geo.d_model, 0u, 0u}};
   if (needle::detail::validate_role(bound.embedding, embedding_spec) !=
           needle::detail::cast_needle_error(needle::error::none) ||
@@ -239,13 +238,11 @@ inline bool validate_graph_contract(const needle::contract &bound) noexcept {
     if (!validate_engram_views(bound.engram_sites[site], geo))
       return false;
   const needle::detail::role_spec final_norm_spec = {
-      needle::detail::constants::dtype_fp16, 1u,
-      {geo.d_model, 0u, 0u, 0u}};
+      needle::detail::constants::dtype_fp16, 1u, {geo.d_model, 0u, 0u, 0u}};
   return needle::detail::validate_role(bound.final_norm, final_norm_spec) ==
              needle::detail::cast_needle_error(needle::error::none) &&
          validate_fp16_payload(bound.final_norm, geo.d_model);
 }
-
 
 inline bool compute_storage_plan(const needle::contract &bound,
                                  storage_plan &plan) noexcept {
@@ -282,8 +279,7 @@ inline bool compute_storage_plan(const needle::contract &bound,
       !checked_mul(hash_extent, plan.max_order, hash_extent) ||
       !checked_add(hash_extent, 1u, plan.hash_window) ||
       !checked_mul(plan.hash_window, plan.tables, hash_tables) ||
-      !checked_mul(geo.engram_conv_taps, plan.engram_e_dim,
-                   engram_tap_embed) ||
+      !checked_mul(geo.engram_conv_taps, plan.engram_e_dim, engram_tap_embed) ||
       !checked_mul(geo.engram_conv_taps, geo.d_model, engram_tap_model) ||
       !checked_mul(geo.num_engram_sites, geo.d_model, engram_site_model))
     return false;
@@ -337,8 +333,7 @@ inline bool compute_storage_plan(const needle::contract &bound,
   for (uint32_t i = 0u; prepared_ok && i < bound.layer_count; ++i) {
     const auto &layer = bound.layers[i];
     prepared_ok = add_prepared(layer.q_proj) && add_prepared(layer.k_proj) &&
-                  add_prepared(layer.v_proj) &&
-                  add_prepared(layer.gate_proj) &&
+                  add_prepared(layer.v_proj) && add_prepared(layer.gate_proj) &&
                   add_prepared(layer.out_proj);
   }
   prepared_ok = prepared_ok && add_prepared(bound.mhc.phi_pre) &&
@@ -358,18 +353,17 @@ inline bool compute_storage_plan(const needle::contract &bound,
   for (uint32_t i = 0u; i < bound.layer_count; ++i) {
     const uint64_t layer_pad = compute_in_pad(bound.layers[i].q_proj);
     const uint64_t out_pad = compute_in_pad(bound.layers[i].out_proj);
-    plan.cq_workspace = layer_pad > plan.cq_workspace ? layer_pad
-                                                      : plan.cq_workspace;
-    plan.cq_workspace = out_pad > plan.cq_workspace ? out_pad
-                                                     : plan.cq_workspace;
+    plan.cq_workspace =
+        layer_pad > plan.cq_workspace ? layer_pad : plan.cq_workspace;
+    plan.cq_workspace =
+        out_pad > plan.cq_workspace ? out_pad : plan.cq_workspace;
   }
   const uint64_t phi_pad = compute_in_pad(bound.mhc.phi_res);
-  plan.cq_workspace = phi_pad > plan.cq_workspace ? phi_pad
-                                                   : plan.cq_workspace;
+  plan.cq_workspace = phi_pad > plan.cq_workspace ? phi_pad : plan.cq_workspace;
   for (uint32_t s = 0u; s < bound.engram_site_count; ++s) {
     const uint64_t site_pad = compute_in_pad(bound.engram_sites[s].key_proj);
-    plan.cq_workspace = site_pad > plan.cq_workspace ? site_pad
-                                                      : plan.cq_workspace;
+    plan.cq_workspace =
+        site_pad > plan.cq_workspace ? site_pad : plan.cq_workspace;
   }
   if (!floats(plan.cq_workspace) || !bytes(plan.cq_workspace) ||
       !floats(plan.cq_workspace))
@@ -388,8 +382,7 @@ validate_construction(const needle::contract &bound) noexcept {
 struct context {
   explicit context(const needle::contract &contract_in,
                    const bool parallel_projection_wave = false)
-      : bound(contract_in),
-        parallel_projection_wave(parallel_projection_wave) {
+      : bound(contract_in), parallel_projection_wave(parallel_projection_wave) {
     storage_plan plan{};
     construction_error = compute_storage_plan(bound, plan)
                              ? emel::error::cast(error::none)
@@ -519,17 +512,14 @@ struct context {
     return action::compute_in_pad(view);
   }
 
-
   // Immutable graph-owned metadata. Tensor payload bytes remain borrowed from
   // the mapped model image and must outlive this graph.
   const needle::contract bound;
   bool storage_valid = false;
-  bool avx2_fma_available =
-      emel::kernel::x86_64::detail::detect_avx2() &&
-      emel::kernel::x86_64::detail::detect_fma();
+  bool avx2_fma_available = emel::kernel::x86_64::detail::detect_avx2() &&
+                            emel::kernel::x86_64::detail::detect_fma();
   emel::error::type construction_error =
       emel::error::cast(error::geometry_unsupported);
-
 
   // Logical position of the next cache slot (persists across dispatches).
   uint32_t position = 0u;

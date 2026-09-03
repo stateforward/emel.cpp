@@ -39,15 +39,19 @@ struct outcome_counts {
   const matmul::event::execute_parallel *error_request = nullptr;
 };
 
-void count_done(void *object, const matmul::events::execute_done<
-                                  matmul::event::execute_parallel> &outcome) noexcept {
+void count_done(
+    void *object,
+    const matmul::events::execute_done<matmul::event::execute_parallel>
+        &outcome) noexcept {
   auto &counts = *static_cast<outcome_counts *>(object);
   ++counts.done;
   counts.done_request = &outcome.request;
 }
 
-void count_error(void *object, const matmul::events::execute_error<
-                                   matmul::event::execute_parallel> &outcome) noexcept {
+void count_error(
+    void *object,
+    const matmul::events::execute_error<matmul::event::execute_parallel>
+        &outcome) noexcept {
   auto &counts = *static_cast<outcome_counts *>(object);
   ++counts.error;
   counts.error_request = &outcome.request;

@@ -25,8 +25,8 @@ inline bool error_is_unknown(const emel::error::type runtime_err) noexcept {
 struct guard_bind_valid_request {
   bool operator()(const event::bind_runtime &ev,
                   const action::context &) const noexcept {
-    return ev.request.tensors.data() != nullptr && !ev.request.tensors.empty() &&
-           static_cast<bool>(ev.request.on_done);
+    return ev.request.tensors.data() != nullptr &&
+           !ev.request.tensors.empty() && static_cast<bool>(ev.request.on_done);
   }
 };
 

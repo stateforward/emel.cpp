@@ -4,8 +4,8 @@
 #include <cstdint>
 #include <limits>
 
-#include "emel/kernel/hadamard/actions.hpp"
 #include "emel/kernel/attention/guards.hpp"
+#include "emel/kernel/hadamard/actions.hpp"
 #include "emel/kernel/x86_64/context.hpp"
 
 namespace emel::kernel::hadamard::guard {
@@ -15,8 +15,7 @@ inline bool power_of_two(const uint32_t n) noexcept {
 }
 
 template <std::size_t bytes_per_element,
-          std::size_t byte_capacity =
-              std::numeric_limits<std::size_t>::max()>
+          std::size_t byte_capacity = std::numeric_limits<std::size_t>::max()>
 constexpr bool fits_size_capacity(const uint32_t count) noexcept {
   static_assert(bytes_per_element != 0u);
   if constexpr (byte_capacity / bytes_per_element <
@@ -57,11 +56,13 @@ inline bool spans_valid(const event::mlp_row_request &request) noexcept {
       reinterpret_cast<std::uintptr_t>(request.workspace.data()) %
               alignof(float) !=
           0u ||
-      reinterpret_cast<std::uintptr_t>(request.output.data()) % alignof(float) !=
+      reinterpret_cast<std::uintptr_t>(request.output.data()) %
+              alignof(float) !=
           0u)
     return false;
   const auto disjoint = [](const void *lhs, const std::size_t lhs_bytes,
-                           const void *rhs, const std::size_t rhs_bytes) noexcept {
+                           const void *rhs,
+                           const std::size_t rhs_bytes) noexcept {
     return emel::kernel::attention::guard::guard_ranges_disjoint(
         lhs, lhs_bytes, rhs, rhs_bytes);
   };
@@ -97,15 +98,15 @@ struct guard_execute_mlp_row {
 };
 
 // Process-wide host capability is immutable after startup; cache the pure
-// query so repeated dispatch guards do not execute CPUID/XGETBV in the hot path.
+// query so repeated dispatch guards do not execute CPUID/XGETBV in the hot
+// path.
 inline bool avx2_fma_f16c_available() noexcept {
-#if (defined(__x86_64__) || defined(_M_X64)) &&                               \
+#if (defined(__x86_64__) || defined(_M_X64)) &&                                \
     ((defined(__AVX2__) && defined(__FMA__) && defined(__F16C__)) ||           \
      defined(__GNUC__) || defined(__clang__))
-  static const bool available =
-      emel::kernel::x86_64::detail::detect_avx2() &&
-      emel::kernel::x86_64::detail::detect_fma() &&
-      emel::kernel::x86_64::detail::detect_f16c();
+  static const bool available = emel::kernel::x86_64::detail::detect_avx2() &&
+                                emel::kernel::x86_64::detail::detect_fma() &&
+                                emel::kernel::x86_64::detail::detect_f16c();
   return available;
 #else
   return false;

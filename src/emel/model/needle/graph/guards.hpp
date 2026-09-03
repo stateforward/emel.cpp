@@ -37,7 +37,6 @@ inline bool cq_group128(const emel::model::needle::contract &bound) noexcept {
   return ok;
 }
 
-
 inline bool layer_is_engram_site(const emel::cact::loader::geometry &geo,
                                  const uint32_t layer_index) noexcept {
   uint32_t site = 0u;
@@ -57,8 +56,7 @@ struct guard_route_avx2 {
 #else
            false &&
 #endif
-           geo.d_model == 512u && geo.hada_n == 512u &&
-           cq_group128(ctx.bound);
+           geo.d_model == 512u && geo.hada_n == 512u && cq_group128(ctx.bound);
   }
 };
 
@@ -117,9 +115,8 @@ struct guard_init_supported {
                   const action::context &ctx) const noexcept {
     const auto &geo = ctx.bound.geo;
     return ctx.storage_valid && geo.d_model > 0u && geo.num_heads > 0u &&
-           geo.num_kv_heads > 0u &&
-           (geo.num_heads % geo.num_kv_heads) == 0u && geo.head_dim >= 2u &&
-           (geo.head_dim % 2u) == 0u &&
+           geo.num_kv_heads > 0u && (geo.num_heads % geo.num_kv_heads) == 0u &&
+           geo.head_dim >= 2u && (geo.head_dim % 2u) == 0u &&
            static_cast<uint64_t>(geo.num_heads) * geo.head_dim >= geo.d_model &&
            geo.num_layers > 0u && ctx.bound.layer_count == geo.num_layers &&
            is_power_of_two(geo.hada_n) && geo.hada_n >= geo.d_model &&

@@ -63,12 +63,18 @@ const emel::model::needle::event::bind_done_fn k_bind_done_cb =
 const emel::model::needle::event::bind_error_fn k_bind_error_cb =
     emel::model::needle::event::bind_error_fn::from<&on_bind_error>();
 
-void on_loader_probe_done(const emel::cact::loader::events::probe_done &) noexcept {}
-void on_loader_probe_error(const emel::cact::loader::events::probe_error &) noexcept {}
-void on_loader_bind_done(const emel::cact::loader::events::bind_done &) noexcept {}
-void on_loader_bind_error(const emel::cact::loader::events::bind_error &) noexcept {}
-void on_loader_parse_done(const emel::cact::loader::events::parse_done &) noexcept {}
-void on_loader_parse_error(const emel::cact::loader::events::parse_error &) noexcept {}
+void on_loader_probe_done(
+    const emel::cact::loader::events::probe_done &) noexcept {}
+void on_loader_probe_error(
+    const emel::cact::loader::events::probe_error &) noexcept {}
+void on_loader_bind_done(
+    const emel::cact::loader::events::bind_done &) noexcept {}
+void on_loader_bind_error(
+    const emel::cact::loader::events::bind_error &) noexcept {}
+void on_loader_parse_done(
+    const emel::cact::loader::events::parse_done &) noexcept {}
+void on_loader_parse_error(
+    const emel::cact::loader::events::parse_error &) noexcept {}
 
 const emel::cact::loader::event::probe_done_fn k_loader_probe_done_cb =
     emel::cact::loader::event::probe_done_fn::from<&on_loader_probe_done>();
@@ -163,10 +169,9 @@ void check_needle_binder_state_bound(emel::model::needle::sm &machine) {
 
 TEST_CASE("machine aggregate exports maintained Needle aliases") {
   static_assert(std::is_same_v<emel::CactLoader, emel::cact::loader::sm>);
-  static_assert(std::is_same_v<emel::NeedleBinder,
-                               emel::model::needle::sm>);
-  static_assert(std::is_same_v<emel::NeedleGraph,
-                               emel::model::needle::graph::sm>);
+  static_assert(std::is_same_v<emel::NeedleBinder, emel::model::needle::sm>);
+  static_assert(
+      std::is_same_v<emel::NeedleGraph, emel::model::needle::graph::sm>);
   static_assert(std::is_same_v<emel::NeedleTokenizerLoader,
                                emel::text::tokenizer::needle::sm>);
 }
@@ -345,8 +350,8 @@ TEST_CASE("needle binder handles empty public callbacks explicitly") {
     CHECK(state.error_count == 1u);
     CHECK(state.err ==
           emel::error::cast(emel::model::needle::error::invalid_request));
-    CHECK(
-        machine.is(stateforward::sml::state<emel::model::needle::state_errored>));
+    CHECK(machine.is(
+        stateforward::sml::state<emel::model::needle::state_errored>));
   }
 
   SUBCASE("an invalid bind allows the optional error callback to be absent") {
@@ -358,8 +363,8 @@ TEST_CASE("needle binder handles empty public callbacks explicitly") {
         k_bind_done_cb, empty_error};
 
     CHECK_FALSE(machine.process_event(bind));
-    CHECK(
-        machine.is(stateforward::sml::state<emel::model::needle::state_errored>));
+    CHECK(machine.is(
+        stateforward::sml::state<emel::model::needle::state_errored>));
   }
 }
 
@@ -528,27 +533,29 @@ TEST_CASE("needle binder allows re-binding after an error") {
   check_needle_binder_state_bound(machine);
 }
 
-TEST_CASE("needle binder rejects geometry capacity and engram inconsistencies") {
+TEST_CASE(
+    "needle binder rejects geometry capacity and engram inconsistencies") {
   const std::vector<uint8_t> file_bytes = read_file_bytes(fixture_model_path());
   emel::cact::loader::geometry geometry = {};
   std::vector<emel::cact::loader::tensor_view> tensors;
   load_fixture_tensors(file_bytes, geometry, tensors);
 
-  const auto check_geometry_error = [&](const emel::cact::loader::geometry &bad) {
-    emel::model::needle::sm machine{};
-    binder_state state = {};
-    binder_scope scope{state};
-    emel::model::needle::contract contract = {};
-    const emel::model::needle::event::bind bind{
-        bad, std::span<const emel::cact::loader::tensor_view>{tensors}, contract,
-        k_bind_done_cb, k_bind_error_cb};
-    CHECK_FALSE(machine.process_event(bind));
-    CHECK(state.done_count == 0u);
-    CHECK(state.error_count == 1u);
-    CHECK(state.err ==
-          emel::error::cast(emel::model::needle::error::geometry_invalid));
-    CHECK(contract.layer_count == 0u);
-  };
+  const auto check_geometry_error =
+      [&](const emel::cact::loader::geometry &bad) {
+        emel::model::needle::sm machine{};
+        binder_state state = {};
+        binder_scope scope{state};
+        emel::model::needle::contract contract = {};
+        const emel::model::needle::event::bind bind{
+            bad, std::span<const emel::cact::loader::tensor_view>{tensors},
+            contract, k_bind_done_cb, k_bind_error_cb};
+        CHECK_FALSE(machine.process_event(bind));
+        CHECK(state.done_count == 0u);
+        CHECK(state.error_count == 1u);
+        CHECK(state.err ==
+              emel::error::cast(emel::model::needle::error::geometry_invalid));
+        CHECK(contract.layer_count == 0u);
+      };
 
   SUBCASE("too many layers") {
     auto bad = geometry;
@@ -612,31 +619,31 @@ TEST_CASE("needle binder classifies failures in later positional sections") {
   emel::cact::loader::geometry geometry = {};
   std::vector<emel::cact::loader::tensor_view> tensors;
   load_fixture_tensors(file_bytes, geometry, tensors);
-  const size_t mhc_base =
-      1u + static_cast<size_t>(geometry.num_layers) *
-               emel::model::needle::k_layer_tensor_count;
+  const size_t mhc_base = 1u + static_cast<size_t>(geometry.num_layers) *
+                                   emel::model::needle::k_layer_tensor_count;
   const size_t engram_base = mhc_base + emel::model::needle::k_mhc_tensor_count;
   const size_t final_norm_index =
       engram_base + static_cast<size_t>(geometry.num_engram_sites) *
                         emel::model::needle::k_engram_site_tensor_count;
   const size_t manifest_index = final_norm_index + 1u;
 
-  const auto check_bind_error = [&](std::vector<emel::cact::loader::tensor_view> bad,
-                                    const emel::model::needle::error expected) {
-    emel::model::needle::sm machine{};
-    binder_state state = {};
-    binder_scope scope{state};
-    emel::model::needle::contract contract = {};
-    const emel::model::needle::event::bind bind{
-        geometry, std::span<const emel::cact::loader::tensor_view>{bad},
-        contract, k_bind_done_cb, k_bind_error_cb};
-    CHECK_FALSE(machine.process_event(bind));
-    CHECK(state.done_count == 0u);
-    CHECK(state.error_count == 1u);
-    CHECK(state.err == emel::error::cast(expected));
-    CHECK(machine.is(
-        stateforward::sml::state<emel::model::needle::state_errored>));
-  };
+  const auto check_bind_error =
+      [&](std::vector<emel::cact::loader::tensor_view> bad,
+          const emel::model::needle::error expected) {
+        emel::model::needle::sm machine{};
+        binder_state state = {};
+        binder_scope scope{state};
+        emel::model::needle::contract contract = {};
+        const emel::model::needle::event::bind bind{
+            geometry, std::span<const emel::cact::loader::tensor_view>{bad},
+            contract, k_bind_done_cb, k_bind_error_cb};
+        CHECK_FALSE(machine.process_event(bind));
+        CHECK(state.done_count == 0u);
+        CHECK(state.error_count == 1u);
+        CHECK(state.err == emel::error::cast(expected));
+        CHECK(machine.is(
+            stateforward::sml::state<emel::model::needle::state_errored>));
+      };
 
   SUBCASE("mHC shape mismatch") {
     auto bad = tensors;
@@ -682,14 +689,16 @@ TEST_CASE("needle binder classifies failures in later positional sections") {
   }
 }
 
-TEST_CASE("needle binder accepts the base contract without heads or tokenizer") {
+TEST_CASE(
+    "needle binder accepts the base contract without heads or tokenizer") {
   const std::vector<uint8_t> file_bytes = read_file_bytes(fixture_model_path());
   emel::cact::loader::geometry geometry = {};
   std::vector<emel::cact::loader::tensor_view> tensors;
   load_fixture_tensors(file_bytes, geometry, tensors);
   const size_t base_count =
-      1u + static_cast<size_t>(geometry.num_layers) *
-               emel::model::needle::k_layer_tensor_count +
+      1u +
+      static_cast<size_t>(geometry.num_layers) *
+          emel::model::needle::k_layer_tensor_count +
       emel::model::needle::k_mhc_tensor_count +
       static_cast<size_t>(geometry.num_engram_sites) *
           emel::model::needle::k_engram_site_tensor_count +

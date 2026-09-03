@@ -61,8 +61,8 @@ inline bool compute_engram_hash_geometry(const geometry &geo,
   if (geo.engram_conv_taps == 0u || geo.engram_conv_dilation == 0u ||
       geo.num_engram_orders == 0u ||
       geo.num_engram_orders > emel::kernel::engram::event::k_max_orders ||
-      !checked_product(geo.engram_conv_taps - 1u,
-                       geo.engram_conv_dilation, history_extent_out)) {
+      !checked_product(geo.engram_conv_taps - 1u, geo.engram_conv_dilation,
+                       history_extent_out)) {
     return false;
   }
 
@@ -102,7 +102,6 @@ inline bool find_engram_site_index(const geometry &geo,
   }
   return false;
 }
-
 
 // Expected geometry of one positional tensor role. `shape` entries beyond
 // `ndim` must be zero in the directory record; a zero entry inside `ndim`
@@ -168,9 +167,8 @@ inline emel::error::type validate_geometry(const geometry &geo) noexcept {
 
   if (geo.d_model == 0u || geo.vocab_size == 0u || geo.num_heads == 0u ||
       geo.num_kv_heads == 0u || geo.head_dim == 0u || geo.hada_n == 0u ||
-      geo.mhc_lanes == 0u || geo.kv_window == 0u ||
-      geo.max_seq_len == 0u || !std::isfinite(geo.rope_theta) ||
-      geo.rope_theta <= 0.0f) {
+      geo.mhc_lanes == 0u || geo.kv_window == 0u || geo.max_seq_len == 0u ||
+      !std::isfinite(geo.rope_theta) || geo.rope_theta <= 0.0f) {
     return cast_needle_error(error::geometry_invalid);
   }
   if (geo.d_model > k_max_d_model || geo.vocab_size > k_max_vocab_size ||
@@ -210,8 +208,7 @@ inline emel::error::type validate_geometry(const geometry &geo) noexcept {
         geo.engram_conv_dilation == 0u || geo.num_engram_orders == 0u ||
         geo.engram_slots > k_max_engram_slots ||
         geo.engram_conv_taps > k_max_engram_conv_taps ||
-        !checked_product(geo.num_engram_tables, geo.engram_slots,
-                         table_rows) ||
+        !checked_product(geo.num_engram_tables, geo.engram_slots, table_rows) ||
         !checked_product(geo.num_engram_tables, geo.engram_sub_dim,
                          embed_dim) ||
         !compute_engram_hash_window(geo, hash_window, hash_positions) ||
@@ -307,14 +304,14 @@ inline emel::error::type bind_mhc(const std::span<const tensor_view> views,
     return cast_needle_error(error::geometry_invalid);
   }
   const std::array<role_spec, k_mhc_tensor_count> specs = {{
-      {constants::dtype_fp16, 1u, {layers, 0u, 0u, 0u}},       // a_pre
-      {constants::dtype_fp16, 1u, {layers, 0u, 0u, 0u}},       // a_post
-      {constants::dtype_fp16, 1u, {layers, 0u, 0u, 0u}},       // a_res
-      {constants::dtype_fp16, 2u, {layers, lanes, 0u, 0u}},    // b_pre
-      {constants::dtype_fp16, 2u, {layers, lanes, 0u, 0u}},    // b_post
-      {constants::dtype_fp16, 3u, {layers, lanes, lanes, 0u}}, // b_res
-      {constants::dtype_cq, 2u, {layer_lanes, nc, 0u, 0u}}, // phi_pre
-      {constants::dtype_cq, 2u, {layer_lanes, nc, 0u, 0u}}, // phi_post
+      {constants::dtype_fp16, 1u, {layers, 0u, 0u, 0u}},         // a_pre
+      {constants::dtype_fp16, 1u, {layers, 0u, 0u, 0u}},         // a_post
+      {constants::dtype_fp16, 1u, {layers, 0u, 0u, 0u}},         // a_res
+      {constants::dtype_fp16, 2u, {layers, lanes, 0u, 0u}},      // b_pre
+      {constants::dtype_fp16, 2u, {layers, lanes, 0u, 0u}},      // b_post
+      {constants::dtype_fp16, 3u, {layers, lanes, lanes, 0u}},   // b_res
+      {constants::dtype_cq, 2u, {layer_lanes, nc, 0u, 0u}},      // phi_pre
+      {constants::dtype_cq, 2u, {layer_lanes, nc, 0u, 0u}},      // phi_post
       {constants::dtype_cq, 2u, {layer_lane_pairs, nc, 0u, 0u}}, // phi_res
   }};
 
@@ -418,8 +415,7 @@ inline emel::error::type bind_heads(const std::span<const tensor_view> views,
     const tensor_view &proj = views[2u + h * k_head_tensor_count];
     const tensor_view &bias = views[3u + h * k_head_tensor_count];
 
-    const role_spec probes_spec = {constants::dtype_fp16, 2u,
-                                   {0u, d, 0u, 0u}};
+    const role_spec probes_spec = {constants::dtype_fp16, 2u, {0u, d, 0u, 0u}};
     const emel::error::type probes_err = validate_role(probes, probes_spec);
     if (probes_err != cast_needle_error(error::none)) {
       return probes_err;

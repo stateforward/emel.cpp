@@ -136,8 +136,7 @@ TEST_CASE("engram hash guard rejects orders outside the gathered window") {
   emel::kernel::engram::action::context context{};
 
   for (const std::array<uint32_t, 2> orders :
-       {std::array<uint32_t, 2>{0u, 2u},
-        std::array<uint32_t, 2>{2u, 4u}}) {
+       {std::array<uint32_t, 2>{0u, 2u}, std::array<uint32_t, 2>{2u, 4u}}) {
     indices.fill(0xDEADBEEFu);
     ngram_ok.fill(-17.0f);
     const emel::kernel::engram::event::hash_rows_request request{
@@ -153,8 +152,8 @@ TEST_CASE("engram hash guard rejects orders outside the gathered window") {
     dispatch_result result{};
     const emel::kernel::engram::event::execute_hash_rows event{request, result};
 
-    CHECK_FALSE(emel::kernel::engram::guard::guard_execute_hash_rows{}(
-        event, context));
+    CHECK_FALSE(
+        emel::kernel::engram::guard::guard_execute_hash_rows{}(event, context));
 
     emel::kernel::engram::sm machine;
     CHECK_FALSE(machine.process_event(event));

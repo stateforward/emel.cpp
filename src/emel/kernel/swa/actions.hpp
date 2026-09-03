@@ -17,9 +17,8 @@ namespace emel::kernel::swa::action {
 
 // CPU capability is detected once with machine construction, never in dispatch.
 struct context {
-  bool avx2_fma_available =
-      emel::kernel::x86_64::detail::detect_avx2() &&
-      emel::kernel::x86_64::detail::detect_fma();
+  bool avx2_fma_available = emel::kernel::x86_64::detail::detect_avx2() &&
+                            emel::kernel::x86_64::detail::detect_fma();
 };
 
 #if defined(__x86_64__) || defined(_M_X64)
@@ -73,10 +72,10 @@ dot_pair_avx2(const float *lhs0, const float *lhs1, const float *rhs,
   alignas(32) float lanes1[8];
   _mm256_store_ps(lanes0, sum0);
   _mm256_store_ps(lanes1, sum1);
-  out0 = lanes0[0] + lanes0[1] + lanes0[2] + lanes0[3] + lanes0[4] +
-         lanes0[5] + lanes0[6] + lanes0[7];
-  out1 = lanes1[0] + lanes1[1] + lanes1[2] + lanes1[3] + lanes1[4] +
-         lanes1[5] + lanes1[6] + lanes1[7];
+  out0 = lanes0[0] + lanes0[1] + lanes0[2] + lanes0[3] + lanes0[4] + lanes0[5] +
+         lanes0[6] + lanes0[7];
+  out1 = lanes1[0] + lanes1[1] + lanes1[2] + lanes1[3] + lanes1[4] + lanes1[5] +
+         lanes1[6] + lanes1[7];
   for (; i < static_cast<size_t>(dim); ++i) {
     out0 += lhs0[i] * rhs[i];
     out1 += lhs1[i] * rhs[i];
@@ -94,11 +93,10 @@ dot_pair_avx2(const float *lhs0, const float *lhs1, const float *rhs,
 #if defined(__GNUC__) || defined(__clang__)
 __attribute__((noinline))
 #endif
-inline void accumulate_value_pair_scalar(float *output0, float *output1,
-                                         const float *values,
-                                         const float weight0,
-                                         const float weight1,
-                                         const uint32_t dim) noexcept {
+inline void
+accumulate_value_pair_scalar(float *output0, float *output1,
+                             const float *values, const float weight0,
+                             const float weight1, const uint32_t dim) noexcept {
   for (size_t i = 0u; i < static_cast<size_t>(dim); ++i) {
     output0[i] += weight0 * values[i];
     output1[i] += weight1 * values[i];
@@ -140,8 +138,7 @@ inline void accumulate_value_scalar(float *output, const float *values,
 }
 
 struct effect_execute_attend {
-  void operator()(const event::execute_attend &ev,
-                  context &) const noexcept {
+  void operator()(const event::execute_attend &ev, context &) const noexcept {
     const auto &request = ev.request;
     const uint32_t span_len = request.position - request.window_begin + 1u;
     const uint32_t reps = request.heads / request.kv_heads;
@@ -205,8 +202,7 @@ struct effect_execute_attend {
   }
 };
 
-template <bool vector_exp>
-struct effect_execute_attend_gqa2_avx2_impl {
+template <bool vector_exp> struct effect_execute_attend_gqa2_avx2_impl {
   EMEL_KERNEL_SWA_AVX2_TARGET void operator()(
       const std::conditional_t<vector_exp,
                                event::execute_attend_gqa2_avx2_vector_exp,
@@ -291,10 +287,9 @@ struct effect_execute_attend_gqa2_avx2_impl {
         const float *value =
             value_base + static_cast<size_t>(slot_begin) * request.head_dim;
         for (uint32_t row = 0u; row < count; ++row, ++offset) {
-          accumulate_value_pair_scalar(output0, output1, value,
-                                       score0[offset] * inv_sum0,
-                                       score1[offset] * inv_sum1,
-                                       request.head_dim);
+          accumulate_value_pair_scalar(
+              output0, output1, value, score0[offset] * inv_sum0,
+              score1[offset] * inv_sum1, request.head_dim);
           value += request.head_dim;
         }
       };

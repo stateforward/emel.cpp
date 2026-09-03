@@ -4,8 +4,8 @@
 #include <cstdint>
 #include <limits>
 
-#include "emel/kernel/swa/actions.hpp"
 #include "emel/kernel/attention/guards.hpp"
+#include "emel/kernel/swa/actions.hpp"
 
 namespace emel::kernel::swa::guard {
 
@@ -33,8 +33,7 @@ inline bool checked_multiply(const uint64_t lhs, const uint64_t rhs,
 
 inline bool checked_float_elements(const uint64_t elements,
                                    std::size_t &narrowed) noexcept {
-  if (elements == 0u ||
-      elements > std::numeric_limits<std::size_t>::max() ||
+  if (elements == 0u || elements > std::numeric_limits<std::size_t>::max() ||
       elements > std::numeric_limits<std::size_t>::max() / sizeof(float) ||
       elements > std::numeric_limits<std::uintptr_t>::max() / sizeof(float))
     return false;
@@ -45,14 +44,12 @@ inline bool checked_float_elements(const uint64_t elements,
 inline bool validate_attend_lengths(const event::attend_request &request,
                                     const uint64_t workspace_reps,
                                     attend_lengths &lengths) noexcept {
-  if (request.heads == 0u || request.kv_heads == 0u ||
-      request.capacity == 0u || request.head_dim == 0u ||
-      request.window_begin > request.position)
+  if (request.heads == 0u || request.kv_heads == 0u || request.capacity == 0u ||
+      request.head_dim == 0u || request.window_begin > request.position)
     return false;
 
-  const uint64_t span = static_cast<uint64_t>(request.position) -
-                            request.window_begin +
-                        1u;
+  const uint64_t span =
+      static_cast<uint64_t>(request.position) - request.window_begin + 1u;
   if (span == 0u || span > request.capacity ||
       span > std::numeric_limits<uint32_t>::max() ||
       span > std::numeric_limits<std::size_t>::max())
@@ -113,9 +110,9 @@ inline bool validate_attend_spans(const event::attend_request &request,
              cache_bytes);
 }
 
-inline bool validate_cache_write_lengths(
-    const event::cache_write_request &request,
-    cache_write_lengths &lengths) noexcept {
+inline bool
+validate_cache_write_lengths(const event::cache_write_request &request,
+                             cache_write_lengths &lengths) noexcept {
   if (request.kv_heads == 0u || request.head_dim == 0u ||
       request.capacity == 0u)
     return false;
@@ -133,9 +130,9 @@ inline bool validate_cache_write_lengths(
   return true;
 }
 
-inline bool validate_cache_write_spans(
-    const event::cache_write_request &request,
-    const cache_write_lengths &lengths) noexcept {
+inline bool
+validate_cache_write_spans(const event::cache_write_request &request,
+                           const cache_write_lengths &lengths) noexcept {
   if (request.key_rows.data() == nullptr ||
       request.value_rows.data() == nullptr ||
       request.key_cache.data() == nullptr ||
@@ -161,8 +158,8 @@ inline bool validate_cache_write_spans(
              request.value_cache.data(), cache_bytes, request.key_rows.data(),
              rows_bytes) &&
          attention::guard::guard_ranges_disjoint(
-             request.value_cache.data(), cache_bytes,
-             request.value_rows.data(), rows_bytes);
+             request.value_cache.data(), cache_bytes, request.value_rows.data(),
+             rows_bytes);
 }
 
 } // namespace detail

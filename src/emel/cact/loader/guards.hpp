@@ -103,32 +103,28 @@ struct guard_parse_mismatches_probed_file_image {
   }
 };
 
-template <class runtime_event_type>
-struct guard_done_callback_present {
+template <class runtime_event_type> struct guard_done_callback_present {
   bool operator()(const runtime_event_type &ev,
                   const action::context &) const noexcept {
     return static_cast<bool>(ev.request.on_done);
   }
 };
 
-template <class runtime_event_type>
-struct guard_done_callback_absent {
+template <class runtime_event_type> struct guard_done_callback_absent {
   bool operator()(const runtime_event_type &ev,
                   const action::context &ctx) const noexcept {
     return !guard_done_callback_present<runtime_event_type>{}(ev, ctx);
   }
 };
 
-template <class runtime_event_type>
-struct guard_error_callback_present {
+template <class runtime_event_type> struct guard_error_callback_present {
   bool operator()(const runtime_event_type &ev,
                   const action::context &) const noexcept {
     return static_cast<bool>(ev.request.on_error);
   }
 };
 
-template <class runtime_event_type>
-struct guard_error_callback_absent {
+template <class runtime_event_type> struct guard_error_callback_absent {
   bool operator()(const runtime_event_type &ev,
                   const action::context &ctx) const noexcept {
     return !guard_error_callback_present<runtime_event_type>{}(ev, ctx);
