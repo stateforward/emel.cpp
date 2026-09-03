@@ -914,13 +914,29 @@ def worker_environment(extra: dict[str, str] | None = None) -> dict[str, str]:
 
 
 def write_reference_output(record: dict[str, Any], output: Path) -> None:
-    temporary = output.with_name(output.name + ".tmp")
+    descriptor = -1
+    temporary_name: str | None = None
     try:
-        temporary.write_text(
-            json.dumps(record, sort_keys=True) + "\n", encoding="utf-8")
-        temporary.replace(output)
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix="record-", suffix=".tmp", dir=output.parent)
+        os.fchmod(descriptor, stat.S_IRUSR | stat.S_IWUSR)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as target:
+            descriptor = -1
+            target.write(json.dumps(record, sort_keys=True) + "\n")
+            target.flush()
+            os.fsync(target.fileno())
+        os.replace(temporary_name, output)
+        temporary_name = None
     except OSError as exc:
         fail(f"cannot write reference JSON: {exc}")
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if temporary_name is not None:
+            try:
+                os.unlink(temporary_name)
+            except FileNotFoundError:
+                pass
 
 
 def run_forked_reference(
@@ -986,8 +1002,6 @@ def run_forked_reference(
                 raise SystemExit(
                     os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1)
             if time.monotonic() >= deadline:
-                Path(args.output).with_name(
-                    Path(args.output).name + ".tmp").unlink(missing_ok=True)
                 fail(
                     f"Needle reference process exceeded {timeout_seconds}s timeout")
             time.sleep(0.01)
@@ -1018,38 +1032,43 @@ def run_reference_subprocess(args: argparse.Namespace) -> None:
         args.timeout_seconds, "timeout_seconds", minimum=1,
         maximum=MAX_TIMEOUT_SECONDS)
     output = Path(args.output)
-    temporary = output.with_name(output.name + ".tmp")
-    with tempfile.TemporaryDirectory(prefix="emel-needle-auth-") as staging_name:
-        staging_root = Path(staging_name)
-        staged_model = staging_root / "model.cact"
-        repo_root = Path(__file__).resolve().parents[4]
-        validate_canonical_path(
-            Path(args.model), repo_root / MODEL_RELATIVE_PATH, "model")
-        validate_canonical_path(
-            Path(args.fixture), repo_root / FIXTURE_ID, "fixture")
-        staged_fixture = staging_root / "fixture.tsv"
-        staged_needle_root = staging_root / "package"
-        staged_needle_root.mkdir(mode=stat.S_IRWXU)
-        copy_authenticated_file(Path(args.model), staged_model, "canonical model")
-        copy_authenticated_file(Path(args.fixture), staged_fixture, "canonical fixture")
-        staged_package = stage_needle_package(
-            Path(args.needle_root), staged_needle_root)
-        needle = import_needle(staged_needle_root, staged_package)
-        staged_library = stage_needle_native_library(needle, staged_package)
-        for name in tuple(sys.modules):
-            if name == "needle" or name.startswith("needle."):
-                sys.modules.pop(name, None)
-        validate_canonical_input(staged_model, MODEL_SHA256, "model")
-        validate_canonical_input(staged_fixture, FIXTURE_SHA256, "fixture")
-        validate_needle_package(
-            staged_needle_root, allow_native_library=staged_library)
-        run_forked_reference(
-            args, staged_model, staged_fixture, staged_needle_root,
-            staged_library, timeout_seconds,
-            worker_environment({"NEEDLE_LIB_PATH": str(staged_library)}))
-    if temporary.exists():
-        temporary.unlink(missing_ok=True)
-        fail("authenticated Needle worker left an incomplete output")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+            prefix=f".{output.name}.auth-", dir=output.parent) as output_staging_name:
+        staged_output = Path(output_staging_name) / "reference.json"
+        with tempfile.TemporaryDirectory(prefix="emel-needle-auth-") as staging_name:
+            staging_root = Path(staging_name)
+            staged_model = staging_root / "model.cact"
+            repo_root = Path(__file__).resolve().parents[4]
+            validate_canonical_path(
+                Path(args.model), repo_root / MODEL_RELATIVE_PATH, "model")
+            validate_canonical_path(
+                Path(args.fixture), repo_root / FIXTURE_ID, "fixture")
+            staged_fixture = staging_root / "fixture.tsv"
+            staged_needle_root = staging_root / "package"
+            staged_needle_root.mkdir(mode=stat.S_IRWXU)
+            copy_authenticated_file(Path(args.model), staged_model, "canonical model")
+            copy_authenticated_file(Path(args.fixture), staged_fixture, "canonical fixture")
+            staged_package = stage_needle_package(
+                Path(args.needle_root), staged_needle_root)
+            needle = import_needle(staged_needle_root, staged_package)
+            staged_library = stage_needle_native_library(needle, staged_package)
+            for name in tuple(sys.modules):
+                if name == "needle" or name.startswith("needle."):
+                    sys.modules.pop(name, None)
+            validate_canonical_input(staged_model, MODEL_SHA256, "model")
+            validate_canonical_input(staged_fixture, FIXTURE_SHA256, "fixture")
+            validate_needle_package(
+                staged_needle_root, allow_native_library=staged_library)
+            worker_args = argparse.Namespace(**vars(args))
+            worker_args.output = str(staged_output)
+            run_forked_reference(
+                worker_args, staged_model, staged_fixture, staged_needle_root,
+                staged_library, timeout_seconds,
+                worker_environment({"NEEDLE_LIB_PATH": str(staged_library)}))
+        if not staged_output.is_file():
+            fail("authenticated Needle worker produced no complete output")
+        os.replace(staged_output, output)
 
 
 def add_reference_arguments(parser: argparse.ArgumentParser) -> None:

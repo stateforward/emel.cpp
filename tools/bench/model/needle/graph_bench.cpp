@@ -8,6 +8,7 @@
 // not direct token-step graph calls. Fixed-context graph rows therefore remain
 // EMEL-only microbenchmarks and are never paired with request telemetry.
 #include "bench_cases.hpp"
+#include "request_aggregation.hpp"
 
 #include <algorithm>
 #include <array>
@@ -765,14 +766,7 @@ emel::bench::result with_internal_microbenchmark_metadata(
   return out;
 }
 
-struct request_measurement {
-  double wall_ns = 0.0;
-  double prefill_ns = 0.0;
-  double decode_ns = 0.0;
-  std::uint64_t prompt_tokens = 0u;
-  std::uint64_t decode_tokens = 0u;
-  std::vector<std::string> envelopes;
-};
+using request_measurement = emel::bench::needle_request::run_sample;
 
 void on_request_configured(const needle::request::events::configured &) noexcept {}
 void on_request_reset(const needle::request::events::reset_done &) noexcept {}
@@ -824,29 +818,30 @@ request_measurement measure_request_workload(const graph_fixture &fixture,
   samples.reserve(run_count);
   for (std::size_t run = 0u; run < run_count; ++run) {
     request_measurement total;
+    request_measurement expected;
     for (std::uint64_t iteration = 0u; iteration < iteration_count; ++iteration) {
       const request_measurement sample = run_request_batch(adapter, rows);
+      if (iteration == 0u) expected = sample;
+      if (sample.envelopes != expected.envelopes ||
+          sample.prompt_tokens != expected.prompt_tokens ||
+          sample.decode_tokens != expected.decode_tokens)
+        fail_needle_setup("request_unstable_iteration_outputs");
       total.wall_ns += sample.wall_ns;
       total.prefill_ns += sample.prefill_ns;
       total.decode_ns += sample.decode_ns;
-      total.prompt_tokens += sample.prompt_tokens;
-      total.decode_tokens += sample.decode_tokens;
-      if (iteration + 1u == iteration_count) total.envelopes = sample.envelopes;
     }
     total.wall_ns /= static_cast<double>(iteration_count);
     total.prefill_ns /= static_cast<double>(iteration_count);
     total.decode_ns /= static_cast<double>(iteration_count);
-    total.prompt_tokens = (total.prompt_tokens + iteration_count / 2u) /
-                          iteration_count;
-    total.decode_tokens = (total.decode_tokens + iteration_count / 2u) /
-                          iteration_count;
+    total.prompt_tokens = expected.prompt_tokens;
+    total.decode_tokens = expected.decode_tokens;
+    total.envelopes = std::move(expected.envelopes);
     samples.push_back(std::move(total));
   }
-  std::sort(samples.begin(), samples.end(),
-            [](const request_measurement &left, const request_measurement &right) {
-              return left.wall_ns < right.wall_ns;
-            });
-  return samples[samples.size() / 2u];
+  request_measurement aggregated;
+  if (!emel::bench::needle_request::aggregate_runs(samples, aggregated))
+    fail_needle_setup("request_unstable_run_outputs");
+  return aggregated;
 }
 
 emel::bench::result make_request_row(const char *name, const char *phase,

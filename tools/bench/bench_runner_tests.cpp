@@ -19,6 +19,7 @@
 #include "bench_runner_contract.hpp"
 #include "bench_runner_registry.hpp"
 #include "generation_workload_manifest.hpp"
+#include "model/needle/request_aggregation.hpp"
 
 #if defined(_WIN32)
 #include <process.h>
@@ -682,6 +683,37 @@ std::string find_line_with_prefix(const std::string &haystack,
 }
 } // namespace
 
+TEST_CASE("needle request aggregation independently ranks phase metrics") {
+  using emel::bench::needle_request::aggregate_runs;
+  using emel::bench::needle_request::run_sample;
+  const std::vector<run_sample> samples = {
+      {.wall_ns = 10.0, .prefill_ns = 300.0, .decode_ns = 2000.0,
+       .prompt_tokens = 100u, .decode_tokens = 20u, .envelopes = {"same"}},
+      {.wall_ns = 20.0, .prefill_ns = 100.0, .decode_ns = 3000.0,
+       .prompt_tokens = 100u, .decode_tokens = 20u, .envelopes = {"same"}},
+      {.wall_ns = 30.0, .prefill_ns = 200.0, .decode_ns = 1000.0,
+       .prompt_tokens = 100u, .decode_tokens = 20u, .envelopes = {"same"}},
+  };
+  run_sample aggregated;
+  REQUIRE(aggregate_runs(samples, aggregated));
+  CHECK(aggregated.wall_ns == doctest::Approx(20.0));
+  CHECK(aggregated.prefill_ns == doctest::Approx(200.0));
+  CHECK(aggregated.decode_ns == doctest::Approx(2000.0));
+  CHECK(aggregated.prompt_tokens == 100u);
+  CHECK(aggregated.decode_tokens == 20u);
+  CHECK(aggregated.envelopes == std::vector<std::string>{"same"});
+
+  std::vector<run_sample> unstable = samples;
+  unstable.back().envelopes = {"different"};
+  CHECK_FALSE(aggregate_runs(unstable, aggregated));
+  unstable = samples;
+  unstable.back().prompt_tokens += 1u;
+  CHECK_FALSE(aggregate_runs(unstable, aggregated));
+  unstable = samples;
+  unstable.back().decode_tokens += 1u;
+  CHECK_FALSE(aggregate_runs(unstable, aggregated));
+}
+
 TEST_CASE("needle cactus boundary rejects substituted inputs and invalid values") {
 #if !defined(_WIN32)
   const std::string program = R"PY(
@@ -1042,6 +1074,7 @@ def fake_fork(args, staged_model, staged_fixture, staged_root,
     assert "NEEDLE_TELEMETRY_URL" not in environment
     assert not (set(module.INJECTION_ENVIRONMENT_VARIABLES) &
                 (set(environment) - {"NEEDLE_LIB_PATH"}))
+    pathlib.Path(args.output).write_text('{"ok": true}\n')
     captured["stage"] = staged_root.parent
 
 module.run_forked_reference = fake_fork
@@ -1103,6 +1136,7 @@ module.run_forked_reference(
     args, paths[0], paths[1], paths[2], paths[3], 10,
     {"NEEDLE_TELEMETRY": "1", "DO_NOT_TRACK": "",
      "NEEDLE_TELEMETRY_URL": "https://attacker.invalid/collect"})
+
 record = json.loads(output.read_text())
 assert record == {
     "needle_telemetry": "0",
@@ -1113,6 +1147,44 @@ assert record == {
   const std::filesystem::path tmp_dir =
       std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
       "needle-telemetry-isolation";
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::string command =
+      "python3 -I -S -B -c " + quote_arg_posix(program) + " " +
+      quote_arg_posix(cactus_reference_driver_path().string()) + " > " +
+      quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+  const process_capture capture =
+      run_command_capture(command, stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+#endif
+}
+TEST_CASE("needle cactus output ignores predictable sibling symlink") {
+#if !defined(_WIN32)
+  const std::string program = R"PY(
+import importlib.util
+import pathlib
+import sys
+import tempfile
+
+spec = importlib.util.spec_from_file_location("cactus_reference", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+root = pathlib.Path(tempfile.mkdtemp())
+output = root / "reference.json"
+sentinel = root / "sentinel"
+sentinel.write_text("unchanged")
+(root / "reference.json.tmp").symlink_to(sentinel)
+module.write_reference_output({"ok": True}, output)
+assert output.read_text() == '{"ok": true}\n'
+assert sentinel.read_text() == "unchanged"
+assert (root / "reference.json.tmp").is_symlink()
+)PY";
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-output-symlink";
   std::filesystem::create_directories(tmp_dir);
   const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
   const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
