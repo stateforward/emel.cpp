@@ -34,9 +34,9 @@ path beats `llama.cpp` on this CPU.
 - Merged local non-draft PR heads: `emel.cpp#95`, `#96`, `#97`, `#98`, `#99`.
 - Explicitly not merged: draft PRs `emel.cpp#48` and `#49`.
 - Upstream scheduler fix: `stateforward/sml.cpp` commit
-  `370488a40adf19b5ba1efe50e9325c4732414e24` provides the batch and runtime
-  worker-budget API used here.
-- Local SML pin points at that exact commit.
+  `a1512d799bde690b639166707d6955dddf7a40f0` provides the batch and runtime
+  worker-budget API used here, including the batch-reservation rollback
+  deadlock fix. The local SML pin points at that exact commit.
 - Local wrapper state: `src/emel/sm.hpp` no longer flattens
   `process_event_async(...)` through `.result()`, and wrapper-level event
   error normalization has been removed. Matmul fanout uses the upstream fixed
