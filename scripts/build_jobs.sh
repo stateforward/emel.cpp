@@ -86,9 +86,13 @@ emel_effective_total_from_limit() {
   if [[ "$limit" == max ]]; then printf '%s\n' "$physical"; return; fi
   if ((limit < physical)); then printf '%s\n' "$limit"; else printf '%s\n' "$physical"; fi
 }
-
 emel_effective_total_memory_bytes() {
   local physical dir minimum; physical="$(emel_physical_memory_bytes)" || return
+  if [[ "${EMEL_MEMORY_TEST_MODE:-0}" == 1 && -n "${EMEL_MEMORY_TEST_ANCESTOR_MAXES:-}" ]]; then
+    minimum="$(emel_min_cgroup_memory_max /sys/fs/cgroup)" || return
+    emel_effective_total_from_limit "$physical" "$minimum"
+    return
+  fi
   dir="$(emel_cgroup_v2_dir)" || { printf '%s\n' "$physical"; return; }
   minimum="$(emel_min_cgroup_memory_max "$dir")" || return
   emel_effective_total_from_limit "$physical" "$minimum"

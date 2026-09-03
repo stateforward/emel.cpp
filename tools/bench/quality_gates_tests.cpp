@@ -1220,7 +1220,7 @@ TEST_CASE("memory envelope computes half of effective total memory") {
                       "emel_memory_cap_half_test.txt";
   const auto script = repo_root() / "scripts" / "build_jobs.sh";
   const command_result result = run_command(
-      "env EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "env EMEL_MEMORY_TEST_OS=Linux EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
       "EMEL_MEMORY_TEST_ANCESTOR_MAXES=max "
       "EMEL_MEMORY_TEST_CURRENT_MAX=max EMEL_MEMORY_TEST_CURRENT_SWAP=max "
       "EMEL_MEMORY_TEST_CORES=64 bash " +
@@ -1237,7 +1237,7 @@ TEST_CASE("memory envelope honors a finite parent cgroup limit") {
                       "emel_memory_cap_cgroup_test.txt";
   const auto script = repo_root() / "scripts" / "build_jobs.sh";
   const command_result result = run_command(
-      "env EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "env EMEL_MEMORY_TEST_OS=Linux EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
       "EMEL_MEMORY_TEST_ANCESTOR_MAXES=42949672960,max "
       "EMEL_MEMORY_TEST_CURRENT_MAX=42949672960 "
       "EMEL_MEMORY_TEST_CURRENT_SWAP=0 EMEL_MEMORY_TEST_CORES=64 bash " +
@@ -1254,7 +1254,7 @@ TEST_CASE("memory overrides validate and build jobs clamp to the cap") {
                       "emel_memory_override_test.txt";
   const auto script = repo_root() / "scripts" / "build_jobs.sh";
   const std::string base =
-      "env EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "env EMEL_MEMORY_TEST_OS=Linux EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
       "EMEL_MEMORY_TEST_ANCESTOR_MAXES=max "
       "EMEL_MEMORY_TEST_CURRENT_MAX=max EMEL_MEMORY_TEST_CURRENT_SWAP=max "
       "EMEL_MEMORY_TEST_CORES=64 ";
@@ -1291,7 +1291,7 @@ TEST_CASE("memory envelope constructs Linux scope and fails closed on Darwin") {
                       "emel_memory_envelope_command_test.txt";
   const auto script = repo_root() / "scripts" / "build_jobs.sh";
   const std::string base =
-      "env EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "env EMEL_MEMORY_TEST_OS=Linux EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
       "EMEL_MEMORY_TEST_ANCESTOR_MAXES=max "
       "EMEL_MEMORY_TEST_CURRENT_MAX=max EMEL_MEMORY_TEST_CURRENT_SWAP=max "
       "EMEL_MEMORY_TEST_CORES=64 ";
@@ -1323,7 +1323,7 @@ TEST_CASE("memory envelope marker requires observable cgroup limits") {
                       "emel_memory_envelope_failure_test.txt";
   const auto script = repo_root() / "scripts" / "build_jobs.sh";
   const std::string base =
-      "env EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "env EMEL_MEMORY_TEST_OS=Linux EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
       "EMEL_MEMORY_TEST_CORES=64 EMEL_MEMORY_TEST_OWNED_SCOPE=1 "
       "EMEL_MEMORY_TEST_ANCESTOR_MAXES=max ";
 
@@ -1345,7 +1345,7 @@ TEST_CASE("memory envelope marker requires observable cgroup limits") {
         std::string::npos);
 
   result = run_command(
-      "env EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "env EMEL_MEMORY_TEST_OS=Linux EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
       "EMEL_MEMORY_TEST_CORES=64 EMEL_MEMORY_TEST_OWNED_SCOPE=1 "
       "EMEL_MEMORY_TEST_ANCESTOR_MAXES=max,42949672960,85899345920 "
       "EMEL_MEMORY_TEST_CURRENT_MAX=21474836481 "
