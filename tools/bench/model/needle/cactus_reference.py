@@ -27,8 +27,10 @@ FIXTURE_ID = "tests/fixtures/cact/needle-heldout-prompts.tsv"
 WORKLOAD_ID = "needle_heldout_first4_greedy80_eos_v1"
 PROMPT_ROWS = 4
 MAX_NEW_TOKENS = 80
-SAMPLING_ID = "cactus_public_default_greedy_v1"
-STOP_ID = "cactus_public_default_eos_or_max80_v1"
+EMEL_SAMPLING_ID = "greedy_argmax_v1"
+EMEL_STOP_ID = "eos_or_max80_v1"
+CACTUS_SAMPLING_ID = "cactus_public_sampling_unverified"
+CACTUS_STOP_ID = "cactus_public_stop_unverified"
 THREAD_COUNT = 1
 THREAD_CONTRACT = "single_thread"
 EMEL_THREAD_COUNT = THREAD_COUNT
@@ -44,6 +46,9 @@ NEEDLE_PACKAGE_TREE_SHA256 = "f7710b88d0a59c92f88a1fc2ce7f374633e15351bc73144290
 NEEDLE_PYTHON_SHA256 = "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"
 PHASE_NONCOMPARABLE_REASON = (
     "closed_reference_phase_contract_missing_token_counts_and_timestamps"
+)
+WALL_NONCOMPARABLE_REASON = (
+    "closed_reference_request_contract_missing_formatter_constraint_sampling_stop"
 )
 EXCLUDED_ENVELOPE_KEYS = frozenset({
     "confidence", "prefill_tps", "decode_tps", "peak_ram_mb",
@@ -591,8 +596,8 @@ def run_reference(args: argparse.Namespace) -> dict[str, Any]:
         "fixture_id": FIXTURE_ID,
         "workload_id": WORKLOAD_ID,
         "model_path": MODEL_RELATIVE_PATH,
-        "sampling_id": SAMPLING_ID,
-        "stop_id": STOP_ID,
+        "sampling_id": CACTUS_SAMPLING_ID,
+        "stop_id": CACTUS_STOP_ID,
         "thread_count": THREAD_COUNT,
         "thread_contract": THREAD_CONTRACT,
         "prompt_rows": PROMPT_ROWS,
@@ -698,9 +703,7 @@ def parse_emel(path: Path) -> dict[str, Any]:
         "workload_id": WORKLOAD_ID,
         "backend_id": "emel_needle_request_serial", "route": "serial",
         "thread_count": str(EMEL_THREAD_COUNT),
-        "thread_contract": EMEL_THREAD_CONTRACT, "prompt_rows": str(PROMPT_ROWS),
-        "max_new_tokens": str(MAX_NEW_TOKENS),
-        "sampling_id": SAMPLING_ID, "stop_id": STOP_ID,
+        "sampling_id": EMEL_SAMPLING_ID, "stop_id": EMEL_STOP_ID,
         "phase_rate_semantics": PHASE_NONCOMPARABLE_REASON,
     }
     metadata_mismatches = [key for key, value in expected_emel.items()
@@ -779,8 +782,8 @@ def validate_reference(record: Any) -> dict[str, Any]:
         "fixture_id": FIXTURE_ID, "workload_id": WORKLOAD_ID,
         "thread_contract": THREAD_CONTRACT,
         "thread_count": THREAD_COUNT,
-        "sampling_id": SAMPLING_ID,
-        "stop_id": STOP_ID,
+        "sampling_id": CACTUS_SAMPLING_ID,
+        "stop_id": CACTUS_STOP_ID,
         "phase_rate_semantics": PHASE_NONCOMPARABLE_REASON,
         "needle_package_version": NEEDLE_PACKAGE_VERSION,
         "needle_package_tree_sha256": NEEDLE_PACKAGE_TREE_SHA256,
@@ -814,8 +817,7 @@ def compare(args: argparse.Namespace) -> None:
     contract_keys = (
         "schema", "model_id", "model_path", "fixture_id", "workload_id",
         "thread_count", "thread_contract", "prompt_rows", "max_new_tokens",
-        "sampling_id", "stop_id", "warmup_iterations", "warmup_runs",
-        "iterations", "runs",
+        "warmup_iterations", "warmup_runs", "iterations", "runs",
     )
     mismatches = [key for key in contract_keys if emel.get(key) != reference.get(key)]
     if mismatches:
@@ -824,22 +826,16 @@ def compare(args: argparse.Namespace) -> None:
                       for value in emel["normalized_envelopes"]]
     reference_envelopes = [canonical_envelope(value)
                            for value in reference["normalized_envelopes"]]
-    if emel_envelopes != reference_envelopes:
-        print(
-            f"# needle_request_contract: reference=live_cactus_native "
-            f"model_id={MODEL_ID} fixture_id={FIXTURE_ID} "
-            f"workload_id={WORKLOAD_ID} output_parity=mismatch "
-            f"wall_comparison=noncomparable_output_mismatch "
-            f"reason=output_envelopes_differ"
-        )
-        return
-    ratio = emel["wall_ns_per_request"] / reference["wall_ns_per_request"]
+    output_parity = "exact" if emel_envelopes == reference_envelopes else "mismatch"
     print(
-        f"needle/request/{WORKLOAD_ID}/wall "
-        f"emel_ns_per_request={emel['wall_ns_per_request']:.3f} "
-        f"cactus_ns_per_request={reference['wall_ns_per_request']:.3f} "
-        f"ratio={ratio:.6f} comparable=true "
-        "timed_scope=reset_excluded_execute_raw_query_public_api"
+        f"needle/request/{WORKLOAD_ID}/emel_wall_diagnostic "
+        f"ns_per_request={emel['wall_ns_per_request']:.3f} comparable=false "
+        f"reason={WALL_NONCOMPARABLE_REASON}"
+    )
+    print(
+        f"needle/request/{WORKLOAD_ID}/cactus_wall_diagnostic "
+        f"ns_per_request={reference['wall_ns_per_request']:.3f} comparable=false "
+        f"reason={WALL_NONCOMPARABLE_REASON}"
     )
     for lane, record in (("emel", emel), ("cactus", reference)):
         print(
@@ -859,9 +855,12 @@ def compare(args: argparse.Namespace) -> None:
         f"model_id={MODEL_ID} fixture_id={FIXTURE_ID} "
         f"workload_id={WORKLOAD_ID} thread_count={THREAD_COUNT} "
         f"thread_contract={THREAD_CONTRACT} max_new_tokens={MAX_NEW_TOKENS} "
-        f"output_parity=exact normalized_envelopes={PROMPT_ROWS} "
-        f"wall_comparison=comparable ratio={ratio:.6f} "
-        f"reason=output_envelopes_exact_match"
+        f"output_parity={output_parity} normalized_envelopes={PROMPT_ROWS} "
+        f"wall_comparison=noncomparable_closed_reference_contract "
+        f"reason={WALL_NONCOMPARABLE_REASON} "
+        f"emel_sampling_id={emel['sampling_id']} emel_stop_id={emel['stop_id']} "
+        f"cactus_sampling_id={reference['sampling_id']} "
+        f"cactus_stop_id={reference['stop_id']}"
     )
 
 

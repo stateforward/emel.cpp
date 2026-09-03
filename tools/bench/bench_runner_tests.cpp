@@ -685,8 +685,10 @@ std::string find_line_with_prefix(const std::string &haystack,
 TEST_CASE("needle cactus boundary rejects substituted inputs and invalid values") {
 #if !defined(_WIN32)
   const std::string program = R"PY(
+import contextlib
 import importlib.util
 import json
+import io
 import math
 import os
 import pathlib
@@ -752,8 +754,8 @@ reference = {
     "thread_contract": module.THREAD_CONTRACT,
     "prompt_rows": module.PROMPT_ROWS,
     "max_new_tokens": module.MAX_NEW_TOKENS,
-    "sampling_id": module.SAMPLING_ID,
-    "stop_id": module.STOP_ID,
+    "sampling_id": module.CACTUS_SAMPLING_ID,
+    "stop_id": module.CACTUS_STOP_ID,
     "warmup_iterations": 1,
     "warmup_runs": 1,
     "iterations": 1,
@@ -796,7 +798,7 @@ for name, value in saved.items():
     setattr(module, name, value)
 for key, value in (("runs", True), ("wall_ns_per_request", math.nan),
                    ("decode_tokens_per_second", 0.0),
-                   ("sampling_id", "greedy_argmax_v1"),
+                   ("sampling_id", module.EMEL_SAMPLING_ID),
                    ("needle_package_version", "2.0.7"),
                    ("needle_package_tree_sha256", "0" * 64),
                    ("needle_native_library_sha256", "f" * 64)):
@@ -816,8 +818,8 @@ def emel_text(metric="1.0", runs="1", envelope=None):
               "backend_id=emel_needle_request_serial route=serial "
               "fixture_id=tests/fixtures/cact/needle-heldout-prompts.tsv "
               "thread_count=1 thread_contract=single_thread "
-              "prompt_rows=4 max_new_tokens=80 sampling_id=" + module.SAMPLING_ID + " "
-              "stop_id=" + module.STOP_ID + " phase_tokens_per_batch=1 "
+              "prompt_rows=4 max_new_tokens=80 sampling_id=" + module.EMEL_SAMPLING_ID + " "
+              "stop_id=" + module.EMEL_STOP_ID + " phase_tokens_per_batch=1 "
               "warmup_iterations=1 warmup_runs=1 phase_rate_semantics=" +
               module.PHASE_NONCOMPARABLE_REASON)
     for phase in ("wall", "prefill", "decode"):
@@ -861,13 +863,22 @@ mismatch_reference = dict(reference)
 mismatch_reference["normalized_envelopes"] = [{"success": False}] * module.PROMPT_ROWS
 mismatch_reference_path = root / "mismatch-reference.json"
 mismatch_reference_path.write_text(json.dumps(mismatch_reference))
-module.compare(types.SimpleNamespace(
-    emel_input=str(good_emel), reference_input=str(mismatch_reference_path)))
+with contextlib.redirect_stdout(io.StringIO()) as mismatch_output:
+    module.compare(types.SimpleNamespace(
+        emel_input=str(good_emel), reference_input=str(mismatch_reference_path)))
+assert "output_parity=mismatch" in mismatch_output.getvalue()
+assert "comparable=true" not in mismatch_output.getvalue()
+assert "ratio=" not in mismatch_output.getvalue()
 assert parsed["thread_contract"] == module.THREAD_CONTRACT == "single_thread"
 reference_path = root / "reference.json"
 reference_path.write_text(json.dumps(reference))
-module.compare(types.SimpleNamespace(
-    emel_input=str(good_emel), reference_input=str(reference_path)))
+with contextlib.redirect_stdout(io.StringIO()) as exact_output:
+    module.compare(types.SimpleNamespace(
+        emel_input=str(good_emel), reference_input=str(reference_path)))
+assert "output_parity=exact" in exact_output.getvalue()
+assert "wall_comparison=noncomparable_closed_reference_contract" in exact_output.getvalue()
+assert "comparable=true" not in exact_output.getvalue()
+assert "ratio=" not in exact_output.getvalue()
 )PY";
   const std::filesystem::path tmp_dir =
       std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
@@ -1319,17 +1330,15 @@ TEST_CASE("needle canonical compare has pinned model and retokenizes fixture") {
   CHECK(graph.find("request_fixture_token_id_mismatch") != std::string::npos);
   CHECK(graph.find("request.text = row.prompt") != std::string::npos);
   CHECK(graph.find("actual != row.token_ids") != std::string::npos);
-  CHECK(driver.find("sampling_stop_output_equivalence=unverified_cactus_public_api") !=
+  CHECK(driver.find("cactus_public_sampling_unverified") != std::string::npos);
+  CHECK(driver.find("cactus_public_stop_unverified") != std::string::npos);
+  CHECK(driver.find("closed_reference_request_contract_missing_formatter_constraint_sampling_stop") !=
         std::string::npos);
-  CHECK(driver.find("comparable=false") != std::string::npos);
-  CHECK(driver.find("wall_comparison=noncomparable_public_api_boundary_mismatch") !=
+  CHECK(driver.find("comparable=true") == std::string::npos);
+  CHECK(driver.find("wall_comparison=noncomparable_closed_reference_contract") !=
         std::string::npos);
-  CHECK(driver.find("timed_scope=pretokenized_native_graph_init_excluded comparable=false") !=
-        std::string::npos);
-  CHECK(driver.find("timed_scope=complete_raw_query_public_api comparable=false") !=
-        std::string::npos);
-  CHECK(driver.find("wall_ratio=") == std::string::npos);
-  CHECK(graph.find("token_weighted_native_graph_noncomparable") !=
+  CHECK(driver.find("ratio=") == std::string::npos);
+  CHECK(graph.find("phase_rate_semantics=closed_reference_phase_contract_missing_token_counts_and_timestamps") !=
         std::string::npos);
   CHECK(wrapper.find("EMEL_BENCH_NEEDLE_TIMEOUT_SECONDS") !=
         std::string::npos);
@@ -1694,15 +1703,14 @@ TEST_CASE("needle graph emits live request metadata without recorded rows") {
   const std::string graph_source = read_file(
       repo_root() / "tools" / "bench" / "model" / "needle" /
       "graph_bench.cpp");
-  CHECK(graph_source.find(
-            "run_request_batch<needle::graph::serial_sm>(fixture, rows)") !=
+  CHECK(graph_source.find("needle::request::sm adapter") != std::string::npos);
+  CHECK(graph_source.find("run_request_batch(adapter, rows)") !=
         std::string::npos);
-  CHECK(graph_source.find(
-            "run_request_batch<needle::graph::sm>(fixture, rows)") ==
+  CHECK(graph_source.find("run_request_batch<needle::graph::sm>") ==
         std::string::npos);
   CHECK(snapshot.stdout_text.find(
-            "max_new_tokens=80 sampling_id=greedy_argmax_v1 stop_id=eos_v1") !=
-        std::string::npos);
+            "max_new_tokens=80 sampling_id=greedy_argmax_v1 "
+            "stop_id=eos_or_max80_v1") != std::string::npos);
   CHECK(snapshot.stdout_text.find(
             "needle/graph/request_heldout_first4_greedy80/prefill ") !=
         std::string::npos);
@@ -1710,7 +1718,7 @@ TEST_CASE("needle graph emits live request metadata without recorded rows") {
             "needle/graph/request_heldout_first4_greedy80/decode ") !=
         std::string::npos);
   CHECK(snapshot.stdout_text.find(
-            "phase_rate_semantics=token_weighted_native_graph_noncomparable") !=
+            "phase_rate_semantics=closed_reference_phase_contract_missing_token_counts_and_timestamps") !=
         std::string::npos);
   const std::string prefill_line = find_line_with_prefix(
       snapshot.stdout_text,

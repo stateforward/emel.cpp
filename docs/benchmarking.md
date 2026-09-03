@@ -169,26 +169,31 @@ maintained examples are the Gemma4 single-lane workload family and the LFM2 sing
 proof workload, which stay available for the EMEL lane but are published as non-comparable instead
 of being presented as parity.
 
-## Needle/Cactus request parity
+## Needle/Cactus request diagnostics
 
-The `needle_graph` request comparison runs the same four held-out requests through the
+The `needle_graph` request diagnostic runs the same four held-out raw queries through the
 public Cactus `complete(raw_query, max_new_tokens=80)` API and the EMEL-owned Needle
 request adapter. Model/tokenizer initialization and shared system/tools configuration are
-outside the measurement. Each request calls `reset` before the external wall timer, then
-times the complete raw-query path (rendering, tokenization, BOS handling, greedy EOS
-generation, detokenization, and envelope normalization).
+outside measurement. Each lane calls `reset` before its external wall timer and then runs
+its complete raw-query path.
 
-The comparator removes only confidence and engine telemetry (`prefill_tps`, `decode_tps`,
-and `peak_ram_mb`) from each final envelope, canonicalizes the remaining JSON, and
-requires all four envelopes to match exactly. A wall ratio is emitted with
-`comparable=true` only after this output parity check succeeds; contract or envelope
-mismatches produce `comparable=false` and never a ratio. The wall scope is therefore
-`reset_excluded_execute_raw_query_public_api`, not a pretokenized graph microbenchmark.
+Authenticated diagnosis proved that the concatenated prompt token IDs match, including
+BOS, but this is not a comparable timing contract. Cactus applies closed constrained enum
+selection and validation semantics after model execution; its formatter split,
+constraint selection, sampling, stop behavior, and validation rules are not exposed by
+the public API. EMEL reports its actual `greedy_argmax_v1` / `eos_or_max80_v1` contract,
+while Cactus reports its sampling and stop contracts as unverified. Exact normalized
+envelope equality is recorded as useful diagnostic evidence, but cannot by itself prove
+that both lanes executed the same algorithmic workload. Wall rows therefore always emit
+`comparable=false`, never a ratio, with reason
+`closed_reference_request_contract_missing_formatter_constraint_sampling_stop`.
 
-Prefill and decode rates are diagnostic-only. The closed Cactus API does not expose the
-token counts and phase timestamps required for an honest phase comparison, so these rows
-always publish `comparable=false` with reason
-`closed_reference_phase_contract_missing_token_counts_and_timestamps`.
+Prefill and decode rates are also diagnostic-only. The closed Cactus API does not expose
+the token counts and phase timestamps required for an honest phase comparison, so these
+rows always publish `comparable=false` with reason
+`closed_reference_phase_contract_missing_token_counts_and_timestamps`. Wall or phase
+parity can be enabled only if Cactus exposes the relevant formatter, constraint,
+sampling, stop, token-count, and timing contracts.
 
 ## phase 13 flash-evidence publication workflow
 

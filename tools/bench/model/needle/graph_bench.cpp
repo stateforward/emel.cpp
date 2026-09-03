@@ -866,8 +866,8 @@ emel::bench::result make_request_row(const char *name, const char *phase,
   out.comparison_mode = "live_cactus_request";
   out.model_id = k_model_id;
   out.fixture_id = k_request_fixture_relative_path;
-  out.sampling_id = "cactus_public_default_greedy_v1";
-  out.stop_id = "cactus_public_default_eos_or_max80_v1";
+  out.sampling_id = "greedy_argmax_v1";
+  out.stop_id = "eos_or_max80_v1";
   out.max_output_tokens = k_request_max_new_tokens;
   out.comparable = false;
   out.ns_per_op = ns_per_batch / static_cast<double>(k_request_rows);
@@ -882,8 +882,8 @@ emel::bench::result make_request_row(const char *name, const char *phase,
   out.note = std::string{"reference=live_cactus_native phase="} + phase +
              " backend_id=emel_needle_request_serial route=serial fixture_id=" +
              k_request_fixture_relative_path + " thread_count=1 thread_contract=single_thread"
-             " prompt_rows=4 max_new_tokens=80 sampling_id=cactus_public_default_greedy_v1"
-             " stop_id=cactus_public_default_eos_or_max80_v1 phase_tokens_per_batch=" +
+             " prompt_rows=4 max_new_tokens=80 sampling_id=greedy_argmax_v1"
+             " stop_id=eos_or_max80_v1 phase_tokens_per_batch=" +
              std::to_string(tokens_per_batch) + " warmup_iterations=" +
              std::to_string(cfg.warmup_iterations) + " warmup_runs=" +
              std::to_string(cfg.warmup_runs) +
