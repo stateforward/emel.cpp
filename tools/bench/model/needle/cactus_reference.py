@@ -607,6 +607,7 @@ def run_reference(args: argparse.Namespace) -> dict[str, Any]:
         "decode_tokens_per_second": median_run_means(
             decode_samples, "decode_tps"),
         "needle_package_version": package_version,
+        "needle_package_tree_sha256": NEEDLE_PACKAGE_TREE_SHA256,
         "phase_rate_semantics": PHASE_NONCOMPARABLE_REASON,
         "needle_native_library_sha256": NEEDLE_NATIVE_LIBRARY_SHA256,
         "normalized_envelopes": normalized_envelopes,

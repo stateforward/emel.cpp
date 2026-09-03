@@ -768,6 +768,32 @@ reference = {
     "normalized_envelopes": [{"success": True}] * module.PROMPT_ROWS,
 }
 module.validate_reference(reference)
+class FakeEngine:
+    def reset(self):
+        pass
+    def complete(self, query, max_new_tokens):
+        return {"success": True, "function_calls": [], "prefill_tps": 1.0,
+                "decode_tps": 1.0, "peak_ram_mb": 1.0}
+
+saved = {name: getattr(module, name) for name in (
+    "validate_canonical_path", "validate_canonical_input", "load_requests",
+    "validate_needle_package", "import_needle", "validate_needle_native_library")}
+module.validate_canonical_path = lambda *args, **kwargs: None
+module.validate_canonical_input = lambda *args, **kwargs: None
+module.load_requests = lambda path: [("system", [], f"query-{index}")
+                                    for index in range(module.PROMPT_ROWS)]
+module.validate_needle_package = lambda *args, **kwargs: root / "needle"
+module.import_needle = lambda *args, **kwargs: types.SimpleNamespace(
+    Needle=lambda **kwargs: FakeEngine())
+module.validate_needle_native_library = lambda *args, **kwargs: root / "libneedle.so"
+live_record = module.run_reference(types.SimpleNamespace(
+    model=str(root / "model.cact"), fixture=str(root / "fixture.tsv"),
+    needle_root=str(root), staged=False, warmup_iterations=0, warmup_runs=0,
+    iterations=1, runs=1))
+assert live_record["needle_package_tree_sha256"] == module.NEEDLE_PACKAGE_TREE_SHA256
+module.validate_reference(live_record)
+for name, value in saved.items():
+    setattr(module, name, value)
 for key, value in (("runs", True), ("wall_ns_per_request", math.nan),
                    ("decode_tokens_per_second", 0.0),
                    ("sampling_id", "greedy_argmax_v1"),
