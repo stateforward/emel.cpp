@@ -58,8 +58,9 @@ struct effect_dispatch_lane {
 };
 
 template <size_t lane_index>
-auto make_parallel_lane_task(const event::run & ev,
-                             emel::policy::fork_join_start_gate & gate) noexcept {
+auto effect_make_parallel_lane_task(
+    const event::run & ev,
+    emel::policy::fork_join_start_gate & gate) noexcept {
   return [&lane = ev.lanes[lane_index], &gate]() noexcept {
     gate.arrive_and_wait();
     const emel::graph::event::compute_reserved reserved_compute{lane.compute};
@@ -68,13 +69,13 @@ auto make_parallel_lane_task(const event::run & ev,
 }
 
 template <size_t... lane_indices>
-size_t submit_parallel_lane_tasks(
+size_t effect_submit_parallel_lane_tasks(
     const event::run & ev, worker_pool & pool, worker_pool::join_group & group,
     emel::policy::fork_join_start_gate & gate,
     std::index_sequence<lane_indices...>) noexcept {
   ((ev.lanes[lane_indices].accepted = false), ...);
   return pool.try_submit_batch(
-      group, make_parallel_lane_task<lane_indices>(ev, gate)...);
+      group, effect_make_parallel_lane_task<lane_indices>(ev, gate)...);
 }
 
 template <size_t lane_count>
@@ -85,7 +86,7 @@ struct effect_dispatch_parallel_lanes {
     worker_pool::join_group group{};
     emel::policy::fork_join_start_gate gate{};
 
-    const size_t submitted_lanes = submit_parallel_lane_tasks(
+    const size_t submitted_lanes = effect_submit_parallel_lane_tasks(
         ev, *ctx.pool, group, gate, std::make_index_sequence<lane_count>{});
 
     gate.open_after_arrivals(submitted_lanes);

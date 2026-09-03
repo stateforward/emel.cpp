@@ -73,6 +73,81 @@ inline bool all_lane_outcomes_distinct(const event::run & ev) noexcept {
   return true;
 }
 
+inline constexpr int32_t guard_max_lifecycle_tensor_count = 65536;
+inline bool guard_lifecycle_buffers_overlap(
+    const emel::graph::event::compute & lhs,
+    const emel::graph::event::compute & rhs) noexcept {
+  if (lhs.lifecycle == nullptr || rhs.lifecycle == nullptr ||
+      lhs.lifecycle->tensors == nullptr || rhs.lifecycle->tensors == nullptr ||
+      lhs.lifecycle->tensor_count <= 0 || rhs.lifecycle->tensor_count <= 0 ||
+      lhs.lifecycle->tensor_count > guard_max_lifecycle_tensor_count ||
+      rhs.lifecycle->tensor_count > guard_max_lifecycle_tensor_count) {
+    return true;
+  }
+
+  for (int32_t lhs_index = 0; lhs_index < lhs.lifecycle->tensor_count;
+       ++lhs_index) {
+    const void * lhs_buffer = lhs.lifecycle->tensors[lhs_index].buffer;
+    if (lhs_buffer == nullptr) {
+      return true;
+    }
+    for (int32_t rhs_index = 0; rhs_index < rhs.lifecycle->tensor_count;
+         ++rhs_index) {
+      const void * rhs_buffer = rhs.lifecycle->tensors[rhs_index].buffer;
+      if (rhs_buffer == nullptr || lhs_buffer == rhs_buffer) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+inline bool guard_opaque_mutable_owners_alias(
+    const emel::graph::event::compute & lhs,
+    const emel::graph::event::compute & rhs) noexcept {
+  const void * lhs_owners[] = {
+      lhs.output_out,
+      lhs.compute_ctx,
+      lhs.memory_sm,
+      lhs.dispatch_done.object,
+      lhs.dispatch_error.object,
+  };
+  const void * rhs_owners[] = {
+      rhs.output_out,
+      rhs.compute_ctx,
+      rhs.memory_sm,
+      rhs.dispatch_done.object,
+      rhs.dispatch_error.object,
+  };
+  for (const void * lhs_owner : lhs_owners) {
+    for (const void * rhs_owner : rhs_owners) {
+      if (lhs_owner != nullptr && lhs_owner == rhs_owner) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Immutable model/plan/sequence metadata may be shared. Output slots, non-null
+// opaque mutable owners, and lifecycle buffers are caller-owned write surfaces,
+// so parallel lanes require pairwise disjoint addresses. Ambiguous null
+// lifecycle buffers stay on the ordered serial path.
+inline bool guard_parallel_payloads_disjoint(const event::run & ev) noexcept {
+  const size_t lane_count = ev.lanes.size();
+  for (size_t i = 0u; i < lane_count; ++i) {
+    for (size_t j = i + 1u; j < lane_count; ++j) {
+      if (guard_opaque_mutable_owners_alias(ev.lanes[i].compute,
+                                           ev.lanes[j].compute) ||
+          guard_lifecycle_buffers_overlap(ev.lanes[i].compute,
+                                          ev.lanes[j].compute)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 }  // namespace detail
 
 struct guard_valid_request {
@@ -103,7 +178,8 @@ struct guard_serial_dispatch {
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
     return ctx.pool == nullptr || ev.lanes.size() == 1u ||
            !detail::all_lane_graphs_distinct(ev) ||
-           !detail::all_lane_outcomes_distinct(ev);
+           !detail::all_lane_outcomes_distinct(ev) ||
+           !detail::guard_parallel_payloads_disjoint(ev);
   }
 };
 
@@ -114,7 +190,8 @@ struct guard_parallel_lane_count {
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
     return ctx.pool != nullptr && ev.lanes.size() == lane_count &&
            detail::all_lane_graphs_distinct(ev) &&
-           detail::all_lane_outcomes_distinct(ev);
+           detail::all_lane_outcomes_distinct(ev) &&
+           detail::guard_parallel_payloads_disjoint(ev);
   }
 };
 

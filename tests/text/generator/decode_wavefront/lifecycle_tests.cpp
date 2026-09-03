@@ -66,15 +66,43 @@ bool run_kernel_rejected(const execute_t & request, int32_t * err_out) {
   return false;
 }
 
-struct parallel_kernel_context {
+struct parallel_lane_context {
   std::atomic<int32_t> entered{0};
+  std::atomic<int32_t> active{0};
   std::atomic<bool> release{false};
+  std::atomic<bool> overlapped{false};
 };
 
+struct parallel_lane_owner {
+  parallel_lane_context * shared = nullptr;
+};
+
+bool run_kernel_synchronized(const execute_t & request, int32_t * err_out) {
+  auto * owner = static_cast<parallel_lane_owner *>(request.compute_ctx);
+  auto & shared = *owner->shared;
+  shared.active.fetch_add(1, std::memory_order_acq_rel);
+  shared.entered.fetch_add(1, std::memory_order_release);
+  for (int32_t attempt = 0; attempt < 100000; ++attempt) {
+    if (shared.entered.load(std::memory_order_acquire) >= 2) {
+      break;
+    }
+    std::this_thread::yield();
+  }
+  shared.overlapped.store(
+      shared.active.load(std::memory_order_acquire) > 1,
+      std::memory_order_release);
+  shared.active.fetch_sub(1, std::memory_order_acq_rel);
+  if (err_out != nullptr) {
+    *err_out = 0;
+  }
+  return true;
+}
+
 bool run_kernel_wait_for_release(const execute_t & request, int32_t * err_out) {
-  auto * ctx = static_cast<parallel_kernel_context *>(request.compute_ctx);
-  ctx->entered.fetch_add(1, std::memory_order_release);
-  while (!ctx->release.load(std::memory_order_acquire)) {
+  auto * owner = static_cast<parallel_lane_owner *>(request.compute_ctx);
+  auto & shared = *owner->shared;
+  shared.entered.fetch_add(1, std::memory_order_release);
+  while (!shared.release.load(std::memory_order_acquire)) {
     std::this_thread::yield();
   }
   if (err_out != nullptr) {
@@ -266,6 +294,33 @@ bool eventually(predicate && pred) {
   return false;
 }
 
+template <class prepare_alias>
+void check_shared_mutable_alias_serialized(prepare_alias && prepare) {
+  int model_tag = 1;
+  int backend_tag = 2;
+  std::array<graph_lane_fixture, 2> fixtures{};
+  prepare(fixtures);
+
+  const auto key = make_key(&model_tag, &backend_tag);
+  std::array<wavefront::event::lane, 2> lanes{{
+      {fixtures[0].graph, fixtures[0].compute_request, key, fixtures[0].lane_accepted},
+      {fixtures[1].graph, fixtures[1].compute_request, key, fixtures[1].lane_accepted},
+  }};
+  wavefront::event::dispatch_summary summary{};
+  wavefront::event::run request{std::span<wavefront::event::lane>{lanes},
+                                summary};
+  wavefront::action::worker_pool pool{};
+  wavefront::sm machine{pool};
+
+  CHECK(machine.process_event(request));
+  CHECK(machine.is(stateforward::sml::state<wavefront::state_idle>));
+  CHECK_FALSE(summary.all_submitted);
+  CHECK_FALSE(summary.joined);
+  CHECK(summary.dispatched_lanes == 2);
+  CHECK(fixtures[0].lane_accepted);
+  CHECK(fixtures[1].lane_accepted);
+}
+
 }  // namespace
 
 TEST_CASE("decode wavefront dispatches one lane inline without grouping") {
@@ -390,14 +445,71 @@ TEST_CASE("decode wavefront routes lanes sharing an outcome slot through serial 
   CHECK(fixtures[1].kernel_calls == 1);
 }
 
+TEST_CASE("decode wavefront serializes shared mutable compute payloads") {
+  SUBCASE("output slot") {
+    parallel_lane_context shared{};
+    std::array<parallel_lane_owner, 2> owners{{{&shared}, {&shared}}};
+    check_shared_mutable_alias_serialized([&](auto & fixtures) {
+      prepare_lane(fixtures[0], run_kernel_synchronized, &owners[0]);
+      prepare_lane(fixtures[1], run_kernel_synchronized, &owners[1]);
+      fixtures[1].compute_request.output_out = &fixtures[0].compute_output;
+    });
+    CHECK_FALSE(shared.overlapped.load(std::memory_order_acquire));
+  }
+
+  SUBCASE("compute context") {
+    int32_t shared_kernel_calls = 0;
+    check_shared_mutable_alias_serialized([&](auto & fixtures) {
+      prepare_lane(fixtures[0], run_kernel_counting, &shared_kernel_calls);
+      prepare_lane(fixtures[1], run_kernel_counting, &shared_kernel_calls);
+    });
+    CHECK(shared_kernel_calls == 2);
+  }
+
+  SUBCASE("callback owner") {
+    compute_callbacks callbacks{};
+    check_shared_mutable_alias_serialized([&](auto & fixtures) {
+      prepare_lane(fixtures[0]);
+      prepare_lane(fixtures[1]);
+      for (auto & fixture : fixtures) {
+        fixture.compute_request.dispatch_done = {
+            &callbacks, compute_callbacks::on_done};
+        fixture.compute_request.dispatch_error = {
+            &callbacks, compute_callbacks::on_error};
+      }
+    });
+    CHECK(callbacks.done_called);
+    CHECK_FALSE(callbacks.error_called);
+  }
+
+  SUBCASE("memory owner") {
+    int memory_owner = 0;
+    check_shared_mutable_alias_serialized([&](auto & fixtures) {
+      prepare_lane(fixtures[0]);
+      prepare_lane(fixtures[1]);
+      fixtures[0].compute_request.memory_sm = &memory_owner;
+      fixtures[1].compute_request.memory_sm = &memory_owner;
+    });
+  }
+
+  SUBCASE("lifecycle buffer") {
+    check_shared_mutable_alias_serialized([](auto & fixtures) {
+      prepare_lane(fixtures[0]);
+      prepare_lane(fixtures[1]);
+      fixtures[1].lifecycle.tensors[1].buffer =
+          fixtures[0].lifecycle.tensors[1].buffer;
+    });
+  }
+}
+
 TEST_CASE("decode wavefront worker pool dispatches compatible lanes concurrently") {
   int model_tag = 1;
   int backend_tag = 2;
   std::array<graph_lane_fixture, 2> fixtures{};
-  parallel_kernel_context kernel_ctx{};
-  for (auto & fixture : fixtures) {
-    prepare_lane(fixture, run_kernel_wait_for_release, &kernel_ctx);
-  }
+  parallel_lane_context kernel_ctx{};
+  std::array<parallel_lane_owner, 2> owners{{{&kernel_ctx}, {&kernel_ctx}}};
+  prepare_lane(fixtures[0], run_kernel_wait_for_release, &owners[0]);
+  prepare_lane(fixtures[1], run_kernel_wait_for_release, &owners[1]);
 
   const auto key = make_key(&model_tag, &backend_tag);
   std::array<wavefront::event::lane, 2> lanes{{
