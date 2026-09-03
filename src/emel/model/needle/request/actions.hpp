@@ -138,46 +138,115 @@ inline bool consume_json(json_cursor &cursor, const char expected) noexcept {
   return true;
 }
 
-inline bool parse_json_string(json_cursor &cursor,
-                              std::string_view &unescaped) noexcept {
+struct json_string {
+  std::string_view encoded = {};
+  bool escaped = false;
+};
+
+inline bool is_json_hex(const char value) noexcept {
+  return (value >= '0' && value <= '9') || (value >= 'a' && value <= 'f') ||
+         (value >= 'A' && value <= 'F');
+}
+
+inline uint32_t json_hex_value(const char value) noexcept {
+  if (value >= '0' && value <= '9')
+    return static_cast<uint32_t>(value - '0');
+  if (value >= 'a' && value <= 'f')
+    return static_cast<uint32_t>(value - 'a' + 10);
+  return static_cast<uint32_t>(value - 'A' + 10);
+}
+
+inline bool parse_json_string(json_cursor &cursor, json_string &result) noexcept {
   skip_json_space(cursor);
   if (cursor.offset == cursor.input.size() ||
       cursor.input[cursor.offset] != '"')
     return false;
   const size_t begin = ++cursor.offset;
   bool escaped = false;
-  for (; cursor.offset < cursor.input.size(); ++cursor.offset) {
+  while (cursor.offset < cursor.input.size()) {
     const unsigned char value =
-        static_cast<unsigned char>(cursor.input[cursor.offset]);
-    if (escaped) {
-      if (value == 'u') {
-        if (cursor.offset + 4u >= cursor.input.size()) return false;
-        for (size_t digit = 1u; digit <= 4u; ++digit) {
-          const char hex = cursor.input[cursor.offset + digit];
-          if (!((hex >= '0' && hex <= '9') || (hex >= 'a' && hex <= 'f') ||
-                (hex >= 'A' && hex <= 'F')))
-            return false;
-        }
-        cursor.offset += 4u;
-      } else if (value != '"' && value != '\\' && value != '/' &&
-                 value != 'b' && value != 'f' && value != 'n' &&
-                 value != 'r' && value != 't') {
-        return false;
-      }
-      escaped = false;
-      continue;
+        static_cast<unsigned char>(cursor.input[cursor.offset++]);
+    if (value == '"') {
+      result = {cursor.input.substr(begin, cursor.offset - begin - 1u), escaped};
+      return true;
     }
-    if (value == '\\') {
-      escaped = true;
-    } else if (value == '"') {
-      unescaped = cursor.input.substr(begin, cursor.offset - begin);
-      ++cursor.offset;
-      return unescaped.find('\\') == std::string_view::npos;
-    } else if (value < 0x20u) {
+    if (value < 0x20u) return false;
+    if (value != '\\') continue;
+    escaped = true;
+    if (cursor.offset == cursor.input.size()) return false;
+    const char escape = cursor.input[cursor.offset++];
+    if (escape == 'u') {
+      if (cursor.offset + 4u > cursor.input.size()) return false;
+      for (size_t digit = 0u; digit < 4u; ++digit)
+        if (!is_json_hex(cursor.input[cursor.offset + digit])) return false;
+      cursor.offset += 4u;
+    } else if (escape != '"' && escape != '\\' && escape != '/' &&
+               escape != 'b' && escape != 'f' && escape != 'n' &&
+               escape != 'r' && escape != 't') {
       return false;
     }
   }
   return false;
+}
+
+inline bool parse_json_string(json_cursor &cursor,
+                              std::string_view &unescaped) noexcept {
+  json_string value = {};
+  if (!parse_json_string(cursor, value) || value.escaped) return false;
+  unescaped = value.encoded;
+  return true;
+}
+
+inline bool json_string_equals(const json_string &value,
+                               const std::string_view expected) noexcept {
+  size_t encoded_at = 0u;
+  size_t expected_at = 0u;
+  const auto matches_byte = [&](const unsigned char byte) noexcept {
+    if (expected_at == expected.size() ||
+        static_cast<unsigned char>(expected[expected_at]) != byte)
+      return false;
+    ++expected_at;
+    return true;
+  };
+  while (encoded_at < value.encoded.size()) {
+    const unsigned char byte =
+        static_cast<unsigned char>(value.encoded[encoded_at++]);
+    if (byte != '\\') {
+      if (!matches_byte(byte)) return false;
+      continue;
+    }
+    const char escape = value.encoded[encoded_at++];
+    unsigned char decoded = 0u;
+    switch (escape) {
+    case '"': decoded = '"'; break;
+    case '\\': decoded = '\\'; break;
+    case '/': decoded = '/'; break;
+    case 'b': decoded = '\b'; break;
+    case 'f': decoded = '\f'; break;
+    case 'n': decoded = '\n'; break;
+    case 'r': decoded = '\r'; break;
+    case 't': decoded = '\t'; break;
+    case 'u': {
+      uint32_t codepoint = 0u;
+      for (size_t digit = 0u; digit < 4u; ++digit)
+        codepoint = (codepoint << 4u) |
+                    json_hex_value(value.encoded[encoded_at + digit]);
+      encoded_at += 4u;
+      if (codepoint > 0x7fu) return false;
+      decoded = static_cast<unsigned char>(codepoint);
+      break;
+    }
+    default: return false;
+    }
+    if (!matches_byte(decoded)) return false;
+  }
+  return expected_at == expected.size();
+}
+
+inline bool parse_exact_json_string(json_cursor &cursor,
+                                    const std::string_view expected) noexcept {
+  json_string value = {};
+  return parse_json_string(cursor, value) && json_string_equals(value, expected);
 }
 
 inline bool is_route_domain(const std::string_view value) noexcept {
@@ -295,131 +364,326 @@ inline bool validate_route_calls_json(const std::string_view calls) noexcept {
   }
 }
 
-inline bool parse_json_value(json_cursor &cursor, uint32_t depth = 0u) noexcept {
+inline bool consume_json_literal(json_cursor &cursor,
+                                 const std::string_view literal) noexcept {
+  if (cursor.input.substr(cursor.offset, literal.size()) != literal) return false;
+  cursor.offset += literal.size();
+  if (cursor.offset == cursor.input.size()) return true;
+  const char next = cursor.input[cursor.offset];
+  return is_json_space(next) || next == ',' || next == ']' || next == '}';
+}
+
+inline bool skip_json_number(json_cursor &cursor) noexcept {
+  const size_t size = cursor.input.size();
+  if (cursor.offset < size && cursor.input[cursor.offset] == '-') ++cursor.offset;
+  if (cursor.offset == size) return false;
+  if (cursor.input[cursor.offset] == '0') {
+    ++cursor.offset;
+    if (cursor.offset < size && cursor.input[cursor.offset] >= '0' &&
+        cursor.input[cursor.offset] <= '9')
+      return false;
+  } else {
+    if (cursor.input[cursor.offset] < '1' || cursor.input[cursor.offset] > '9')
+      return false;
+    do {
+      ++cursor.offset;
+    } while (cursor.offset < size && cursor.input[cursor.offset] >= '0' &&
+             cursor.input[cursor.offset] <= '9');
+  }
+  if (cursor.offset < size && cursor.input[cursor.offset] == '.') {
+    ++cursor.offset;
+    if (cursor.offset == size || cursor.input[cursor.offset] < '0' ||
+        cursor.input[cursor.offset] > '9')
+      return false;
+    do {
+      ++cursor.offset;
+    } while (cursor.offset < size && cursor.input[cursor.offset] >= '0' &&
+             cursor.input[cursor.offset] <= '9');
+  }
+  if (cursor.offset < size &&
+      (cursor.input[cursor.offset] == 'e' || cursor.input[cursor.offset] == 'E')) {
+    ++cursor.offset;
+    if (cursor.offset < size &&
+        (cursor.input[cursor.offset] == '+' || cursor.input[cursor.offset] == '-'))
+      ++cursor.offset;
+    if (cursor.offset == size || cursor.input[cursor.offset] < '0' ||
+        cursor.input[cursor.offset] > '9')
+      return false;
+    do {
+      ++cursor.offset;
+    } while (cursor.offset < size && cursor.input[cursor.offset] >= '0' &&
+             cursor.input[cursor.offset] <= '9');
+  }
+  if (cursor.offset == size) return true;
+  const char next = cursor.input[cursor.offset];
+  return is_json_space(next) || next == ',' || next == ']' || next == '}';
+}
+
+inline bool skip_json_value(json_cursor &cursor, uint32_t depth = 0u) noexcept {
   if (depth > 32u) return false;
   skip_json_space(cursor);
   if (cursor.offset == cursor.input.size()) return false;
   const char value = cursor.input[cursor.offset];
   if (value == '"') {
-    std::string_view ignored = {};
+    json_string ignored = {};
     return parse_json_string(cursor, ignored);
   }
   if (value == '{') {
     ++cursor.offset;
-    bool need_member = true;
+    skip_json_space(cursor);
+    if (cursor.offset < cursor.input.size() && cursor.input[cursor.offset] == '}') {
+      ++cursor.offset;
+      return true;
+    }
     for (;;) {
+      json_string key = {};
+      if (!parse_json_string(cursor, key) || !consume_json(cursor, ':') ||
+          !skip_json_value(cursor, depth + 1u))
+        return false;
       skip_json_space(cursor);
       if (cursor.offset == cursor.input.size()) return false;
       if (cursor.input[cursor.offset] == '}') {
-        if (need_member) return false;
         ++cursor.offset;
         return true;
       }
-      std::string_view key = {};
-      if (!parse_json_string(cursor, key) || !consume_json(cursor, ':') ||
-          !parse_json_value(cursor, depth + 1u)) return false;
-      need_member = false;
+      if (cursor.input[cursor.offset++] != ',') return false;
       skip_json_space(cursor);
-      if (cursor.offset == cursor.input.size()) return false;
-      if (cursor.input[cursor.offset] == ',') {
-        ++cursor.offset;
-        need_member = true;
-        continue;
-      }
-      if (cursor.input[cursor.offset] != '}') return false;
+      if (cursor.offset == cursor.input.size() ||
+          cursor.input[cursor.offset] == '}')
+        return false;
     }
   }
   if (value == '[') {
     ++cursor.offset;
-    bool need_element = true;
+    skip_json_space(cursor);
+    if (cursor.offset < cursor.input.size() && cursor.input[cursor.offset] == ']') {
+      ++cursor.offset;
+      return true;
+    }
     for (;;) {
+      if (!skip_json_value(cursor, depth + 1u)) return false;
       skip_json_space(cursor);
       if (cursor.offset == cursor.input.size()) return false;
       if (cursor.input[cursor.offset] == ']') {
-        if (need_element) return false;
         ++cursor.offset;
         return true;
       }
-      if (!parse_json_value(cursor, depth + 1u)) return false;
-      need_element = false;
+      if (cursor.input[cursor.offset++] != ',') return false;
       skip_json_space(cursor);
-      if (cursor.offset == cursor.input.size()) return false;
-      if (cursor.input[cursor.offset] == ',') {
-        ++cursor.offset;
-        need_element = true;
-        continue;
-      }
-      if (cursor.input[cursor.offset] != ']') return false;
+      if (cursor.offset == cursor.input.size() ||
+          cursor.input[cursor.offset] == ']')
+        return false;
     }
   }
-  const size_t begin = cursor.offset;
-  while (cursor.offset < cursor.input.size() &&
-         cursor.input[cursor.offset] != ',' && cursor.input[cursor.offset] != ']' &&
-         cursor.input[cursor.offset] != '}') ++cursor.offset;
-  if (begin == cursor.offset) return false;
-  const std::string_view literal = cursor.input.substr(begin, cursor.offset - begin);
-  return literal == "true" || literal == "false" || literal == "null" ||
-         (literal.front() == '-' || (literal.front() >= '0' && literal.front() <= '9'));
+  if (value == 't') return consume_json_literal(cursor, "true");
+  if (value == 'f') return consume_json_literal(cursor, "false");
+  if (value == 'n') return consume_json_literal(cursor, "null");
+  return value == '-' || (value >= '0' && value <= '9')
+             ? skip_json_number(cursor)
+             : false;
 }
 
-inline bool validate_tools_json(const std::string_view tools) noexcept {
-  json_cursor cursor{tools};
+template <size_t Size>
+inline bool parse_exact_string_set(
+    json_cursor &cursor,
+    const std::array<std::string_view, Size> &expected) noexcept {
+  static_assert(Size <= 32u);
   if (!consume_json(cursor, '[')) return false;
-  bool need_element = true;
-  bool found_route = false;
+  uint32_t found = 0u;
+  size_t count = 0u;
   for (;;) {
+    skip_json_space(cursor);
+    if (cursor.offset == cursor.input.size() || cursor.input[cursor.offset] == ']')
+      return false;
+    json_string value = {};
+    if (!parse_json_string(cursor, value)) return false;
+    size_t index = 0u;
+    while (index < Size && !json_string_equals(value, expected[index])) ++index;
+    if (index == Size || (found & (1u << index)) != 0u) return false;
+    found |= 1u << index;
+    ++count;
     skip_json_space(cursor);
     if (cursor.offset == cursor.input.size()) return false;
     if (cursor.input[cursor.offset] == ']') {
-      if (need_element || !found_route) return false;
       ++cursor.offset;
-      skip_json_space(cursor);
-      return cursor.offset == cursor.input.size();
+      return count == Size;
     }
-    if (cursor.input[cursor.offset] != '{') return false;
-    ++cursor.offset;
-    bool need_member = true;
-    bool found_name = false;
-    bool object_route = false;
-    for (;;) {
-      skip_json_space(cursor);
-      if (cursor.offset == cursor.input.size()) return false;
-      if (cursor.input[cursor.offset] == '}') {
-        if (need_member || !found_name || !object_route) return false;
-        ++cursor.offset;
-        break;
-      }
-      std::string_view key = {};
-      if (!parse_json_string(cursor, key) || !consume_json(cursor, ':')) return false;
-      if (key == "name") {
-        std::string_view name = {};
-        if (found_name || !parse_json_string(cursor, name) || name != "route") return false;
-        found_name = true;
-        object_route = true;
-        found_route = true;
-      } else if (!parse_json_value(cursor)) {
-        return false;
-      }
-      need_member = false;
-      skip_json_space(cursor);
-      if (cursor.offset == cursor.input.size()) return false;
-      if (cursor.input[cursor.offset] == ',') {
-        ++cursor.offset;
-        need_member = true;
-        continue;
-      }
-      if (cursor.input[cursor.offset] != '}') return false;
+    if (cursor.input[cursor.offset++] != ',') return false;
+  }
+}
+
+template <size_t Size>
+inline bool parse_route_property_schema(
+    json_cursor &cursor,
+    const std::array<std::string_view, Size> &enum_values) noexcept {
+  if (!consume_json(cursor, '{')) return false;
+  bool found_type = false;
+  bool found_enum = false;
+  bool need_member = true;
+  for (;;) {
+    skip_json_space(cursor);
+    if (cursor.offset == cursor.input.size()) return false;
+    if (cursor.input[cursor.offset] == '}') {
+      if (need_member) return false;
+      ++cursor.offset;
+      return found_type && found_enum;
     }
-    need_element = false;
+    json_string key = {};
+    if (!parse_json_string(cursor, key) || !consume_json(cursor, ':')) return false;
+    if (json_string_equals(key, "type")) {
+      if (found_type || !parse_exact_json_string(cursor, "string")) return false;
+      found_type = true;
+    } else if (json_string_equals(key, "enum")) {
+      if (found_enum || !parse_exact_string_set(cursor, enum_values)) return false;
+      found_enum = true;
+    } else {
+      return false;
+    }
+    need_member = false;
     skip_json_space(cursor);
     if (cursor.offset == cursor.input.size()) return false;
     if (cursor.input[cursor.offset] == ',') {
       ++cursor.offset;
-      need_element = true;
-      continue;
+      need_member = true;
+    } else if (cursor.input[cursor.offset] != '}') {
+      return false;
     }
-    if (cursor.input[cursor.offset] != ']') return false;
   }
+}
+
+inline bool parse_route_properties(json_cursor &cursor) noexcept {
+  static constexpr std::array<std::string_view, 8> k_domains = {
+      "agentic-coding", "programming-qa", "math", "research",
+      "writing",        "extraction",     "chat", "other"};
+  static constexpr std::array<std::string_view, 4> k_efforts = {
+      "low", "medium", "high", "xhigh"};
+  if (!consume_json(cursor, '{')) return false;
+  bool found_domain = false;
+  bool found_effort = false;
+  bool need_member = true;
+  for (;;) {
+    skip_json_space(cursor);
+    if (cursor.offset == cursor.input.size()) return false;
+    if (cursor.input[cursor.offset] == '}') {
+      if (need_member) return false;
+      ++cursor.offset;
+      return found_domain && found_effort;
+    }
+    json_string key = {};
+    if (!parse_json_string(cursor, key) || !consume_json(cursor, ':')) return false;
+    if (json_string_equals(key, "domain")) {
+      if (found_domain || !parse_route_property_schema(cursor, k_domains))
+        return false;
+      found_domain = true;
+    } else if (json_string_equals(key, "effort")) {
+      if (found_effort || !parse_route_property_schema(cursor, k_efforts))
+        return false;
+      found_effort = true;
+    } else {
+      return false;
+    }
+    need_member = false;
+    skip_json_space(cursor);
+    if (cursor.offset == cursor.input.size()) return false;
+    if (cursor.input[cursor.offset] == ',') {
+      ++cursor.offset;
+      need_member = true;
+    } else if (cursor.input[cursor.offset] != '}') {
+      return false;
+    }
+  }
+}
+
+inline bool parse_route_parameters(json_cursor &cursor) noexcept {
+  static constexpr std::array<std::string_view, 2> k_required = {"domain",
+                                                                 "effort"};
+  if (!consume_json(cursor, '{')) return false;
+  bool found_type = false;
+  bool found_properties = false;
+  bool found_required = false;
+  bool need_member = true;
+  for (;;) {
+    skip_json_space(cursor);
+    if (cursor.offset == cursor.input.size()) return false;
+    if (cursor.input[cursor.offset] == '}') {
+      if (need_member) return false;
+      ++cursor.offset;
+      return found_type && found_properties && found_required;
+    }
+    json_string key = {};
+    if (!parse_json_string(cursor, key) || !consume_json(cursor, ':')) return false;
+    if (json_string_equals(key, "type")) {
+      if (found_type || !parse_exact_json_string(cursor, "object")) return false;
+      found_type = true;
+    } else if (json_string_equals(key, "properties")) {
+      if (found_properties || !parse_route_properties(cursor)) return false;
+      found_properties = true;
+    } else if (json_string_equals(key, "required")) {
+      if (found_required || !parse_exact_string_set(cursor, k_required))
+        return false;
+      found_required = true;
+    } else {
+      return false;
+    }
+    need_member = false;
+    skip_json_space(cursor);
+    if (cursor.offset == cursor.input.size()) return false;
+    if (cursor.input[cursor.offset] == ',') {
+      ++cursor.offset;
+      need_member = true;
+    } else if (cursor.input[cursor.offset] != '}') {
+      return false;
+    }
+  }
+}
+
+inline bool parse_route_tool(json_cursor &cursor) noexcept {
+  if (!consume_json(cursor, '{')) return false;
+  bool found_name = false;
+  bool found_description = false;
+  bool found_parameters = false;
+  bool need_member = true;
+  for (;;) {
+    skip_json_space(cursor);
+    if (cursor.offset == cursor.input.size()) return false;
+    if (cursor.input[cursor.offset] == '}') {
+      if (need_member) return false;
+      ++cursor.offset;
+      return found_name && found_description && found_parameters;
+    }
+    json_string key = {};
+    if (!parse_json_string(cursor, key) || !consume_json(cursor, ':')) return false;
+    if (json_string_equals(key, "name")) {
+      if (found_name || !parse_exact_json_string(cursor, "route")) return false;
+      found_name = true;
+    } else if (json_string_equals(key, "description")) {
+      json_string description = {};
+      if (found_description || !parse_json_string(cursor, description)) return false;
+      found_description = true;
+    } else if (json_string_equals(key, "parameters")) {
+      if (found_parameters || !parse_route_parameters(cursor)) return false;
+      found_parameters = true;
+    } else if (!skip_json_value(cursor)) {
+      return false;
+    }
+    need_member = false;
+    skip_json_space(cursor);
+    if (cursor.offset == cursor.input.size()) return false;
+    if (cursor.input[cursor.offset] == ',') {
+      ++cursor.offset;
+      need_member = true;
+    } else if (cursor.input[cursor.offset] != '}') {
+      return false;
+    }
+  }
+}
+
+inline bool validate_tools_json(const std::string_view tools) noexcept {
+  json_cursor cursor{tools};
+  if (!consume_json(cursor, '[') || !parse_route_tool(cursor)) return false;
+  if (!consume_json(cursor, ']')) return false;
+  skip_json_space(cursor);
+  return cursor.offset == cursor.input.size();
 }
 
 inline bool parse_route_call(const std::string_view generated,

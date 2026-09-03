@@ -226,6 +226,25 @@ std::vector<request_prompt_fixture> first_request_prompts() {
   REQUIRE(rows.size() == 4u);
   return rows;
 }
+constexpr std::string_view k_route_tools_json =
+    R"json([{"name":"route","description":"Route a request to a domain queue with the minimum sufficient reasoning effort","parameters":{"type":"object","properties":{"domain":{"type":"string","enum":["agentic-coding","programming-qa","math","research","writing","extraction","chat","other"]},"effort":{"type":"string","enum":["low","medium","high","xhigh"]}},"required":["domain","effort"]}}])json";
+
+std::string replace_once(std::string input, const std::string_view from,
+                         const std::string_view to) {
+  const size_t at = input.find(from);
+  REQUIRE(at != std::string::npos);
+  input.replace(at, from.size(), to);
+  return input;
+}
+
+std::string with_route_ancillary(const std::string_view value) {
+  std::string result{k_route_tools_json};
+  const size_t route_end = result.rfind('}');
+  REQUIRE(route_end != std::string::npos);
+  result.insert(route_end, value);
+  return result;
+}
+
 
 TEST_CASE("needle request source adapter preserves first-four rendered prompts and token ids") {
   auto fixture = load_contract_fixture();
@@ -303,34 +322,72 @@ TEST_CASE("needle request rejects malformed tool-call JSON") {
   }
 }
 
-TEST_CASE("needle request rejects malformed configured tools JSON") {
-  auto fixture = load_contract_fixture();
-  const std::string_view prompt = first_request_prompts().front().prompt;
-  const size_t tools_at = prompt.find("<tools>") + 7u;
-  const size_t tools_end_at = prompt.find("</tools>", tools_at);
-  const std::string tools{prompt.substr(tools_at, tools_end_at - tools_at)};
-  constexpr std::array suffixes = {",]", "garbage", ""};
-  for (const std::string_view suffix : suffixes) {
-    emel::model::needle::request::sm request{fixture.contract};
-    std::string malformed = tools;
-    if (suffix == ",]") {
-      malformed.insert(malformed.size() - 1u, ",");
-    } else if (suffix.empty()) {
-      malformed = "{}";
-    } else {
-      malformed += suffix;
-    }
-    CAPTURE(malformed);
-    CHECK_FALSE(request.process_event(
-        emel::model::needle::request::event::configure{{}, malformed}));
+TEST_CASE("needle request rejects structurally invalid configured tools JSON") {
+  constexpr std::array malformed = {
+      R"json([{"name":"route","description":"decoy: properties domain effort enum required agentic-coding programming-qa math research writing extraction chat other low medium high xhigh","parameters":{"type":"object"}}])json",
+      R"json([{"name":"route","description":"wrong path","parameters":{"type":"object","properties":{},"required":["domain","effort"]},"properties":{"domain":{"type":"string","enum":["agentic-coding","programming-qa","math","research","writing","extraction","chat","other"]},"effort":{"type":"string","enum":["low","medium","high","xhigh"]}}}])json",
+      R"json([{"name":"route","name":"route","description":"duplicate","parameters":{"type":"object","properties":{"domain":{"type":"string","enum":["agentic-coding","programming-qa","math","research","writing","extraction","chat","other"]},"effort":{"type":"string","enum":["low","medium","high","xhigh"]}},"required":["domain","effort"]}}])json",
+      R"json([{"name":"route","description":"unknown nested key","parameters":{"type":"object","additionalProperties":false,"properties":{"domain":{"type":"string","enum":["agentic-coding","programming-qa","math","research","writing","extraction","chat","other"]},"effort":{"type":"string","enum":["low","medium","high","xhigh"]}},"required":["domain","effort"]}}])json",
+      R"json([{"description":"missing name","parameters":{"type":"object","properties":{"domain":{"type":"string","enum":["agentic-coding","programming-qa","math","research","writing","extraction","chat","other"]},"effort":{"type":"string","enum":["low","medium","high","xhigh"]}},"required":["domain","effort"]}}])json",
+      R"json([{"name":"route","description":"missing parameters"}])json",
+      R"json([{"name":"route","description":"duplicate required","parameters":{"type":"object","properties":{"domain":{"type":"string","enum":["agentic-coding","programming-qa","math","research","writing","extraction","chat","other"]},"effort":{"type":"string","enum":["low","medium","high","xhigh"]}},"required":["domain","effort"],"required":["domain","effort"]}}])json",
+      R"json([{"name":"route","description":"duplicate enum key","parameters":{"type":"object","properties":{"domain":{"type":"string","enum":["agentic-coding","programming-qa","math","research","writing","extraction","chat","other"],"enum":["agentic-coding","programming-qa","math","research","writing","extraction","chat","other"]},"effort":{"type":"string","enum":["low","medium","high","xhigh"]}},"required":["domain","effort"]}}])json",
+      R"json([{"name":"route","description":"two tools","parameters":{"type":"object","properties":{"domain":{"type":"string","enum":["agentic-coding","programming-qa","math","research","writing","extraction","chat","other"]},"effort":{"type":"string","enum":["low","medium","high","xhigh"]}},"required":["domain","effort"]}},{"name":"route","description":"second","parameters":{"type":"object","properties":{"domain":{"type":"string","enum":["agentic-coding","programming-qa","math","research","writing","extraction","chat","other"]},"effort":{"type":"string","enum":["low","medium","high","xhigh"]}},"required":["domain","effort"]}}])json",
+  };
+  for (const std::string_view value : malformed) {
+    CAPTURE(value);
+    CHECK_FALSE(
+        emel::model::needle::request::action::validate_tools_json(value));
   }
+
+  const std::array malformed_variants = {
+      replace_once(std::string{k_route_tools_json},
+                   R"json(,"required":["domain","effort"])json", ""),
+      replace_once(std::string{k_route_tools_json}, R"json("other")json",
+                   R"json("wrong")json"),
+      replace_once(std::string{k_route_tools_json}, R"json("xhigh")json",
+                   R"json("high")json"),
+      replace_once(std::string{k_route_tools_json}, R"json("type":"object")json",
+                   R"json("type":"array")json"),
+      replace_once(std::string{k_route_tools_json},
+                   R"json("required":["domain","effort"])json",
+                   R"json("required":["domain","domain"])json"),
+      with_route_ancillary(R"json(,"metadata":01)json"),
+      with_route_ancillary(R"json(,"metadata":1.)json"),
+      with_route_ancillary(R"json(,"metadata":1e)json"),
+      with_route_ancillary(R"json(,"metadata":{"items":[],})json"),
+      replace_once(std::string{k_route_tools_json}, "]", ",]"),
+      std::string{k_route_tools_json} + "garbage",
+      std::string{"{}"},
+  };
+  for (const std::string &value : malformed_variants) {
+    CAPTURE(value);
+    CHECK_FALSE(
+        emel::model::needle::request::action::validate_tools_json(value));
+  }
+}
+
+TEST_CASE("needle request accepts valid configured tool JSON grammar") {
+  const std::string escaped_description = replace_once(
+      std::string{k_route_tools_json},
+      "Route a request to a domain queue with the minimum sufficient reasoning effort",
+      R"json(Route \"quoted\" \\ slash \u0052oute\nnext)json");
+  const std::string ancillary = with_route_ancillary(
+      R"json(,"metadata":{"items":[],"object":{},"number":-1.25e+2,"enabled":true,"none":null},"examples":[])json");
+
+  emel::test::allocation::allocation_scope allocation_scope;
+  CHECK(emel::model::needle::request::action::validate_tools_json(
+      k_route_tools_json));
+  CHECK(emel::model::needle::request::action::validate_tools_json(
+      escaped_description));
+  CHECK(emel::model::needle::request::action::validate_tools_json(ancillary));
+  CHECK(allocation_scope.allocations() == 0u);
 }
 
 TEST_CASE("needle request null timestamp dependency is safe") {
   auto fixture = load_contract_fixture();
   emel::model::needle::request::sm request{fixture.contract, nullptr};
-  constexpr std::string_view tools =
-      "[{\"name\":\"route\",\"parameters\":{\"type\":\"object\"}}]";
+  constexpr std::string_view tools = k_route_tools_json;
   constexpr std::string_view query = "hello";
   REQUIRE(request.process_event(
       emel::model::needle::request::event::configure{{}, tools}));
@@ -342,8 +399,7 @@ TEST_CASE("needle request null timestamp dependency is safe") {
 TEST_CASE("needle request invalid reconfigure clears prior reset state") {
   auto fixture = load_contract_fixture();
   emel::model::needle::request::sm request{fixture.contract};
-  constexpr std::string_view tools =
-      "[{\"name\":\"route\",\"parameters\":{\"type\":\"object\"}}]";
+  constexpr std::string_view tools = k_route_tools_json;
   REQUIRE(request.process_event(
       emel::model::needle::request::event::configure{{}, tools}));
   REQUIRE(request.process_event(emel::model::needle::request::event::reset{}));
