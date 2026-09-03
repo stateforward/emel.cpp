@@ -1432,6 +1432,21 @@ TEST_CASE("direct check and lint gates enter the hard envelope first") {
   }
 }
 
+
+TEST_CASE("profile scripts enter the hard envelope first") {
+  const auto scripts = repo_root() / "scripts";
+  for (const auto &entry : std::filesystem::directory_iterator(scripts)) {
+    if (!entry.is_regular_file() || entry.path().extension() != ".sh") continue;
+    const std::string name = entry.path().filename().string();
+    if (!name.starts_with("profile_")) continue;
+    const std::string text = read_file(entry.path());
+    CAPTURE(name);
+    const std::size_t source = text.find("build_jobs.sh");
+    CHECK(source != std::string::npos);
+    CHECK(source < text.find("xctrace"));
+    CHECK(source < text.find("bench_runner"));
+  }
+}
 TEST_CASE("removed memory bypasses and sampled watchdog stay absent") {
   const std::string helper =
       read_file(repo_root() / "scripts" / "build_jobs.sh");

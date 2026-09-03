@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/build_jobs.sh
+source "$ROOT_DIR/scripts/build_jobs.sh"
 PROFILE_DIR="${EMEL_PROFILE_DIR:-$ROOT_DIR/tmp/profiles}"
 TRACE_TEMPLATE="${EMEL_PROFILE_TEMPLATE:-Time Profiler}"
 CASE_INDEX="${EMEL_PROFILE_CASE_INDEX:-7}"
