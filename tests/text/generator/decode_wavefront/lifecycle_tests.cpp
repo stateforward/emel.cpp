@@ -216,6 +216,7 @@ struct graph_lane_fixture {
   emel::graph::event::compute compute_request{};
   int32_t kernel_calls = 0;
   bool lane_accepted = false;
+  int32_t mutable_execution_owner = 0;
 
   void reserve_graph() {
     const emel::graph::event::reserve reserve_request{
@@ -310,8 +311,10 @@ void check_shared_mutable_alias_serialized(prepare_alias && prepare) {
 
   const auto key = make_key(&model_tag, &backend_tag);
   std::array<wavefront::event::lane, 2> lanes{{
-      {fixtures[0].graph, fixtures[0].compute_request, key, fixtures[0].lane_accepted},
-      {fixtures[1].graph, fixtures[1].compute_request, key, fixtures[1].lane_accepted},
+      {fixtures[0].graph, fixtures[0].compute_request, key,
+       fixtures[0].lane_accepted, &fixtures[0].mutable_execution_owner},
+      {fixtures[1].graph, fixtures[1].compute_request, key,
+       fixtures[1].lane_accepted, &fixtures[1].mutable_execution_owner},
   }};
   wavefront::event::dispatch_summary summary{};
   wavefront::event::run request{std::span<wavefront::event::lane>{lanes},
@@ -338,7 +341,8 @@ TEST_CASE("decode wavefront dispatches one lane inline without grouping") {
 
   const auto key = make_key(&model_tag, &backend_tag);
   wavefront::event::lane lane{fixture.graph, fixture.compute_request, key,
-                              fixture.lane_accepted};
+                              fixture.lane_accepted,
+                              &fixture.mutable_execution_owner};
   wavefront::event::dispatch_summary summary{};
   wavefront::event::run request{std::span<wavefront::event::lane>{&lane, 1u},
                                 summary};
@@ -367,10 +371,14 @@ TEST_CASE("decode wavefront groups compatible lanes with bounded explicit stages
 
   const auto key = make_key(&model_tag, &backend_tag);
   std::array<wavefront::event::lane, 4> lanes{{
-      {fixtures[0].graph, fixtures[0].compute_request, key, fixtures[0].lane_accepted},
-      {fixtures[1].graph, fixtures[1].compute_request, key, fixtures[1].lane_accepted},
-      {fixtures[2].graph, fixtures[2].compute_request, key, fixtures[2].lane_accepted},
-      {fixtures[3].graph, fixtures[3].compute_request, key, fixtures[3].lane_accepted},
+      {fixtures[0].graph, fixtures[0].compute_request, key,
+       fixtures[0].lane_accepted, &fixtures[0].mutable_execution_owner},
+      {fixtures[1].graph, fixtures[1].compute_request, key,
+       fixtures[1].lane_accepted, &fixtures[1].mutable_execution_owner},
+      {fixtures[2].graph, fixtures[2].compute_request, key,
+       fixtures[2].lane_accepted, &fixtures[2].mutable_execution_owner},
+      {fixtures[3].graph, fixtures[3].compute_request, key,
+       fixtures[3].lane_accepted, &fixtures[3].mutable_execution_owner},
   }};
   wavefront::event::dispatch_summary summary{};
   wavefront::event::run request{std::span<wavefront::event::lane>{lanes},
@@ -400,8 +408,10 @@ TEST_CASE("decode wavefront routes duplicate graph actors through serial path") 
 
   const auto key = make_key(&model_tag, &backend_tag);
   std::array<wavefront::event::lane, 2> lanes{{
-      {fixtures[0].graph, fixtures[0].compute_request, key, fixtures[0].lane_accepted},
-      {fixtures[0].graph, fixtures[0].compute_request, key, fixtures[1].lane_accepted},
+      {fixtures[0].graph, fixtures[0].compute_request, key,
+       fixtures[0].lane_accepted, &fixtures[0].mutable_execution_owner},
+      {fixtures[0].graph, fixtures[0].compute_request, key,
+       fixtures[1].lane_accepted, &fixtures[1].mutable_execution_owner},
   }};
   wavefront::event::dispatch_summary summary{};
   wavefront::event::run request{std::span<wavefront::event::lane>{lanes},
@@ -433,8 +443,10 @@ TEST_CASE("decode wavefront routes lanes sharing an outcome slot through serial 
   // outcome before the next lane writes.
   bool shared_accepted = false;
   std::array<wavefront::event::lane, 2> lanes{{
-      {fixtures[0].graph, fixtures[0].compute_request, key, shared_accepted},
-      {fixtures[1].graph, fixtures[1].compute_request, key, shared_accepted},
+      {fixtures[0].graph, fixtures[0].compute_request, key, shared_accepted,
+       &fixtures[0].mutable_execution_owner},
+      {fixtures[1].graph, fixtures[1].compute_request, key, shared_accepted,
+       &fixtures[1].mutable_execution_owner},
   }};
   wavefront::event::dispatch_summary summary{};
   wavefront::event::run request{std::span<wavefront::event::lane>{lanes},
@@ -471,6 +483,61 @@ TEST_CASE("decode wavefront serializes shared mutable compute payloads") {
       prepare_lane(fixtures[1], run_kernel_counting, &shared_kernel_calls);
     });
     CHECK(shared_kernel_calls == 2);
+  }
+
+  SUBCASE("distinct compute wrappers sharing a mutable execution owner") {
+    parallel_lane_context shared{};
+    std::array<parallel_lane_owner, 2> owners{{{&shared}, {&shared}}};
+    std::array<graph_lane_fixture, 2> fixtures{};
+    prepare_lane(fixtures[0], run_kernel_synchronized, &owners[0]);
+    prepare_lane(fixtures[1], run_kernel_synchronized, &owners[1]);
+
+    int model_tag = 1;
+    int backend_tag = 2;
+    const auto key = make_key(&model_tag, &backend_tag);
+    std::array<wavefront::event::lane, 2> lanes{{
+        {fixtures[0].graph, fixtures[0].compute_request, key,
+         fixtures[0].lane_accepted, &shared},
+        {fixtures[1].graph, fixtures[1].compute_request, key,
+         fixtures[1].lane_accepted, &shared},
+    }};
+    wavefront::event::dispatch_summary summary{};
+    wavefront::event::run request{std::span<wavefront::event::lane>{lanes},
+                                  summary};
+    wavefront::action::worker_pool pool{};
+    wavefront::sm machine{pool};
+
+    CHECK(machine.process_event(request));
+    CHECK_FALSE(summary.all_submitted);
+    CHECK_FALSE(summary.joined);
+    CHECK(summary.dispatched_lanes == 2);
+    CHECK_FALSE(shared.overlapped.load(std::memory_order_acquire));
+  }
+
+  SUBCASE("missing mutable execution owner") {
+    int model_tag = 1;
+    int backend_tag = 2;
+    std::array<graph_lane_fixture, 2> fixtures{};
+    prepare_lane(fixtures[0]);
+    prepare_lane(fixtures[1]);
+
+    const auto key = make_key(&model_tag, &backend_tag);
+    std::array<wavefront::event::lane, 2> lanes{{
+        {fixtures[0].graph, fixtures[0].compute_request, key,
+         fixtures[0].lane_accepted, nullptr},
+        {fixtures[1].graph, fixtures[1].compute_request, key,
+         fixtures[1].lane_accepted, &fixtures[1].mutable_execution_owner},
+    }};
+    wavefront::event::dispatch_summary summary{};
+    wavefront::event::run request{std::span<wavefront::event::lane>{lanes},
+                                  summary};
+    wavefront::action::worker_pool pool{};
+    wavefront::sm machine{pool};
+
+    CHECK(machine.process_event(request));
+    CHECK_FALSE(summary.all_submitted);
+    CHECK_FALSE(summary.joined);
+    CHECK(summary.dispatched_lanes == 2);
   }
 
   SUBCASE("callback owner") {
@@ -581,8 +648,10 @@ TEST_CASE("decode wavefront parallel dispatch permits shared leaf model ranges")
 
   const auto key = make_key(&model_tag, &backend_tag);
   std::array<wavefront::event::lane, 2> lanes{{
-      {fixtures[0].graph, fixtures[0].compute_request, key, fixtures[0].lane_accepted},
-      {fixtures[1].graph, fixtures[1].compute_request, key, fixtures[1].lane_accepted},
+      {fixtures[0].graph, fixtures[0].compute_request, key,
+       fixtures[0].lane_accepted, &fixtures[0].mutable_execution_owner},
+      {fixtures[1].graph, fixtures[1].compute_request, key,
+       fixtures[1].lane_accepted, &fixtures[1].mutable_execution_owner},
   }};
   wavefront::event::dispatch_summary summary{};
   wavefront::event::run request{std::span<wavefront::event::lane>{lanes},
@@ -638,21 +707,21 @@ TEST_CASE("decode wavefront parallel dispatch routes each supported lane count")
     const auto key = make_key(&model_tag, &backend_tag);
     std::array<wavefront::event::lane, wavefront::event::k_max_lanes> lanes{{
         {fixtures[0]->graph, fixtures[0]->compute_request, key,
-         fixtures[0]->lane_accepted},
+         fixtures[0]->lane_accepted, &fixtures[0]->mutable_execution_owner},
         {fixtures[1]->graph, fixtures[1]->compute_request, key,
-         fixtures[1]->lane_accepted},
+         fixtures[1]->lane_accepted, &fixtures[1]->mutable_execution_owner},
         {fixtures[2]->graph, fixtures[2]->compute_request, key,
-         fixtures[2]->lane_accepted},
+         fixtures[2]->lane_accepted, &fixtures[2]->mutable_execution_owner},
         {fixtures[3]->graph, fixtures[3]->compute_request, key,
-         fixtures[3]->lane_accepted},
+         fixtures[3]->lane_accepted, &fixtures[3]->mutable_execution_owner},
         {fixtures[4]->graph, fixtures[4]->compute_request, key,
-         fixtures[4]->lane_accepted},
+         fixtures[4]->lane_accepted, &fixtures[4]->mutable_execution_owner},
         {fixtures[5]->graph, fixtures[5]->compute_request, key,
-         fixtures[5]->lane_accepted},
+         fixtures[5]->lane_accepted, &fixtures[5]->mutable_execution_owner},
         {fixtures[6]->graph, fixtures[6]->compute_request, key,
-         fixtures[6]->lane_accepted},
+         fixtures[6]->lane_accepted, &fixtures[6]->mutable_execution_owner},
         {fixtures[7]->graph, fixtures[7]->compute_request, key,
-         fixtures[7]->lane_accepted},
+         fixtures[7]->lane_accepted, &fixtures[7]->mutable_execution_owner},
     }};
     wavefront::event::dispatch_summary summary{};
     wavefront::event::run request{
@@ -687,9 +756,9 @@ TEST_CASE("decode wavefront rejects incompatible multi-lane groups before dispat
       make_key(&model_tag, &backend_tag, wavefront::event::kernel_route::kernel);
   std::array<wavefront::event::lane, 2> lanes{{
       {fixtures[0].graph, fixtures[0].compute_request, first_key,
-       fixtures[0].lane_accepted},
+       fixtures[0].lane_accepted, &fixtures[0].mutable_execution_owner},
       {fixtures[1].graph, fixtures[1].compute_request, second_key,
-       fixtures[1].lane_accepted},
+       fixtures[1].lane_accepted, &fixtures[1].mutable_execution_owner},
   }};
   wavefront::event::dispatch_summary summary{};
   wavefront::event::run request{std::span<wavefront::event::lane>{lanes},
@@ -717,9 +786,12 @@ TEST_CASE("decode wavefront reports the first rejected lane and stops") {
 
   const auto key = make_key(&model_tag, &backend_tag);
   std::array<wavefront::event::lane, 3> lanes{{
-      {fixtures[0].graph, fixtures[0].compute_request, key, fixtures[0].lane_accepted},
-      {fixtures[1].graph, fixtures[1].compute_request, key, fixtures[1].lane_accepted},
-      {fixtures[2].graph, fixtures[2].compute_request, key, fixtures[2].lane_accepted},
+      {fixtures[0].graph, fixtures[0].compute_request, key,
+       fixtures[0].lane_accepted, &fixtures[0].mutable_execution_owner},
+      {fixtures[1].graph, fixtures[1].compute_request, key,
+       fixtures[1].lane_accepted, &fixtures[1].mutable_execution_owner},
+      {fixtures[2].graph, fixtures[2].compute_request, key,
+       fixtures[2].lane_accepted, &fixtures[2].mutable_execution_owner},
   }};
   wavefront::event::dispatch_summary summary{};
   wavefront::event::run request{std::span<wavefront::event::lane>{lanes},
@@ -750,9 +822,12 @@ TEST_CASE("decode wavefront parallel dispatch reports first rejected lane after 
 
   const auto key = make_key(&model_tag, &backend_tag);
   std::array<wavefront::event::lane, 3> lanes{{
-      {fixtures[0].graph, fixtures[0].compute_request, key, fixtures[0].lane_accepted},
-      {fixtures[1].graph, fixtures[1].compute_request, key, fixtures[1].lane_accepted},
-      {fixtures[2].graph, fixtures[2].compute_request, key, fixtures[2].lane_accepted},
+      {fixtures[0].graph, fixtures[0].compute_request, key,
+       fixtures[0].lane_accepted, &fixtures[0].mutable_execution_owner},
+      {fixtures[1].graph, fixtures[1].compute_request, key,
+       fixtures[1].lane_accepted, &fixtures[1].mutable_execution_owner},
+      {fixtures[2].graph, fixtures[2].compute_request, key,
+       fixtures[2].lane_accepted, &fixtures[2].mutable_execution_owner},
   }};
   wavefront::event::dispatch_summary summary{};
   wavefront::event::run request{std::span<wavefront::event::lane>{lanes},
@@ -784,15 +859,15 @@ TEST_CASE("decode wavefront rejects requests beyond the fixed lane bound") {
   std::array<bool, wavefront::event::k_max_lanes + 1u> accepted{};
   const auto key = make_key(&model_tag, &backend_tag);
   std::array<wavefront::event::lane, wavefront::event::k_max_lanes + 1u> lanes{{
-      {graph, compute, key, accepted[0]},
-      {graph, compute, key, accepted[1]},
-      {graph, compute, key, accepted[2]},
-      {graph, compute, key, accepted[3]},
-      {graph, compute, key, accepted[4]},
-      {graph, compute, key, accepted[5]},
-      {graph, compute, key, accepted[6]},
-      {graph, compute, key, accepted[7]},
-      {graph, compute, key, accepted[8]},
+      {graph, compute, key, accepted[0], &accepted[0]},
+      {graph, compute, key, accepted[1], &accepted[1]},
+      {graph, compute, key, accepted[2], &accepted[2]},
+      {graph, compute, key, accepted[3], &accepted[3]},
+      {graph, compute, key, accepted[4], &accepted[4]},
+      {graph, compute, key, accepted[5], &accepted[5]},
+      {graph, compute, key, accepted[6], &accepted[6]},
+      {graph, compute, key, accepted[7], &accepted[7]},
+      {graph, compute, key, accepted[8], &accepted[8]},
   }};
   wavefront::event::dispatch_summary summary{};
   wavefront::event::run request{std::span<wavefront::event::lane>{lanes},
@@ -816,7 +891,8 @@ TEST_CASE("decode wavefront async surface completes within the RTC call") {
 
   const auto key = make_key(&model_tag, &backend_tag);
   wavefront::event::lane lane{fixture.graph, fixture.compute_request, key,
-                              fixture.lane_accepted};
+                              fixture.lane_accepted,
+                              &fixture.mutable_execution_owner};
   wavefront::event::dispatch_summary summary{};
   wavefront::event::run request{std::span<wavefront::event::lane>{&lane, 1u},
                                 summary};

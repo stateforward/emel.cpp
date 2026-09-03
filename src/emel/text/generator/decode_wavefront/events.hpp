@@ -59,11 +59,14 @@ struct lane {
   lane(emel::graph::sm & graph_ref,
        emel::graph::event::compute & compute_ref,
        const compatibility_key key_ref,
-       bool & accepted_ref) noexcept
-    : graph(graph_ref), compute(compute_ref), key(key_ref), accepted(accepted_ref) {}
+       bool & accepted_ref,
+       void * const mutable_owner_ref) noexcept
+    : graph(graph_ref), compute(compute_ref), mutable_owner(mutable_owner_ref),
+      key(key_ref), accepted(accepted_ref) {}
 
   emel::graph::sm & graph;
   emel::graph::event::compute & compute;
+  void * mutable_owner;
   compatibility_key key;
   bool & accepted;
 };

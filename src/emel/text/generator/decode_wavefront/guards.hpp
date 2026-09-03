@@ -58,7 +58,7 @@ struct guard_writable_range {
 // leaf bindings. A larger mutable manifest is outside this compact admission
 // contract and therefore remains on the ordered serial path.
 inline constexpr size_t guard_max_mutable_lifecycle_ranges = 3u;
-inline constexpr size_t guard_fixed_writable_ranges = 7u;
+inline constexpr size_t guard_fixed_writable_ranges = 8u;
 inline constexpr size_t guard_max_writable_ranges =
     guard_fixed_writable_ranges + guard_max_mutable_lifecycle_ranges;
 inline constexpr int32_t guard_max_lifecycle_tensor_count = 65536;
@@ -109,6 +109,8 @@ inline bool guard_collect_lane_writable_ranges(
       !guard_append_writable_range(
           out, compute.output_out,
           static_cast<uint64_t>(sizeof(*compute.output_out))) ||
+      lane.mutable_owner == nullptr ||
+      !guard_append_writable_range(out, lane.mutable_owner, 1u) ||
       !guard_append_opaque_owner(out, compute.compute_ctx) ||
       !guard_append_opaque_owner(out, compute.memory_sm) ||
       !guard_append_opaque_owner(out, compute.dispatch_done.object) ||
