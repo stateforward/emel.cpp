@@ -46,8 +46,8 @@ inline bool valid_lane_count(const event::run & ev) noexcept {
 
 // Parallel dispatch requires every lane-owned write surface to be disjoint.
 // Opaque owners have no public extent, so their mechanically visible range is
-// their identity byte. Known outputs and lifecycle buffers retain their full
-// byte extent, which also catches cross-category and partial-range aliases.
+// their identity byte. Known mutable actors, outputs, and lifecycle buffers
+// retain their full byte extent, catching cross-category and partial aliases.
 struct guard_writable_range {
   uintptr_t begin = 0u;
   uintptr_t end = 0u;
@@ -101,7 +101,8 @@ inline bool guard_append_opaque_owner(guard_lane_writable_ranges & out,
 inline bool guard_collect_lane_writable_ranges(
     const event::lane & lane, guard_lane_writable_ranges & out) noexcept {
   const auto & compute = lane.compute;
-  if (!guard_append_writable_range(out, &lane.graph, 1u) ||
+  if (!guard_append_writable_range(
+          out, &lane.graph, static_cast<uint64_t>(sizeof(lane.graph))) ||
       !guard_append_writable_range(
           out, &lane.accepted,
           static_cast<uint64_t>(sizeof(lane.accepted))) ||

@@ -517,6 +517,15 @@ TEST_CASE("decode wavefront serializes accepted-to-opaque cross aliases") {
   });
 }
 
+TEST_CASE("decode wavefront serializes graph-to-opaque cross aliases") {
+  check_shared_mutable_alias_serialized([](auto & fixtures) {
+    prepare_lane(fixtures[0]);
+    auto * graph_storage = reinterpret_cast<uint8_t *>(&fixtures[0].graph);
+    prepare_lane(fixtures[1], run_kernel_ok,
+                 static_cast<void *>(graph_storage + 1u));
+  });
+}
+
 TEST_CASE("decode wavefront serializes partially overlapping mutable ranges") {
   std::array<uint8_t, 12> shared{};
   check_shared_mutable_alias_serialized([&](auto & fixtures) {
