@@ -57,6 +57,26 @@ struct effect_dispatch_lane {
   }
 };
 
+template <size_t lane_index>
+auto make_parallel_lane_task(const event::run & ev,
+                             emel::policy::fork_join_start_gate & gate) noexcept {
+  return [&lane = ev.lanes[lane_index], &gate]() noexcept {
+    gate.arrive_and_wait();
+    const emel::graph::event::compute_reserved reserved_compute{lane.compute};
+    lane.accepted = lane.graph.process_event(reserved_compute);
+  };
+}
+
+template <size_t... lane_indices>
+size_t submit_parallel_lane_tasks(
+    const event::run & ev, worker_pool & pool, worker_pool::join_group & group,
+    emel::policy::fork_join_start_gate & gate,
+    std::index_sequence<lane_indices...>) noexcept {
+  ((ev.lanes[lane_indices].accepted = false), ...);
+  return pool.try_submit_batch(
+      group, make_parallel_lane_task<lane_indices>(ev, gate)...);
+}
+
 template <size_t lane_count>
 struct effect_dispatch_parallel_lanes {
   static_assert(lane_count >= 2u && lane_count <= event::k_max_lanes);
@@ -65,22 +85,13 @@ struct effect_dispatch_parallel_lanes {
     worker_pool::join_group group{};
     emel::policy::fork_join_start_gate gate{};
 
-    [&]<size_t... lane_indices>(std::index_sequence<lane_indices...>) noexcept {
-      ((ev.lanes[lane_indices].accepted = false), ...);
-      const size_t submitted_lanes = ctx.pool->try_submit_batch(
-          group,
-          ([&lane = ev.lanes[lane_indices], &gate]() noexcept {
-            gate.arrive_and_wait();
-            const emel::graph::event::compute_reserved reserved_compute{
-                lane.compute};
-            lane.accepted = lane.graph.process_event(reserved_compute);
-          })...);
+    const size_t submitted_lanes = submit_parallel_lane_tasks(
+        ev, *ctx.pool, group, gate, std::make_index_sequence<lane_count>{});
 
-      gate.open_after_arrivals(submitted_lanes);
-      ev.out.all_submitted = submitted_lanes == lane_count;
-      ev.out.joined = group.wait();
-      ev.out.dispatched_lanes = static_cast<int32_t>(submitted_lanes);
-    }(std::make_index_sequence<lane_count>{});
+    gate.open_after_arrivals(submitted_lanes);
+    ev.out.all_submitted = submitted_lanes == lane_count;
+    ev.out.joined = group.wait();
+    ev.out.dispatched_lanes = static_cast<int32_t>(submitted_lanes);
   }
 };
 
