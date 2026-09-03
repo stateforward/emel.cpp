@@ -215,8 +215,11 @@ int copy_to_sealed_memfd(const char *source_path) {
   }
 
   const int executable = static_cast<int>(
-      ::syscall(SYS_memfd_create, "emel-needle-python", MFD_ALLOW_SEALING));
-  if (executable < 0) fail_errno("memfd_create(MFD_ALLOW_SEALING) failed");
+      ::syscall(SYS_memfd_create, "emel-needle-python",
+                MFD_ALLOW_SEALING | MFD_CLOEXEC));
+  if (executable < 0) {
+    fail_errno("memfd_create(MFD_ALLOW_SEALING|MFD_CLOEXEC) failed");
+  }
 
   std::array<unsigned char, 64u * 1024u> buffer{};
   for (;;) {

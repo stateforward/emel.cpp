@@ -1330,13 +1330,8 @@ TEST_CASE("needle authenticated exec resists source replacement after authentica
   const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
   const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
   const std::filesystem::path status_path = tmp_dir / "status.txt";
-
-  write_file(configured,
-             "#!/bin/sh\nprintf original > " +
-                 quote_arg_posix(original_marker.string()) + "\n");
-  write_file(replacement,
-             "#!/bin/sh\nprintf replacement > " +
-                 quote_arg_posix(replacement_marker.string()) + "\n");
+  std::filesystem::copy_file("/usr/bin/python3.12", configured);
+  std::filesystem::copy_file("/bin/false", replacement);
   make_executable(configured);
   make_executable(replacement);
   const std::string digest_command =
@@ -1361,6 +1356,9 @@ TEST_CASE("needle authenticated exec resists source replacement after authentica
       " EMEL_AUTHENTICATED_EXEC_TEST_CONTINUE=" + quote_arg_posix(proceed.string()) +
       " " + helper + " " + quote_arg_posix(configured.string()) + " " +
       quote_arg_posix(digest) + " -- " + quote_arg_posix(configured.string()) +
+      " -I -S -B -c " +
+      quote_arg_posix("open('" + original_marker.string() +
+                      "','w').write('original')") +
       " > " + quote_arg_posix(stdout_path.string()) + " 2> " +
       quote_arg_posix(stderr_path.string()) + " & child=$!; "
       "while [ ! -e " + quote_arg_posix(ready.string()) + " ]; do sleep 0.01; done; "
@@ -1404,6 +1402,35 @@ TEST_CASE("needle authenticated exec rejects the wrong interpreter hash") {
   CHECK(capture.stderr_text.find("configured Needle Python SHA-256 mismatch") !=
         std::string::npos);
   CHECK_FALSE(std::filesystem::exists(marker));
+#endif
+}
+
+TEST_CASE("needle authenticated exec closes interpreter memfd across exec") {
+#if defined(__linux__)
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-authenticated-exec-cloexec";
+  std::error_code ec;
+  std::filesystem::remove_all(tmp_dir, ec);
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::string program =
+      "import os,pathlib; leaked=[]; "
+      "[(leaked.append(str(p)) if 'emel-needle-python' in "
+      "os.readlink(p) else None) for p in pathlib.Path('/proc/self/fd').iterdir() "
+      "if p.exists()]; assert not leaked, leaked; print('cloexec-ok')";
+  const process_capture capture = run_command_capture(
+      quote_arg_posix(needle_authenticated_exec_test_path().string()) + " " +
+          quote_arg_posix("/usr/bin/python3.12") + " " +
+          "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118" +
+          " -- /usr/bin/python3.12 -I -S -B -c " + quote_arg_posix(program) +
+          " > " + quote_arg_posix(stdout_path.string()) + " 2> " +
+          quote_arg_posix(stderr_path.string()),
+      stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stdout_text == "cloexec-ok\n");
+  CHECK(capture.stderr_text.empty());
 #endif
 }
 
