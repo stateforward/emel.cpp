@@ -66,6 +66,13 @@ bool run_kernel_rejected(const execute_t & request, int32_t * err_out) {
   return false;
 }
 
+bool run_kernel_ok(const execute_t &, int32_t * err_out) {
+  if (err_out != nullptr) {
+    *err_out = 0;
+  }
+  return true;
+}
+
 struct parallel_lane_context {
   std::atomic<int32_t> entered{0};
   std::atomic<int32_t> active{0};
@@ -502,7 +509,55 @@ TEST_CASE("decode wavefront serializes shared mutable compute payloads") {
   }
 }
 
-TEST_CASE("decode wavefront worker pool dispatches compatible lanes concurrently") {
+TEST_CASE("decode wavefront serializes accepted-to-opaque cross aliases") {
+  check_shared_mutable_alias_serialized([](auto & fixtures) {
+    prepare_lane(fixtures[0], run_kernel_ok);
+    prepare_lane(fixtures[1], run_kernel_ok,
+                 static_cast<void *>(&fixtures[0].lane_accepted));
+  });
+}
+
+TEST_CASE("decode wavefront serializes partially overlapping mutable ranges") {
+  std::array<uint8_t, 12> shared{};
+  check_shared_mutable_alias_serialized([&](auto & fixtures) {
+    prepare_lane(fixtures[0]);
+    prepare_lane(fixtures[1]);
+    fixtures[0].lifecycle.tensors[1].buffer = shared.data();
+    fixtures[0].lifecycle.tensors[1].buffer_bytes = 8u;
+    fixtures[1].lifecycle.tensors[1].buffer = shared.data() + 4u;
+    fixtures[1].lifecycle.tensors[1].buffer_bytes = 8u;
+  });
+}
+
+TEST_CASE("decode wavefront serializes manifests beyond mutable range contract") {
+  using binding = emel::graph::processor::event::lifecycle_tensor_binding;
+  std::array<std::array<int32_t, 5>, 2> buffers{};
+  std::array<std::array<binding, 5>, 2> tensors{};
+
+  check_shared_mutable_alias_serialized([&](auto & fixtures) {
+    for (size_t lane_index = 0u; lane_index < fixtures.size(); ++lane_index) {
+      for (size_t tensor_index = 0u; tensor_index < tensors[lane_index].size();
+           ++tensor_index) {
+        tensors[lane_index][tensor_index] = binding{
+            .tensor_id = static_cast<int32_t>(tensor_index),
+            .buffer = &buffers[lane_index][tensor_index],
+            .buffer_bytes = sizeof(buffers[lane_index][tensor_index]),
+            .consumer_refs = tensor_index == 0u ? 0 : 1,
+            .is_leaf = tensor_index == 0u,
+        };
+      }
+      fixtures[lane_index].lifecycle.reserve.tensors = tensors[lane_index].data();
+      fixtures[lane_index].lifecycle.reserve.tensor_count =
+          static_cast<int32_t>(tensors[lane_index].size());
+      fixtures[lane_index].lifecycle.compute.tensors = tensors[lane_index].data();
+      fixtures[lane_index].lifecycle.compute.tensor_count =
+          static_cast<int32_t>(tensors[lane_index].size());
+      prepare_lane(fixtures[lane_index]);
+    }
+  });
+}
+
+TEST_CASE("decode wavefront parallel dispatch permits shared leaf model ranges") {
   int model_tag = 1;
   int backend_tag = 2;
   std::array<graph_lane_fixture, 2> fixtures{};
@@ -510,6 +565,10 @@ TEST_CASE("decode wavefront worker pool dispatches compatible lanes concurrently
   std::array<parallel_lane_owner, 2> owners{{{&kernel_ctx}, {&kernel_ctx}}};
   prepare_lane(fixtures[0], run_kernel_wait_for_release, &owners[0]);
   prepare_lane(fixtures[1], run_kernel_wait_for_release, &owners[1]);
+  fixtures[1].lifecycle.tensors[0].buffer =
+      fixtures[0].lifecycle.tensors[0].buffer;
+  fixtures[1].lifecycle.tensors[0].buffer_bytes =
+      fixtures[0].lifecycle.tensors[0].buffer_bytes;
 
   const auto key = make_key(&model_tag, &backend_tag);
   std::array<wavefront::event::lane, 2> lanes{{
