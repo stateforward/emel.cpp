@@ -1317,9 +1317,8 @@ TEST_CASE("memory envelope marker requires observable cgroup limits") {
   const auto script = repo_root() / "scripts" / "build_jobs.sh";
   const std::string base =
       "env EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
-      "EMEL_MEMORY_TEST_CORES=64 "
-      "EMEL_MEMORY_ENVELOPE_TARGET_BYTES=53687091200 "
-      "EMEL_MEMORY_ENVELOPE_BASE_TOTAL_BYTES=107374182400 ";
+      "EMEL_MEMORY_TEST_CORES=64 EMEL_MEMORY_TEST_OWNED_SCOPE=1 "
+      "EMEL_MEMORY_TEST_PARENT_MAX=107374182400 ";
 
   command_result result = run_command(
       base + "EMEL_MEMORY_TEST_CURRENT_MAX=53687091200 "
@@ -1335,7 +1334,7 @@ TEST_CASE("memory envelope marker requires observable cgroup limits") {
           shell_quote(script.string()) + " --memory-cap-check",
       output);
   CHECK(result.status != 0);
-  CHECK(result.output.find("memory.max=53687091201 exceeds required") !=
+  CHECK(result.output.find("memory.max=53687091201 exceeds recomputed cap") !=
         std::string::npos);
 
   result = run_command(
@@ -1348,6 +1347,17 @@ TEST_CASE("memory envelope marker requires observable cgroup limits") {
         std::string::npos);
 }
 
+TEST_CASE("sourced production entry ignores memory test environment") {
+  const auto output = std::filesystem::temp_directory_path() /
+                      "emel_memory_source_trust_test.txt";
+  const auto helper = repo_root() / "scripts" / "build_jobs.sh";
+  const command_result result = run_command(
+      "env EMEL_MEMORY_TEST_OS=Darwin EMEL_MEMORY_TEST_PHYSICAL_BYTES=1 "
+      "EMEL_MEMORY_TEST_CURRENT_MAX=1 EMEL_MEMORY_TEST_CURRENT_SWAP=0 bash -c " +
+          shell_quote("source " + shell_quote(helper.string())),
+      output);
+  CHECK(result.status == 0);
+}
 TEST_CASE("every script with a build invocation sources the hard envelope") {
   const auto scripts = repo_root() / "scripts";
   for (const auto &entry : std::filesystem::directory_iterator(scripts)) {
