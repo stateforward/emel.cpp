@@ -1396,6 +1396,39 @@ TEST_CASE("sourced production entry ignores memory test environment") {
   std::error_code ec;
   std::filesystem::remove_all(fake_bin, ec);
 }
+
+TEST_CASE("memory-cap-run never executes payload without an envelope") {
+  const auto output = std::filesystem::temp_directory_path() /
+                      "emel_memory_run_fail_closed_test.txt";
+  const auto helper = repo_root() / "scripts" / "build_jobs.sh";
+  const auto fake_bin = std::filesystem::temp_directory_path() /
+                        "emel_memory_run_fake_systemd_bin";
+  const auto sentinel = std::filesystem::temp_directory_path() /
+                        "emel_memory_run_payload_sentinel";
+  std::filesystem::create_directories(fake_bin);
+  for (const std::string tool : {"systemctl", "systemd-run"}) {
+    const auto path = fake_bin / tool;
+    write_file(path, "#!/bin/sh\nexit 99\n");
+    std::filesystem::permissions(
+        path, std::filesystem::perms::owner_exec |
+                  std::filesystem::perms::owner_read |
+                  std::filesystem::perms::owner_write,
+        std::filesystem::perm_options::replace);
+  }
+  std::error_code ec;
+  std::filesystem::remove(sentinel, ec);
+
+  const command_result result = run_command(
+      "env PATH=" + shell_quote(fake_bin.string() + ":/usr/bin:/bin") +
+          " bash " + shell_quote(helper.string()) +
+          " --memory-cap-run touch " + shell_quote(sentinel.string()),
+      output);
+  CHECK(result.status != 0);
+  CHECK(result.output.find("verified systemd --user scopes") !=
+        std::string::npos);
+  CHECK_FALSE(std::filesystem::exists(sentinel));
+  std::filesystem::remove_all(fake_bin, ec);
+}
 TEST_CASE("every native build or installer enters the hard envelope first") {
   const auto scripts = repo_root() / "scripts";
   for (const auto &entry : std::filesystem::directory_iterator(scripts)) {

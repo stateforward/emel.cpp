@@ -167,5 +167,10 @@ emel_initialize_build_memory() {
 
 emel_initialize_build_memory || return 1 2>/dev/null || exit 1
 if [[ "${1:-}" == --memory-cap-check ]]; then printf 'effective_total_bytes=%s\ncap_bytes=%s\nreserve_bytes=%s\nsafe_build_jobs=%s\nbuild_jobs=%s\n' "$EMEL_MEMORY_EFFECTIVE_TOTAL_BYTES" "$EMEL_MEMORY_CAP_BYTES" "$EMEL_MEMORY_RESERVE_BYTES" "$EMEL_SAFE_BUILD_JOBS" "$EMEL_BUILD_JOBS"; if ! emel_inside_owned_envelope; then check_status=0; EMEL_MEMORY_ENVELOPE_DRY_RUN=1 emel_enter_memory_envelope "$@" || check_status=$?; if ((check_status != 2)); then exit "$check_status"; fi; fi; exit 0; fi
-if [[ "${1:-}" == --memory-cap-run ]]; then shift; (($# > 0)) || exit 1; emel_enter_memory_envelope --memory-cap-run "$@"; exec "$@"; fi
+if [[ "${1:-}" == --memory-cap-run ]]; then
+  shift
+  (($# > 0)) || exit 1
+  emel_enter_memory_envelope --memory-cap-run "$@" || exit 1
+  exec "$@"
+fi
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then emel_enter_memory_envelope "$@"; fi
