@@ -20,6 +20,7 @@
 #include "bench_runner_registry.hpp"
 #include "generation_workload_manifest.hpp"
 #include "model/needle/request_aggregation.hpp"
+#include "model/needle/request_fixture_contract.hpp"
 
 #if defined(_WIN32)
 #include <process.h>
@@ -712,6 +713,17 @@ TEST_CASE("needle request aggregation independently ranks phase metrics") {
   unstable = samples;
   unstable.back().decode_tokens += 1u;
   CHECK_FALSE(aggregate_runs(unstable, aggregated));
+}
+
+TEST_CASE("needle request fixture rejects altered token ids") {
+  using emel::bench::needle_request::token_ids_match;
+  const std::array<int32_t, 4> canonical = {1, 2, 3, 4};
+  std::array<int32_t, 4> actual = canonical;
+  CHECK(token_ids_match(canonical, actual));
+  actual[2] = 99;
+  CHECK_FALSE(token_ids_match(canonical, actual));
+  const std::array<int32_t, 3> truncated = {1, 2, 3};
+  CHECK_FALSE(token_ids_match(canonical, truncated));
 }
 
 TEST_CASE("needle cactus boundary rejects substituted inputs and invalid values") {

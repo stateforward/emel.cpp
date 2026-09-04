@@ -9,6 +9,7 @@
 // EMEL-only microbenchmarks and are never paired with request telemetry.
 #include "bench_cases.hpp"
 #include "request_aggregation.hpp"
+#include "request_fixture_contract.hpp"
 
 #include <algorithm>
 #include <array>
@@ -599,7 +600,7 @@ struct graph_fixture {
           count < 0)
         fail_needle_setup("request_fixture_retokenize");
       actual.resize(static_cast<size_t>(count));
-      if (actual != row.token_ids)
+      if (!emel::bench::needle_request::token_ids_match(row.token_ids, actual))
         fail_needle_setup("request_fixture_token_id_mismatch");
     }
   }
@@ -900,6 +901,7 @@ void append_request_cases(std::vector<emel::bench::result> &results,
                           graph_fixture &fixture) {
   std::vector<request_row> rows = read_request_rows();
   for (request_row &row : rows) split_request_prompt(row);
+  fixture.verify_request_rows(rows);
   const request_measurement measured = measure_request_workload(fixture, rows, cfg);
   results.push_back(make_request_row(k_request_wall_case_name, "wall", cfg,
                                      measured.wall_ns, 0u, measured.envelopes));
