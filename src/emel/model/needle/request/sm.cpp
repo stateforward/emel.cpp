@@ -4,6 +4,7 @@ namespace emel::model::needle::request {
 
 
 bool sm::process_event(const event::configure &ev) {
+  action::reset_outputs(this->context_);
   event::configure_ctx ctx{};
   event::configure_run runtime{ev, ctx};
   const bool accepted = base_type::process_event(runtime);
@@ -14,6 +15,7 @@ bool sm::process_event(const event::configure &ev) {
 }
 
 bool sm::process_event(const event::reset &ev) {
+  action::reset_outputs(this->context_);
   event::reset_ctx ctx{};
   event::reset_run runtime{ev, ctx};
   const bool accepted = base_type::process_event(runtime);
@@ -24,6 +26,7 @@ bool sm::process_event(const event::reset &ev) {
 }
 
 bool sm::process_event(const event::complete &ev) {
+  action::reset_outputs(this->context_);
   event::complete_ctx ctx{};
   event::complete_run runtime{ev, ctx};
   const bool accepted = base_type::process_event(runtime);

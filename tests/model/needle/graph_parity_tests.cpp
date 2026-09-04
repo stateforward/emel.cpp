@@ -302,20 +302,47 @@ TEST_CASE("needle request illegal runtime dispatch reports internal error withou
       const request::event::configure_run &event_;
     };
 
+    const auto seed_outputs = [&ctx]() {
+      ctx.prompt_size = 1u;
+      ctx.prompt_id_count = 2u;
+      ctx.generated_id_count = 3u;
+      ctx.generated_text_size = 4u;
+      ctx.normalized_envelope_size = 5u;
+      ctx.prefill_nanoseconds = 6u;
+      ctx.decode_nanoseconds = 7u;
+    };
+    const auto check_outputs_cleared = [&ctx]() {
+      CHECK(ctx.prompt_size == 0u);
+      CHECK(ctx.prompt_id_count == 0u);
+      CHECK(ctx.generated_id_count == 0u);
+      CHECK(ctx.generated_text_size == 0u);
+      CHECK(ctx.normalized_envelope_size == 0u);
+      CHECK(ctx.prefill_nanoseconds == 0u);
+      CHECK(ctx.decode_nanoseconds == 0u);
+    };
+
     emel::test::allocation::allocation_scope allocation_scope;
+    seed_outputs();
     request::action::effect_on_unexpected{}(configure_run, ctx);
-    request::action::effect_on_unexpected{}(reset_run, ctx);
-    request::action::effect_on_unexpected{}(complete_run, ctx);
     CHECK(configure_ctx.err ==
           emel::error::cast(request::error::internal_error));
+    check_outputs_cleared();
+    seed_outputs();
+    request::action::effect_on_unexpected{}(reset_run, ctx);
     CHECK(reset_ctx.err == emel::error::cast(request::error::internal_error));
+    check_outputs_cleared();
+    seed_outputs();
+    request::action::effect_on_unexpected{}(complete_run, ctx);
     CHECK(complete_ctx.err ==
           emel::error::cast(request::error::internal_error));
+    check_outputs_cleared();
     configure_ctx.err = emel::error::cast(request::error::none);
+    seed_outputs();
     request::action::effect_on_unexpected{}(
         wrapped_runtime_event{configure_run}, ctx);
     CHECK(configure_ctx.err ==
           emel::error::cast(request::error::internal_error));
+    check_outputs_cleared();
     CHECK(allocation_scope.allocations() == 0u);
   }
 
@@ -329,11 +356,25 @@ TEST_CASE("needle request illegal runtime dispatch reports internal error withou
                                                              auto &runtime_ctx) {
       machine.set_current_states(stateforward::sml::state<state_type>);
       runtime_ctx.err = emel::error::cast(request::error::none);
+      ctx.prompt_size = 1u;
+      ctx.prompt_id_count = 2u;
+      ctx.generated_id_count = 3u;
+      ctx.generated_text_size = 4u;
+      ctx.normalized_envelope_size = 5u;
+      ctx.prefill_nanoseconds = 6u;
+      ctx.decode_nanoseconds = 7u;
       emel::test::allocation::allocation_scope allocation_scope;
       CHECK_FALSE(machine.process_event(runtime));
       CHECK(allocation_scope.allocations() == 0u);
       CHECK(runtime_ctx.err ==
             emel::error::cast(request::error::internal_error));
+      CHECK(ctx.prompt_size == 0u);
+      CHECK(ctx.prompt_id_count == 0u);
+      CHECK(ctx.generated_id_count == 0u);
+      CHECK(ctx.generated_text_size == 0u);
+      CHECK(ctx.normalized_envelope_size == 0u);
+      CHECK(ctx.prefill_nanoseconds == 0u);
+      CHECK(ctx.decode_nanoseconds == 0u);
       CHECK(machine.is(stateforward::sml::state<request::state_errored>));
     };
 
@@ -381,6 +422,98 @@ TEST_CASE("needle request illegal runtime dispatch reports internal error withou
     check_failure(callbacks, machine.process_event(request::event::complete{
                                  query, 1u, &on_request_completed,
                                  &on_request_error}));
+    g_request_callback_state = nullptr;
+  }
+
+  SUBCASE("illegal complete after success invalidates every prior response output") {
+    request::sm machine{fixture.contract};
+    const request_prompt_fixture row = first_request_prompts().front();
+    constexpr std::string_view tools_end = "</tools>\n";
+    constexpr std::string_view query_end =
+        "<|im_end|>\n<|im_start|>assistant\n";
+    const size_t tools_end_at = row.prompt.find(tools_end);
+    REQUIRE(tools_end_at != std::string::npos);
+    REQUIRE(row.prompt.ends_with(query_end));
+    const size_t query_begin = tools_end_at + tools_end.size();
+    const std::string_view successful_query{
+        row.prompt.data() + query_begin,
+        row.prompt.size() - query_begin - query_end.size()};
+
+    REQUIRE(machine.process_event(
+        request::event::configure{{}, k_route_tools_json}));
+    REQUIRE(machine.process_event(request::event::reset{}));
+    request_callback_state callbacks{};
+    g_request_callback_state = &callbacks;
+    REQUIRE(machine.process_event(request::event::complete{
+        successful_query, 80u, &on_request_completed, &on_request_error}));
+    REQUIRE(callbacks.done_count == 1u);
+    REQUIRE(callbacks.error_count == 0u);
+    REQUIRE_FALSE(machine.normalized_envelope().empty());
+    REQUIRE_FALSE(machine.generated_token_ids().empty());
+    REQUIRE(machine.prompt_tokens() > 0u);
+    REQUIRE(machine.generated_tokens() > 0u);
+    REQUIRE(machine.prefill_nanoseconds() > 0u);
+    REQUIRE(machine.decode_nanoseconds() > 0u);
+
+    callbacks = {};
+    check_failure(callbacks, machine.process_event(request::event::complete{
+                                 query, 1u, &on_request_completed,
+                                 &on_request_error}));
+    CHECK(machine.normalized_envelope().empty());
+    CHECK(machine.generated_token_ids().empty());
+    CHECK(machine.prompt_tokens() == 0u);
+    CHECK(machine.generated_tokens() == 0u);
+    CHECK(machine.prefill_nanoseconds() == 0u);
+    CHECK(machine.decode_nanoseconds() == 0u);
+    g_request_callback_state = nullptr;
+  }
+
+  SUBCASE("configure and reset dispatches invalidate prior response outputs") {
+    request::sm machine{fixture.contract};
+    const request_prompt_fixture row = first_request_prompts().front();
+    constexpr std::string_view tools_end = "</tools>\n";
+    constexpr std::string_view query_end =
+        "<|im_end|>\n<|im_start|>assistant\n";
+    const size_t tools_end_at = row.prompt.find(tools_end);
+    REQUIRE(tools_end_at != std::string::npos);
+    REQUIRE(row.prompt.ends_with(query_end));
+    const size_t query_begin = tools_end_at + tools_end.size();
+    const std::string_view successful_query{
+        row.prompt.data() + query_begin,
+        row.prompt.size() - query_begin - query_end.size()};
+    REQUIRE(machine.process_event(
+        request::event::configure{{}, k_route_tools_json}));
+    request_callback_state callbacks{};
+    g_request_callback_state = &callbacks;
+    const auto complete_successfully = [&]() {
+      REQUIRE(machine.process_event(request::event::reset{}));
+      REQUIRE(machine.process_event(request::event::complete{
+          successful_query, 80u, &on_request_completed, &on_request_error}));
+      REQUIRE_FALSE(machine.normalized_envelope().empty());
+      REQUIRE_FALSE(machine.generated_token_ids().empty());
+      REQUIRE(machine.prompt_tokens() > 0u);
+      REQUIRE(machine.generated_tokens() > 0u);
+      REQUIRE(machine.prefill_nanoseconds() > 0u);
+      REQUIRE(machine.decode_nanoseconds() > 0u);
+    };
+    const auto check_outputs_cleared = [&]() {
+      CHECK(machine.normalized_envelope().empty());
+      CHECK(machine.generated_token_ids().empty());
+      CHECK(machine.prompt_tokens() == 0u);
+      CHECK(machine.generated_tokens() == 0u);
+      CHECK(machine.prefill_nanoseconds() == 0u);
+      CHECK(machine.decode_nanoseconds() == 0u);
+    };
+
+    callbacks = {};
+    complete_successfully();
+    REQUIRE(machine.process_event(request::event::reset{}));
+    check_outputs_cleared();
+
+    complete_successfully();
+    REQUIRE(machine.process_event(
+        request::event::configure{{}, k_route_tools_json}));
+    check_outputs_cleared();
     g_request_callback_state = nullptr;
   }
 

@@ -1008,7 +1008,8 @@ struct effect_mark_invalid {
 
 struct effect_on_unexpected {
   template <class runtime_event>
-  void operator()(const runtime_event &ev, context &) const noexcept {
+  void operator()(const runtime_event &ev, context &ctx) const noexcept {
+    reset_outputs(ctx);
     const auto &run = origin_event(ev);
     if constexpr (requires { run.ctx.err; })
       run.ctx.err = emel::error::cast(error::internal_error);
