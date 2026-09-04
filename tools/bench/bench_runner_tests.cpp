@@ -875,6 +875,14 @@ bad_emel = root / "bad-emel.txt"
 for text in (emel_text("nan"), emel_text("0"), emel_text("1", "33")):
     bad_emel.write_text(text)
     rejected(lambda: module.parse_emel(bad_emel))
+for key, expected, wrong in (
+        ("thread_contract", module.EMEL_THREAD_CONTRACT, "wrong_contract"),
+        ("prompt_rows", str(module.PROMPT_ROWS), str(module.PROMPT_ROWS - 1)),
+        ("max_new_tokens", str(module.MAX_NEW_TOKENS),
+         str(module.MAX_NEW_TOKENS - 1))):
+    bad_emel.write_text(
+        emel_text().replace(f"{key}={expected}", f"{key}={wrong}"))
+    rejected(lambda: module.parse_emel(bad_emel))
 
 old_contract_emel = root / "old-contract-emel.txt"
 old_contract_emel.write_text(

@@ -708,6 +708,9 @@ def parse_emel(path: Path) -> dict[str, Any]:
         "workload_id": WORKLOAD_ID,
         "backend_id": "emel_needle_request_serial", "route": "serial",
         "thread_count": str(EMEL_THREAD_COUNT),
+        "thread_contract": EMEL_THREAD_CONTRACT,
+        "prompt_rows": str(PROMPT_ROWS),
+        "max_new_tokens": str(MAX_NEW_TOKENS),
         "sampling_id": EMEL_SAMPLING_ID, "stop_id": EMEL_STOP_ID,
         "phase_rate_semantics": PHASE_NONCOMPARABLE_REASON,
     }
