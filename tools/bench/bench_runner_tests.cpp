@@ -884,6 +884,29 @@ for key, expected, wrong in (
         emel_text().replace(f"{key}={expected}", f"{key}={wrong}"))
     rejected(lambda: module.parse_emel(bad_emel))
 
+wrong_marker_masked_by_metric = root / "wrong-marker-masked-by-metric.txt"
+wrong_marker_masked_by_metric.write_text(
+    emel_text().replace("thread_contract=single_thread ",
+                        "thread_contract=wrong_contract ").replace(
+        " iter=1 runs=1", " thread_contract=single_thread iter=1 runs=1"))
+rejected(lambda: module.parse_emel(wrong_marker_masked_by_metric))
+
+marker_metric_collision = root / "marker-metric-collision.txt"
+marker_metric_collision.write_text(
+    emel_text().replace(" iter=1 runs=1",
+                        " backend_id=emel_needle_request_serial iter=1 runs=1"))
+rejected(lambda: module.parse_emel(marker_metric_collision))
+
+unexpected_metric_metadata = root / "unexpected-metric-metadata.txt"
+unexpected_metric_metadata.write_text(
+    emel_text().replace(" iter=1 runs=1", " metadata=unexpected iter=1 runs=1"))
+rejected(lambda: module.parse_emel(unexpected_metric_metadata))
+
+duplicate_metric_key = root / "duplicate-metric-key.txt"
+duplicate_metric_key.write_text(
+    emel_text().replace(" iter=1 runs=1", " iter=1 iter=1 runs=1"))
+rejected(lambda: module.parse_emel(duplicate_metric_key))
+
 old_contract_emel = root / "old-contract-emel.txt"
 old_contract_emel.write_text(
     emel_text().replace(

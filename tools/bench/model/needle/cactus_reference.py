@@ -630,6 +630,7 @@ def parse_emel(path: Path) -> dict[str, Any]:
     phases: dict[str, dict[str, str]] = {}
     envelope_hex: dict[int, str] = {}
     marker: dict[str, str] | None = None
+    required_metric_keys = {"ns_per_op", "tokens_per_second", "iter", "runs"}
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeError) as exc:
@@ -675,6 +676,18 @@ def parse_emel(path: Path) -> dict[str, Any]:
                 if key in metrics:
                     fail(f"duplicate EMEL metric key: {key}")
                 metrics[key] = value
+            collisions = set(marker) & set(metrics)
+            if collisions:
+                fail("EMEL marker/metric key collision: " +
+                     ", ".join(sorted(collisions)))
+            unexpected_metric_keys = set(metrics) - required_metric_keys
+            if unexpected_metric_keys:
+                fail("EMEL metric row has unexpected keys: " +
+                     ", ".join(sorted(unexpected_metric_keys)))
+            missing_metric_keys = required_metric_keys - set(metrics)
+            if missing_metric_keys:
+                fail("EMEL metric row missing keys: " +
+                     ", ".join(sorted(missing_metric_keys)))
             phase = marker.get("phase", "")
             if phase in phases:
                 fail(f"duplicate EMEL request phase: {phase}")
@@ -690,7 +703,6 @@ def parse_emel(path: Path) -> dict[str, Any]:
         "sampling_id", "stop_id", "warmup_iterations", "warmup_runs",
         "phase_rate_semantics",
     }
-    required_metric_keys = {"ns_per_op", "tokens_per_second", "iter", "runs"}
     allowed_keys = required_marker_keys | required_metric_keys | {
         "lane", "case", "phase", "reference", "backend_id",
         "phase_tokens_per_batch",
