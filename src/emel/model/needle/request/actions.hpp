@@ -1009,8 +1009,9 @@ struct effect_mark_invalid {
 struct effect_on_unexpected {
   template <class runtime_event>
   void operator()(const runtime_event &ev, context &) const noexcept {
-    if constexpr (requires { ev.event_.ctx.err; })
-      ev.event_.ctx.err = emel::error::cast(error::internal_error);
+    const auto &run = origin_event(ev);
+    if constexpr (requires { run.ctx.err; })
+      run.ctx.err = emel::error::cast(error::internal_error);
   }
 };
 

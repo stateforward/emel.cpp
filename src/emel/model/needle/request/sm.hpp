@@ -133,6 +133,30 @@ struct model {
           / action::effect_on_unexpected{}
       , sml::state<state_errored> <= sml::state<state_errored> + sml::unexpected_event<sml::_>
           / action::effect_on_unexpected{}
+      , sml::state<state_errored> <= sml::state<state_configure_decision> + sml::unexpected_event<sml::_>
+          / action::effect_on_unexpected{}
+      , sml::state<state_errored> <= sml::state<state_configure_outcome> + sml::unexpected_event<sml::_>
+          / action::effect_on_unexpected{}
+      , sml::state<state_errored> <= sml::state<state_reset_decision> + sml::unexpected_event<sml::_>
+          / action::effect_on_unexpected{}
+      , sml::state<state_errored> <= sml::state<state_reset_outcome> + sml::unexpected_event<sml::_>
+          / action::effect_on_unexpected{}
+      , sml::state<state_errored> <= sml::state<state_complete_decision> + sml::unexpected_event<sml::_>
+          / action::effect_on_unexpected{}
+      , sml::state<state_errored> <= sml::state<state_rendering> + sml::unexpected_event<sml::_>
+          / action::effect_on_unexpected{}
+      , sml::state<state_errored> <= sml::state<state_tokenizing> + sml::unexpected_event<sml::_>
+          / action::effect_on_unexpected{}
+      , sml::state<state_errored> <= sml::state<state_prefilling> + sml::unexpected_event<sml::_>
+          / action::effect_on_unexpected{}
+      , sml::state<state_errored> <= sml::state<state_decoding> + sml::unexpected_event<sml::_>
+          / action::effect_on_unexpected{}
+      , sml::state<state_errored> <= sml::state<state_detokenizing> + sml::unexpected_event<sml::_>
+          / action::effect_on_unexpected{}
+      , sml::state<state_errored> <= sml::state<state_normalizing> + sml::unexpected_event<sml::_>
+          / action::effect_on_unexpected{}
+      , sml::state<state_errored> <= sml::state<state_complete_outcome> + sml::unexpected_event<sml::_>
+          / action::effect_on_unexpected{}
     );
     // clang-format on
   }

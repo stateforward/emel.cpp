@@ -245,6 +245,146 @@ std::string with_route_ancillary(const std::string_view value) {
   return result;
 }
 
+struct request_callback_state {
+  uint32_t done_count = 0u;
+  uint32_t error_count = 0u;
+  emel::error::type err =
+      emel::error::cast(emel::model::needle::request::error::none);
+};
+
+request_callback_state *g_request_callback_state = nullptr;
+
+void on_request_reset_done(
+    const emel::model::needle::request::events::reset_done &) noexcept {
+  ++g_request_callback_state->done_count;
+}
+
+void on_request_completed(
+    const emel::model::needle::request::events::completed &) noexcept {
+  ++g_request_callback_state->done_count;
+}
+
+void on_request_error(
+    const emel::model::needle::request::events::request_error &ev) noexcept {
+  ++g_request_callback_state->error_count;
+  g_request_callback_state->err = ev.err;
+}
+
+TEST_CASE("needle request illegal runtime dispatch reports internal error without stale success") {
+  namespace request = emel::model::needle::request;
+
+  auto fixture = load_contract_fixture();
+  constexpr std::string_view query = "hello";
+
+  const auto check_failure = [](request_callback_state &callbacks,
+                                const bool accepted) {
+    CHECK_FALSE(accepted);
+    CHECK(callbacks.done_count == 0u);
+    CHECK(callbacks.error_count == 1u);
+    CHECK(callbacks.err ==
+          emel::error::cast(request::error::internal_error));
+  };
+
+  SUBCASE("wrapped and unwrapped runtime events set their originating context") {
+    request::action::context ctx{
+        request::action::dependencies{fixture.contract}};
+    const request::event::configure configure{{}, k_route_tools_json};
+    const request::event::reset reset{};
+    const request::event::complete complete{query, 1u};
+    request::event::configure_ctx configure_ctx{};
+    request::event::reset_ctx reset_ctx{};
+    request::event::complete_ctx complete_ctx{};
+    const request::event::configure_run configure_run{configure,
+                                                       configure_ctx};
+    const request::event::reset_run reset_run{reset, reset_ctx};
+    const request::event::complete_run complete_run{complete, complete_ctx};
+    struct wrapped_runtime_event {
+      const request::event::configure_run &event_;
+    };
+
+    emel::test::allocation::allocation_scope allocation_scope;
+    request::action::effect_on_unexpected{}(configure_run, ctx);
+    request::action::effect_on_unexpected{}(reset_run, ctx);
+    request::action::effect_on_unexpected{}(complete_run, ctx);
+    CHECK(configure_ctx.err ==
+          emel::error::cast(request::error::internal_error));
+    CHECK(reset_ctx.err == emel::error::cast(request::error::internal_error));
+    CHECK(complete_ctx.err ==
+          emel::error::cast(request::error::internal_error));
+    configure_ctx.err = emel::error::cast(request::error::none);
+    request::action::effect_on_unexpected{}(
+        wrapped_runtime_event{configure_run}, ctx);
+    CHECK(configure_ctx.err ==
+          emel::error::cast(request::error::internal_error));
+    CHECK(allocation_scope.allocations() == 0u);
+  }
+
+  SUBCASE("unwrapped runtime events fail from intermediate states") {
+    request::action::context ctx{
+        request::action::dependencies{fixture.contract}};
+    stateforward::sml::sm<request::model, stateforward::sml::testing> machine{
+        ctx};
+
+    const auto check_runtime_failure = [&]<class state_type>(const auto &runtime,
+                                                             auto &runtime_ctx) {
+      machine.set_current_states(stateforward::sml::state<state_type>);
+      runtime_ctx.err = emel::error::cast(request::error::none);
+      emel::test::allocation::allocation_scope allocation_scope;
+      CHECK_FALSE(machine.process_event(runtime));
+      CHECK(allocation_scope.allocations() == 0u);
+      CHECK(runtime_ctx.err ==
+            emel::error::cast(request::error::internal_error));
+      CHECK(machine.is(stateforward::sml::state<request::state_errored>));
+    };
+
+    const request::event::configure configure{{}, k_route_tools_json};
+    request::event::configure_ctx configure_ctx{};
+    check_runtime_failure.template operator()<request::state_reset_decision>(
+        request::event::configure_run{configure, configure_ctx}, configure_ctx);
+
+    const request::event::reset reset{};
+    request::event::reset_ctx reset_ctx{};
+    check_runtime_failure.template operator()<request::state_configure_decision>(
+        request::event::reset_run{reset, reset_ctx}, reset_ctx);
+
+    const request::event::complete complete{query, 1u};
+    request::event::complete_ctx complete_ctx{};
+    check_runtime_failure.template operator()<request::state_reset_outcome>(
+        request::event::complete_run{complete, complete_ctx}, complete_ctx);
+  }
+
+  SUBCASE("reset before configure reports error") {
+    request::sm machine{fixture.contract};
+    request_callback_state callbacks{};
+    g_request_callback_state = &callbacks;
+    check_failure(callbacks, machine.process_event(request::event::reset{
+                                 &on_request_reset_done, &on_request_error}));
+    g_request_callback_state = nullptr;
+  }
+
+  SUBCASE("complete before configure reports error") {
+    request::sm machine{fixture.contract};
+    request_callback_state callbacks{};
+    g_request_callback_state = &callbacks;
+    check_failure(callbacks, machine.process_event(request::event::complete{
+                                 query, 1u, &on_request_completed,
+                                 &on_request_error}));
+    g_request_callback_state = nullptr;
+  }
+
+  SUBCASE("complete before reset reports error") {
+    request::sm machine{fixture.contract};
+    REQUIRE(machine.process_event(
+        request::event::configure{{}, k_route_tools_json}));
+    request_callback_state callbacks{};
+    g_request_callback_state = &callbacks;
+    check_failure(callbacks, machine.process_event(request::event::complete{
+                                 query, 1u, &on_request_completed,
+                                 &on_request_error}));
+    g_request_callback_state = nullptr;
+  }
+
+}
 
 TEST_CASE("needle request source adapter preserves first-four rendered prompts and token ids") {
   auto fixture = load_contract_fixture();
