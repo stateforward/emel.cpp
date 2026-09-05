@@ -251,6 +251,7 @@ struct graph_lane_fixture {
   uint32_t gemv_seed = 0;
   gemv_work kernel_work{};
   bool lane_accepted = false;
+  int32_t mutable_execution_owner = 0;
 
   void reserve_graph() {
     const emel::graph::event::reserve reserve_request{
@@ -334,7 +335,7 @@ struct decode_wavefront_fixture {
   int backend_tag = 2;
   std::array<std::unique_ptr<graph_lane_fixture>, lane_count> lanes{};
   std::vector<wavefront::event::lane> wavefront_lanes{};
-  wavefront::lane_pool pool{};
+  wavefront::worker_pool pool{};
   wavefront::sm machine{pool};
   volatile int32_t sink = 0;
 
@@ -351,7 +352,8 @@ struct decode_wavefront_fixture {
       wavefront_lanes.emplace_back(lanes[lane_index]->graph,
                                    lanes[lane_index]->compute_request,
                                    key,
-                                   lanes[lane_index]->lane_accepted);
+                                   lanes[lane_index]->lane_accepted,
+                                   &lanes[lane_index]->mutable_execution_owner);
     }
   }
 

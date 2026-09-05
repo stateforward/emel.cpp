@@ -53,6 +53,7 @@ clear_tokenize_runtime(const runtime_event_type &runtime_ev) noexcept {
   ev.ctx.fragment_count = 0;
   ev.ctx.fragment_index = 0;
   ev.ctx.preprocessed = false;
+  ev.ctx.global_dummy_prefix_pending = false;
   ev.ctx.preprocess_accepted = false;
   ev.ctx.preprocess_err_code = error_code(error::none);
   ev.ctx.encode_accepted = false;
@@ -159,6 +160,10 @@ struct dispatch_preprocess {
     ev.ctx.fragment_count = fragment_count;
     ev.ctx.fragment_index = 0;
     ev.ctx.preprocessed = preprocessed;
+    ev.ctx.global_dummy_prefix_pending =
+        ctx.vocab->tokenizer_pre_id ==
+            emel::model::data::tokenizer_pre::NEEDLE &&
+        ctx.vocab->add_space_prefix && !ev.request.text.empty();
   }
 };
 
@@ -221,32 +226,59 @@ struct append_fragment_token {
   }
 };
 
-struct dispatch_encode_raw_fragment {
+template <bool suppress_space_prefix, class runtime_event_type>
+inline void encode_raw_fragment(const runtime_event_type &runtime_ev,
+                                context &ctx) noexcept {
+  auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+  const fragment &frag = ev.ctx.fragments[ev.ctx.fragment_index];
+  const int32_t capacity = ev.request.token_capacity - ev.ctx.token_count;
+  const int32_t non_negative_capacity =
+      capacity * static_cast<int32_t>(capacity > 0);
+  const size_t output_capacity = static_cast<size_t>(non_negative_capacity);
+
+  int32_t fragment_count = 0;
+  int32_t err = error_code(error::none);
+  emel::text::encoders::event::encode encode_ev{
+      .vocab = *ctx.vocab,
+      .text = frag.text,
+      .preprocessed = ev.ctx.preprocessed,
+      .suppress_space_prefix = suppress_space_prefix,
+      .token_ids = std::span<int32_t>(
+          ev.request.token_ids_out + ev.ctx.token_count, output_capacity),
+      .token_count_out = &fragment_count,
+      .error_out = &err,
+  };
+
+  ev.ctx.encode_accepted = ctx.encoder_any.process_event(encode_ev);
+  ev.ctx.encode_err_code = err;
+  ev.ctx.encode_token_count = fragment_count;
+}
+
+struct dispatch_encode_raw_fragment_needle_first {
   template <class runtime_event_type>
   void operator()(const runtime_event_type &runtime_ev,
                   context &ctx) const noexcept {
+    encode_raw_fragment<false>(runtime_ev, ctx);
     auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
-    const fragment &frag = ev.ctx.fragments[ev.ctx.fragment_index];
-    const int32_t capacity = ev.request.token_capacity - ev.ctx.token_count;
-    const int32_t non_negative_capacity =
-        capacity * static_cast<int32_t>(capacity > 0);
-    const size_t output_capacity = static_cast<size_t>(non_negative_capacity);
+    ev.ctx.global_dummy_prefix_pending = false;
+  }
+};
 
-    int32_t fragment_count = 0;
-    int32_t err = error_code(error::none);
-    emel::text::encoders::event::encode encode_ev{
-        .vocab = *ctx.vocab,
-        .text = frag.text,
-        .preprocessed = ev.ctx.preprocessed,
-        .token_ids =
-            std::span<int32_t>(ev.request.token_ids_out + ev.ctx.token_count, output_capacity),
-        .token_count_out = &fragment_count,
-        .error_out = &err,
-    };
+struct dispatch_encode_raw_fragment_needle_subsequent {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &ctx) const noexcept {
+    encode_raw_fragment<true>(runtime_ev, ctx);
+    auto &ev = emel::text::tokenizer::detail::unwrap_runtime_event(runtime_ev);
+    ev.ctx.global_dummy_prefix_pending = false;
+  }
+};
 
-    ev.ctx.encode_accepted = ctx.encoder_any.process_event(encode_ev);
-    ev.ctx.encode_err_code = err;
-    ev.ctx.encode_token_count = fragment_count;
+struct dispatch_encode_raw_fragment_standard {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type &runtime_ev,
+                  context &ctx) const noexcept {
+    encode_raw_fragment<false>(runtime_ev, ctx);
   }
 };
 
@@ -327,7 +359,12 @@ inline constexpr append_bos append_bos{};
 inline constexpr append_sep append_sep{};
 inline constexpr append_eos append_eos{};
 inline constexpr append_fragment_token append_fragment_token{};
-inline constexpr dispatch_encode_raw_fragment dispatch_encode_raw_fragment{};
+inline constexpr dispatch_encode_raw_fragment_needle_first
+    dispatch_encode_raw_fragment_needle_first{};
+inline constexpr dispatch_encode_raw_fragment_needle_subsequent
+    dispatch_encode_raw_fragment_needle_subsequent{};
+inline constexpr dispatch_encode_raw_fragment_standard
+    dispatch_encode_raw_fragment_standard{};
 inline constexpr set_error_from_encode set_error_from_encode{};
 inline constexpr commit_encoded_fragment commit_encoded_fragment{};
 inline constexpr finalize finalize{};

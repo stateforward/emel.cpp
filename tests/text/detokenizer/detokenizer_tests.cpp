@@ -52,7 +52,7 @@ struct detokenizer_callback_recorder {
 
 bool on_detok_bind_done(
     void * owner,
-    const emel::text::detokenizer::events::binding_done &) {
+    const emel::text::detokenizer::events::binding_done &) noexcept {
   if (owner == nullptr) {
     return false;
   }
@@ -62,7 +62,7 @@ bool on_detok_bind_done(
 
 bool on_detok_bind_error(
     void * owner,
-    const emel::text::detokenizer::events::binding_error & ev) {
+    const emel::text::detokenizer::events::binding_error & ev) noexcept {
   if (owner == nullptr) {
     return false;
   }
@@ -74,7 +74,7 @@ bool on_detok_bind_error(
 
 bool on_detok_detokenize_done(
     void * owner,
-    const emel::text::detokenizer::events::detokenize_done & ev) {
+    const emel::text::detokenizer::events::detokenize_done & ev) noexcept {
   if (owner == nullptr) {
     return false;
   }
@@ -87,7 +87,7 @@ bool on_detok_detokenize_done(
 
 bool on_detok_detokenize_error(
     void * owner,
-    const emel::text::detokenizer::events::detokenize_error & ev) {
+    const emel::text::detokenizer::events::detokenize_error & ev) noexcept {
   if (owner == nullptr) {
     return false;
   }
@@ -509,4 +509,189 @@ TEST_CASE("detokenizer_action_and_guard_paths") {
   err = 0x7777;
   CHECK(emel::text::detokenizer::guard::bind_error_unknown{}(bind_ev));
   CHECK(emel::text::detokenizer::guard::detokenize_error_unknown{}(bad_detok));
+}
+
+TEST_CASE("detokenizer_accumulates_and_flushes_utf8_byte_tokens") {
+  auto & vocab = make_vocab();
+  const int32_t lead = add_token(vocab, "<0xE2>");
+  const int32_t continuation_one = add_token(vocab, "<0x82>");
+  const int32_t continuation_two = add_token(vocab, "<0xAC>");
+  const int32_t ok = detokenizer_error_code(emel::text::detokenizer::error::none);
+
+  emel::text::detokenizer::sm machine{};
+  int32_t bind_err = -1;
+  emel::text::detokenizer::event::bind bind_ev{vocab, bind_err};
+  CHECK(machine.process_event(bind_ev));
+  CHECK(bind_err == ok);
+
+  std::array<uint8_t, 4> pending = {};
+  std::array<char, 8> output = {};
+  size_t pending_input_length = 0;
+  for (const int32_t token : {lead, continuation_one, continuation_two}) {
+    CAPTURE(token);
+    size_t output_length = 99;
+    size_t pending_length = 99;
+    int32_t err = -1;
+    emel::text::detokenizer::event::detokenize ev{
+        token,
+        true,
+        pending.data(),
+        pending_input_length,
+        pending.size(),
+        output.data(),
+        output.size(),
+        output_length,
+        pending_length,
+        err,
+    };
+
+    CHECK(machine.process_event(ev));
+    CHECK(err == ok);
+    pending_input_length = pending_length;
+    if (token != continuation_two) {
+      CHECK(output_length == 0);
+      CHECK(pending_length == static_cast<size_t>(token == lead ? 1 : 2));
+    } else {
+      CHECK(output_length == 3);
+      CHECK(pending_length == 0);
+      CHECK(static_cast<uint8_t>(output[0]) == 0xE2u);
+      CHECK(static_cast<uint8_t>(output[1]) == 0x82u);
+      CHECK(static_cast<uint8_t>(output[2]) == 0xACu);
+    }
+  }
+}
+
+TEST_CASE("detokenizer_rejects_invalid_continuation_and_recovers") {
+  auto & vocab = make_vocab();
+  const int32_t bad_continuation = add_token(vocab, "<0x20>");
+  const int32_t plain = add_token(vocab, "A");
+  const int32_t ok = detokenizer_error_code(emel::text::detokenizer::error::none);
+  const int32_t invalid =
+      detokenizer_error_code(emel::text::detokenizer::error::invalid_request);
+
+  emel::text::detokenizer::sm machine{};
+  int32_t bind_err = -1;
+  emel::text::detokenizer::event::bind bind_ev{vocab, bind_err};
+  CHECK(machine.process_event(bind_ev));
+
+  std::array<uint8_t, 4> pending{0xE2u, 0x82u, 0u, 0u};
+  std::array<char, 8> output = {};
+  size_t output_length = 0;
+  size_t pending_length = 0;
+  int32_t err = ok;
+  emel::text::detokenizer::event::detokenize invalid_ev{
+      bad_continuation,
+      true,
+      pending.data(),
+      2,
+      pending.size(),
+      output.data(),
+      output.size(),
+      output_length,
+      pending_length,
+      err,
+  };
+
+  CHECK_FALSE(machine.process_event(invalid_ev));
+  CHECK(err == invalid);
+  CHECK(output_length == 0);
+  CHECK(pending_length == 3);
+
+  output_length = 0;
+  pending_length = 0;
+  err = invalid;
+  emel::text::detokenizer::event::detokenize recovered_ev{
+      plain,
+      true,
+      pending.data(),
+      0,
+      pending.size(),
+      output.data(),
+      output.size(),
+      output_length,
+      pending_length,
+      err,
+  };
+  CHECK(machine.process_event(recovered_ev));
+  CHECK(err == ok);
+  CHECK(output_length == 1);
+  CHECK(output[0] == 'A');
+}
+
+TEST_CASE("detokenizer_rebinds_after_terminal_states") {
+  auto & first_vocab = make_vocab();
+  const int32_t first_token = add_token(first_vocab, "A");
+  static emel::model::data::vocab second_vocab{};
+  second_vocab = {};
+  second_vocab.tokenizer_model_id = emel::model::data::tokenizer_model::PLAMO2;
+  second_vocab.tokenizer_pre_id = emel::model::data::tokenizer_pre::DEFAULT;
+  const int32_t second_token = add_token(second_vocab, "B");
+  const int32_t ok = detokenizer_error_code(emel::text::detokenizer::error::none);
+
+  emel::text::detokenizer::sm machine{};
+  int32_t bind_err = -1;
+  emel::text::detokenizer::event::bind first_bind{first_vocab, bind_err};
+  CHECK(machine.process_event(first_bind));
+
+  std::array<uint8_t, 4> pending = {};
+  std::array<char, 8> output = {};
+  size_t output_length = 0;
+  size_t pending_length = 0;
+  int32_t err = ok;
+  emel::text::detokenizer::event::detokenize first_detok{
+      first_token, true, pending.data(), 0, pending.size(), output.data(), output.size(),
+      output_length, pending_length, err};
+  CHECK(machine.process_event(first_detok));
+  CHECK(output[0] == 'A');
+
+  bind_err = -1;
+  emel::text::detokenizer::event::bind second_bind{second_vocab, bind_err};
+  CHECK(machine.process_event(second_bind));
+  CHECK(bind_err == ok);
+
+  output_length = 0;
+  pending_length = 0;
+  err = -1;
+  emel::text::detokenizer::event::detokenize second_detok{
+      second_token, true, pending.data(), 0, pending.size(), output.data(), output.size(),
+      output_length, pending_length, err};
+  CHECK(machine.process_event(second_detok));
+  CHECK(err == ok);
+  CHECK(output_length == 1);
+  CHECK(output[0] == 'B');
+}
+
+TEST_CASE("detokenizer_unexpected_events_transition_each_phase") {
+  namespace sml = stateforward::sml;
+  struct unknown_event {};
+  using test_sm = stateforward::sml::sm<emel::text::detokenizer::model,
+                                        stateforward::sml::testing>;
+  emel::text::detokenizer::action::context ctx{};
+  test_sm machine{ctx};
+
+  const auto expect_unexpected = [&machine](auto state) {
+    machine.set_current_states(state);
+    (void)machine.process_event(unknown_event{});
+    CHECK(machine.is(sml::state<emel::text::detokenizer::unexpected>));
+  };
+
+  expect_unexpected(sml::state<emel::text::detokenizer::binding>);
+  expect_unexpected(sml::state<emel::text::detokenizer::binding_decision>);
+  expect_unexpected(sml::state<emel::text::detokenizer::binding_done_decision>);
+  expect_unexpected(sml::state<emel::text::detokenizer::binding_error_decision>);
+  expect_unexpected(sml::state<emel::text::detokenizer::decoding>);
+  expect_unexpected(sml::state<emel::text::detokenizer::decode_token_validation>);
+  expect_unexpected(sml::state<emel::text::detokenizer::decode_piece_decision>);
+  expect_unexpected(sml::state<emel::text::detokenizer::decode_byte_capacity_decision>);
+  expect_unexpected(sml::state<emel::text::detokenizer::decode_byte_pending_decision>);
+  expect_unexpected(sml::state<emel::text::detokenizer::decode_byte_pending_write>);
+  expect_unexpected(sml::state<emel::text::detokenizer::decode_text_pending_decision>);
+  expect_unexpected(sml::state<emel::text::detokenizer::decode_text_pending_write>);
+  expect_unexpected(sml::state<emel::text::detokenizer::decode_text_write>);
+  expect_unexpected(sml::state<emel::text::detokenizer::decode_decision>);
+  expect_unexpected(sml::state<emel::text::detokenizer::detokenize_done_decision>);
+  expect_unexpected(sml::state<emel::text::detokenizer::detokenize_error_decision>);
+  expect_unexpected(sml::state<emel::text::detokenizer::done>);
+  expect_unexpected(sml::state<emel::text::detokenizer::errored>);
+  expect_unexpected(sml::state<emel::text::detokenizer::unexpected>);
 }

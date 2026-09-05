@@ -99,6 +99,11 @@ Individual gates live in `scripts/build_with_zig.sh`, `scripts/test_with_coverag
 `scripts/test_with_sanitizers.sh`, `scripts/fuzz_smoke.sh`, `scripts/lint_snapshot.sh`,
 and `scripts/bench.sh`.
 
+Repository build and gate scripts require a kernel-enforced aggregate process-tree memory
+envelope. Linux uses a verified systemd user scope capped at 50% of effective memory with swap
+disabled. These scripts intentionally fail closed on macOS because macOS provides no supported
+native aggregate descendant memory controller.
+
 ### Why Zig for builds
 
 Zig’s C/C++ toolchain gives us consistent, fast, cross-platform builds without forcing a full

@@ -216,7 +216,14 @@ struct attention_executor_bench_fixture {
       depformer_layer_offsets[index] = index * depformer_per_layer_cache;
     }
     if (lane_count > 1u) {
-      attention_lanes.emplace(lane_count - 1u);
+      const auto budget = emel::kernel::matmul::worker_pool::try_worker_budget(
+          lane_count - 1u);
+      if (!budget) {
+        std::fprintf(stderr, "invalid attention worker budget: %zu\n",
+                     lane_count - 1u);
+        std::exit(2);
+      }
+      attention_lanes.emplace(budget);
     }
     for (std::size_t index = 0u; index < input_embedding.size(); ++index) {
       input_embedding[index] =
@@ -388,7 +395,7 @@ struct attention_executor_bench_fixture {
   emel::kernel::sm kernel = {};
   emel::kernel::matmul::execution_policy matmul_policy;
   emel::kernel::matmul::sm matmul;
-  std::optional<emel::kernel::matmul::lane_pool> attention_lanes = {};
+  std::optional<emel::kernel::matmul::worker_pool> attention_lanes = {};
   std::unique_ptr<emel::speech::predictor::moshi::executor::sm> executor = {};
 };
 
@@ -445,55 +452,55 @@ std::filesystem::path personaplex_lm_model_path() {
 }
 
 void on_probe_done(void *owner,
-                   const emel::gguf::loader::events::probe_done &ev) {
+                   const emel::gguf::loader::events::probe_done &ev) noexcept {
   auto &fixture = *static_cast<lm_fixture *>(owner);
   fixture.gguf.probe_done = true;
   fixture.gguf.requirements = ev.requirements_out;
 }
 
 void on_probe_error(void *owner,
-                    const emel::gguf::loader::events::probe_error &ev) {
+                    const emel::gguf::loader::events::probe_error &ev) noexcept {
   auto &fixture = *static_cast<lm_fixture *>(owner);
   fixture.gguf.probe_error = true;
   fixture.gguf.err = ev.err;
 }
 
-void on_bind_done(void *owner, const emel::gguf::loader::events::bind_done &) {
+void on_bind_done(void *owner, const emel::gguf::loader::events::bind_done &) noexcept {
   static_cast<lm_fixture *>(owner)->gguf.bind_done = true;
 }
 
 void on_bind_error(void *owner,
-                   const emel::gguf::loader::events::bind_error &ev) {
+                   const emel::gguf::loader::events::bind_error &ev) noexcept {
   auto &fixture = *static_cast<lm_fixture *>(owner);
   fixture.gguf.bind_error = true;
   fixture.gguf.err = ev.err;
 }
 
 void on_parse_done(void *owner,
-                   const emel::gguf::loader::events::parse_done &) {
+                   const emel::gguf::loader::events::parse_done &) noexcept {
   static_cast<lm_fixture *>(owner)->gguf.parse_done = true;
 }
 
 void on_parse_error(void *owner,
-                    const emel::gguf::loader::events::parse_error &ev) {
+                    const emel::gguf::loader::events::parse_error &ev) noexcept {
   auto &fixture = *static_cast<lm_fixture *>(owner);
   fixture.gguf.parse_error = true;
   fixture.gguf.err = ev.err;
 }
 
-void on_load_done(void *owner, const emel::model::loader::events::load_done &) {
+void on_load_done(void *owner, const emel::model::loader::events::load_done &) noexcept {
   static_cast<lm_fixture *>(owner)->load.done = true;
 }
 
 void on_load_error(void *owner,
-                   const emel::model::loader::events::load_error &ev) {
+                   const emel::model::loader::events::load_error &ev) noexcept {
   auto &fixture = *static_cast<lm_fixture *>(owner);
   fixture.load.error = true;
   fixture.load.err = ev.err;
 }
 
 void on_map_done(void *owner,
-                 const emel::io::mmap::events::map_tensor_done &ev) {
+                 const emel::io::mmap::events::map_tensor_done &ev) noexcept {
   auto &mapping = *static_cast<mapped_model *>(owner);
   mapping.map_done = true;
   mapping.handle = ev.handle;
@@ -502,19 +509,19 @@ void on_map_done(void *owner,
 }
 
 void on_map_error(void *owner,
-                  const emel::io::mmap::events::map_tensor_error &ev) {
+                  const emel::io::mmap::events::map_tensor_error &ev) noexcept {
   auto &mapping = *static_cast<mapped_model *>(owner);
   mapping.map_error = true;
   mapping.err = ev.err;
 }
 
 void on_release_done(void *owner,
-                     const emel::io::mmap::events::release_mapping_done &) {
+                     const emel::io::mmap::events::release_mapping_done &) noexcept {
   static_cast<mapped_model *>(owner)->release_done = true;
 }
 
 void on_release_error(void *owner,
-                      const emel::io::mmap::events::release_mapping_error &ev) {
+                      const emel::io::mmap::events::release_mapping_error &ev) noexcept {
   auto &mapping = *static_cast<mapped_model *>(owner);
   mapping.release_error = true;
   mapping.err = ev.err;
@@ -606,66 +613,70 @@ bool prebind_gguf_storage(lm_fixture &fixture) {
   return true;
 }
 
-emel::error::type run_parse_model(void *owner,
-                                  const emel::model::loader::event::load &req) {
-  auto &fixture = *static_cast<lm_fixture *>(owner);
-  if (req.file_image == nullptr || req.file_size == 0u) {
-    return emel::error::cast(emel::model::loader::error::invalid_request);
-  }
-  const std::span<const uint8_t> file_image{
-      static_cast<const uint8_t *>(req.file_image),
-      static_cast<size_t>(req.file_size),
-  };
+emel::error::type run_parse_model(
+    void *owner, const emel::model::loader::event::load &req) noexcept {
+  try {
+    auto &fixture = *static_cast<lm_fixture *>(owner);
+    if (req.file_image == nullptr || req.file_size == 0u) {
+      return emel::error::cast(emel::model::loader::error::invalid_request);
+    }
+    const std::span<const uint8_t> file_image{
+        static_cast<const uint8_t *>(req.file_image),
+        static_cast<size_t>(req.file_size),
+    };
 
-  fixture.gguf = {};
-  const emel::gguf::loader::event::bind_done_fn bind_done_cb{&fixture,
-                                                             on_bind_done};
-  const emel::gguf::loader::event::bind_error_fn bind_error_cb{&fixture,
-                                                               on_bind_error};
-  const emel::gguf::loader::event::bind_storage bind_ev{
-      std::span<uint8_t>{fixture.kv_arena},
-      std::span<emel::gguf::loader::kv_entry>{fixture.kv_entries},
-      std::span<emel::model::data::tensor_record>{req.model_data.tensors.data(),
-                                                  fixture.gguf_tensor_count},
-      bind_done_cb,
-      bind_error_cb,
-  };
-  if (!fixture.gguf_loader.process_event(bind_ev) || !fixture.gguf.bind_done ||
-      fixture.gguf.bind_error) {
-    return emel::error::cast(emel::model::loader::error::model_invalid);
-  }
+    fixture.gguf = {};
+    const emel::gguf::loader::event::bind_done_fn bind_done_cb{&fixture,
+                                                               on_bind_done};
+    const emel::gguf::loader::event::bind_error_fn bind_error_cb{&fixture,
+                                                                 on_bind_error};
+    const emel::gguf::loader::event::bind_storage bind_ev{
+        std::span<uint8_t>{fixture.kv_arena},
+        std::span<emel::gguf::loader::kv_entry>{fixture.kv_entries},
+        std::span<emel::model::data::tensor_record>{req.model_data.tensors.data(),
+                                                    fixture.gguf_tensor_count},
+        bind_done_cb,
+        bind_error_cb,
+    };
+    if (!fixture.gguf_loader.process_event(bind_ev) || !fixture.gguf.bind_done ||
+        fixture.gguf.bind_error) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
 
-  fixture.gguf = {};
-  const emel::gguf::loader::event::parse_done_fn parse_done_cb{&fixture,
-                                                               on_parse_done};
-  const emel::gguf::loader::event::parse_error_fn parse_error_cb{
-      &fixture, on_parse_error};
-  const emel::gguf::loader::event::parse parse_ev{file_image, parse_done_cb,
-                                                  parse_error_cb};
-  if (!fixture.gguf_loader.process_event(parse_ev) ||
-      !fixture.gguf.parse_done || fixture.gguf.parse_error) {
-    return emel::error::cast(emel::model::loader::error::model_invalid);
-  }
+    fixture.gguf = {};
+    const emel::gguf::loader::event::parse_done_fn parse_done_cb{&fixture,
+                                                                 on_parse_done};
+    const emel::gguf::loader::event::parse_error_fn parse_error_cb{
+        &fixture, on_parse_error};
+    const emel::gguf::loader::event::parse parse_ev{file_image, parse_done_cb,
+                                                    parse_error_cb};
+    if (!fixture.gguf_loader.process_event(parse_ev) ||
+        !fixture.gguf.parse_done || fixture.gguf.parse_error) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
 
-  req.model_data.n_tensors = fixture.gguf_tensor_count;
-  if (!copy_tensor_names(file_image, req.model_data)) {
+    req.model_data.n_tensors = fixture.gguf_tensor_count;
+    if (!copy_tensor_names(file_image, req.model_data)) {
+      return emel::error::cast(emel::model::loader::error::backend_error);
+    }
+
+    const emel::model::detail::kv_binding binding{
+        .arena = std::span<const uint8_t>{fixture.kv_arena.data(),
+                                          fixture.kv_arena.size()},
+        .entries =
+            std::span<const emel::gguf::loader::kv_entry>{
+                fixture.kv_entries.data(), fixture.kv_entries.size()},
+    };
+    return emel::model::detail::load_hparams_from_gguf(binding, req.model_data)
+               ? emel::error::cast(emel::model::loader::error::none)
+               : emel::error::cast(emel::model::loader::error::model_invalid);
+  } catch (...) {
     return emel::error::cast(emel::model::loader::error::backend_error);
   }
-
-  const emel::model::detail::kv_binding binding{
-      .arena = std::span<const uint8_t>{fixture.kv_arena.data(),
-                                        fixture.kv_arena.size()},
-      .entries =
-          std::span<const emel::gguf::loader::kv_entry>{
-              fixture.kv_entries.data(), fixture.kv_entries.size()},
-  };
-  return emel::model::detail::load_hparams_from_gguf(binding, req.model_data)
-             ? emel::error::cast(emel::model::loader::error::none)
-             : emel::error::cast(emel::model::loader::error::model_invalid);
 }
 
 emel::error::type run_map_layers(void *,
-                                 const emel::model::loader::event::load &req) {
+                                 const emel::model::loader::event::load &req) noexcept {
   req.model_data.n_layers = req.model_data.params.n_layer;
   return req.model_data.n_layers > 0
              ? emel::error::cast(emel::model::loader::error::none)
@@ -673,7 +684,7 @@ emel::error::type run_map_layers(void *,
 }
 
 emel::error::type
-run_validate_structure(void *, const emel::model::loader::event::load &req) {
+run_validate_structure(void *, const emel::model::loader::event::load &req) noexcept {
   if (req.model_data.n_tensors == 0u ||
       req.model_data.moshi_component_id !=
           emel::model::data::moshi_component::lm ||
@@ -685,7 +696,7 @@ run_validate_structure(void *, const emel::model::loader::event::load &req) {
 }
 
 emel::error::type
-run_validate_architecture(void *, const emel::model::loader::event::load &req) {
+run_validate_architecture(void *, const emel::model::loader::event::load &req) noexcept {
   return emel::model::validate_execution_contract(req.model_data);
 }
 

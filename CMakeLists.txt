@@ -19,6 +19,7 @@ else()
 endif()
 
 option(EMEL_ENABLE_TESTS "Build tests" ON)
+option(EMEL_ENABLE_NEEDLE_EVAL "Build maintained Needle heldout evaluator" ON)
 option(EMEL_ENABLE_FUZZ "Build fuzz targets" OFF)
 option(EMEL_ENABLE_AARCH64_HOST_FEATURES
   "Enable host-tuned AArch64 compile flags for EMEL-owned C++ code"
@@ -127,6 +128,7 @@ add_library(emel STATIC
   src/emel/model/data.cpp
   src/emel/model/generation/any.cpp
   src/emel/text/unicode_data.cpp
+  src/emel/model/needle/request/sm.cpp
   src/emel/model/llama/detail.cpp
   src/emel/model/qwen3/detail.cpp
   src/emel/model/lfm2/detail.cpp
@@ -150,6 +152,11 @@ target_link_libraries(emel
     emel_core
 )
 
+if(EMEL_ENABLE_NEEDLE_EVAL)
+  set(EMEL_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+  add_subdirectory(tools/needle_eval needle_eval)
+endif()
+
 
 if(EMEL_ENABLE_TESTS)
   include(CTest)
@@ -165,6 +172,8 @@ if(EMEL_ENABLE_TESTS)
     tests/model/fixture_manifest_tests.cpp
     tests/model/loader/lifecycle_tests.cpp
     tests/model/moshi/binding_tests.cpp
+    tests/model/needle/binding_tests.cpp
+    tests/model/needle/graph_parity_tests.cpp
     tests/gbnf/lexer_tests.cpp
     tests/gbnf/parser_tests.cpp
     tests/gbnf/sampler_tests.cpp
@@ -222,6 +231,13 @@ if(EMEL_ENABLE_TESTS)
     tests/kernel/attention_tests.cpp
     tests/kernel/f32_matvec_tests.cpp
     tests/kernel/matmul_tests.cpp
+    tests/kernel/cq_tests.cpp
+    tests/kernel/zcrms_tests.cpp
+    tests/kernel/rope_tests.cpp
+    tests/kernel/swa_tests.cpp
+    tests/kernel/hadamard_tests.cpp
+    tests/kernel/engram_tests.cpp
+    tests/kernel/mhc_tests.cpp
     tests/kernel/x86_64_tests.cpp
     # Legacy processor tests target pre-cutover API shape and are disabled until migrated.
     # Keep them out of gate builds during the hard cutover.
@@ -249,6 +265,7 @@ if(EMEL_ENABLE_TESTS)
   )
 
   list(APPEND EMEL_TEST_SOURCES
+    tests/cact/loader_tests.cpp
     tests/gguf/loader/lifecycle_tests.cpp
     tests/io/loader/lifecycle_tests.cpp
     tests/io/mmap/advise_tests.cpp
@@ -284,6 +301,7 @@ if(EMEL_ENABLE_TESTS)
     tests/text/tokenizer/tokenizer_tests.cpp
     tests/text/tokenizer/tokenizer_parity_tests.cpp
     tests/text/tokenizer/tokenizer_action_guard_tests.cpp
+    tests/text/tokenizer/needle_loader_tests.cpp
   )
 
   set(EMEL_TEST_SHARDS "" CACHE STRING "Comma or semicolon separated doctest shards to compile")
@@ -298,11 +316,15 @@ if(EMEL_ENABLE_TESTS)
       set(keep_test_source FALSE)
       foreach(test_shard IN LISTS EMEL_TEST_SELECTED_SHARDS)
         if((test_shard STREQUAL "model_and_batch" AND
-              test_source MATCHES "^tests/(model|gguf|gbnf|batch|io)/") OR
+              test_source MATCHES "^tests/(model|gguf|gbnf|batch|io|cact)/") OR
            (test_shard STREQUAL "io" AND
               test_source MATCHES "^tests/io/") OR
-           (test_shard STREQUAL "generator_and_runtime" AND
-              test_source MATCHES "^tests/(text/generator|embeddings|logits|token)/") OR
+           (test_shard STREQUAL "text_generator" AND
+              test_source MATCHES "^tests/text/generator/") OR
+           (test_shard STREQUAL "embeddings" AND
+              test_source MATCHES "^tests/embeddings/") OR
+           (test_shard STREQUAL "logits_and_token" AND
+              test_source MATCHES "^tests/(logits|token)/") OR
            (test_shard STREQUAL "diarization" AND
               test_source MATCHES "^tests/diarization/") OR
            (test_shard STREQUAL "speech" AND
@@ -378,15 +400,23 @@ if(EMEL_ENABLE_TESTS)
 
   emel_add_doctest_shard(
     model_and_batch
-    "*tests/model/*,*tests/gguf/*,*tests/gbnf/*,*tests/batch/*,*tests/io/*"
+    "*tests/model/*,*tests/gguf/*,*tests/gbnf/*,*tests/batch/*,*tests/io/*,*tests/cact/*"
   )
   emel_add_doctest_shard(
     io
     "*tests/io/*"
   )
   emel_add_doctest_shard(
-    generator_and_runtime
-    "*tests/text/generator/*,*tests/embeddings/*,*tests/logits/*,*tests/token/*"
+    text_generator
+    "*tests/text/generator/*"
+  )
+  emel_add_doctest_shard(
+    embeddings
+    "*tests/embeddings/*"
+  )
+  emel_add_doctest_shard(
+    logits_and_token
+    "*tests/logits/*,*tests/token/*"
   )
   emel_add_doctest_shard(
     diarization

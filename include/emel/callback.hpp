@@ -12,7 +12,7 @@ struct callback;
 template <class R, class... Args>
 struct callback<R(Args...)> {
   using result_type = R;
-  using thunk_fn = R (*)(void *, Args...);
+  using thunk_fn = R (*)(void *, Args...) noexcept;
 
   void * object = nullptr;
   thunk_fn thunk = nullptr;
@@ -44,10 +44,11 @@ struct callback<R(Args...)> {
   }
 
   template <auto Fn>
+    requires(std::is_nothrow_invocable_r_v<R, decltype(Fn), Args...>)
   static constexpr callback from() noexcept {
     return callback{
       nullptr,
-      [](void *, Args... args) -> R {
+      [](void *, Args... args) noexcept -> R {
         if constexpr (std::is_void_v<R>) {
           Fn(std::forward<Args>(args)...);
           return;
@@ -59,11 +60,12 @@ struct callback<R(Args...)> {
   }
 
   template <class T, auto MemFn>
-    requires(std::is_member_function_pointer_v<decltype(MemFn)>)
+    requires(std::is_member_function_pointer_v<decltype(MemFn)> &&
+             std::is_nothrow_invocable_r_v<R, decltype(MemFn), T &, Args...>)
   static constexpr callback from(T * obj) noexcept {
     return callback{
       obj,
-      [](void * ptr, Args... args) -> R {
+      [](void * ptr, Args... args) noexcept -> R {
         if constexpr (std::is_void_v<R>) {
           (static_cast<T *>(ptr)->*MemFn)(std::forward<Args>(args)...);
           return;
@@ -75,16 +77,19 @@ struct callback<R(Args...)> {
   }
 
   template <class T, auto MemFn>
-    requires(std::is_member_function_pointer_v<decltype(MemFn)>)
+    requires(std::is_member_function_pointer_v<decltype(MemFn)> &&
+             std::is_nothrow_invocable_r_v<R, decltype(MemFn), const T &,
+                                           Args...>)
   static constexpr callback from(const T * obj) noexcept {
     return callback{
       const_cast<T *>(obj),
-      [](void * ptr, Args... args) -> R {
+      [](void * ptr, Args... args) noexcept -> R {
         if constexpr (std::is_void_v<R>) {
           (static_cast<const T *>(ptr)->*MemFn)(std::forward<Args>(args)...);
           return;
         } else {
-          return (static_cast<const T *>(ptr)->*MemFn)(std::forward<Args>(args)...);
+          return (static_cast<const T *>(ptr)->*MemFn)(
+              std::forward<Args>(args)...);
         }
       },
     };
@@ -92,11 +97,11 @@ struct callback<R(Args...)> {
 
   template <class T, auto Fn>
     requires(!std::is_member_function_pointer_v<decltype(Fn)> &&
-             std::is_invocable_r_v<R, decltype(Fn), T &, Args...>)
+             std::is_nothrow_invocable_r_v<R, decltype(Fn), T &, Args...>)
   static constexpr callback from(T * obj) noexcept {
     return callback{
       obj,
-      [](void * ptr, Args... args) -> R {
+      [](void * ptr, Args... args) noexcept -> R {
         if constexpr (std::is_void_v<R>) {
           Fn(*static_cast<T *>(ptr), std::forward<Args>(args)...);
           return;
@@ -109,16 +114,18 @@ struct callback<R(Args...)> {
 
   template <class T, auto Fn>
     requires(!std::is_member_function_pointer_v<decltype(Fn)> &&
-             std::is_invocable_r_v<R, decltype(Fn), const T &, Args...>)
+             std::is_nothrow_invocable_r_v<R, decltype(Fn), const T &,
+                                           Args...>)
   static constexpr callback from(const T * obj) noexcept {
     return callback{
       const_cast<T *>(obj),
-      [](void * ptr, Args... args) -> R {
+      [](void * ptr, Args... args) noexcept -> R {
         if constexpr (std::is_void_v<R>) {
           Fn(*static_cast<const T *>(ptr), std::forward<Args>(args)...);
           return;
         } else {
-          return Fn(*static_cast<const T *>(ptr), std::forward<Args>(args)...);
+          return Fn(*static_cast<const T *>(ptr),
+                    std::forward<Args>(args)...);
         }
       },
     };
@@ -126,14 +133,15 @@ struct callback<R(Args...)> {
 
   template <class T, auto Fn>
     requires(!std::is_member_function_pointer_v<decltype(Fn)> &&
-             std::is_invocable_r_v<R, decltype(Fn), T &, Args...>)
+             std::is_nothrow_invocable_r_v<R, decltype(Fn), T &, Args...>)
   static constexpr callback from(T & obj) noexcept {
     return from<T, Fn>(&obj);
   }
 
   template <class T, auto Fn>
     requires(!std::is_member_function_pointer_v<decltype(Fn)> &&
-             std::is_invocable_r_v<R, decltype(Fn), const T &, Args...>)
+             std::is_nothrow_invocable_r_v<R, decltype(Fn), const T &,
+                                           Args...>)
   static constexpr callback from(const T & obj) noexcept {
     return from<T, Fn>(&obj);
   }

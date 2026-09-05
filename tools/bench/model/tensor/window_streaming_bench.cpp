@@ -185,48 +185,48 @@ struct emel_fixture {
 };
 
 void on_probe_done(void *owner,
-                   const emel::gguf::loader::events::probe_done &ev) {
+                   const emel::gguf::loader::events::probe_done &ev) noexcept {
   auto &fixture = *static_cast<emel_fixture *>(owner);
   fixture.gguf.probe_done = true;
   fixture.gguf.requirements = ev.requirements_out;
 }
 
 void on_probe_error(void *owner,
-                    const emel::gguf::loader::events::probe_error &ev) {
+                    const emel::gguf::loader::events::probe_error &ev) noexcept {
   auto &fixture = *static_cast<emel_fixture *>(owner);
   fixture.gguf.probe_error = true;
   fixture.gguf.err = ev.err;
 }
 
-void on_bind_done(void *owner, const emel::gguf::loader::events::bind_done &) {
+void on_bind_done(void *owner, const emel::gguf::loader::events::bind_done &) noexcept {
   static_cast<emel_fixture *>(owner)->gguf.bind_done = true;
 }
 
 void on_bind_error(void *owner,
-                   const emel::gguf::loader::events::bind_error &ev) {
+                   const emel::gguf::loader::events::bind_error &ev) noexcept {
   auto &fixture = *static_cast<emel_fixture *>(owner);
   fixture.gguf.bind_error = true;
   fixture.gguf.err = ev.err;
 }
 
 void on_parse_done(void *owner,
-                   const emel::gguf::loader::events::parse_done &) {
+                   const emel::gguf::loader::events::parse_done &) noexcept {
   static_cast<emel_fixture *>(owner)->gguf.parse_done = true;
 }
 
 void on_parse_error(void *owner,
-                    const emel::gguf::loader::events::parse_error &ev) {
+                    const emel::gguf::loader::events::parse_error &ev) noexcept {
   auto &fixture = *static_cast<emel_fixture *>(owner);
   fixture.gguf.parse_error = true;
   fixture.gguf.err = ev.err;
 }
 
-void on_load_done(void *owner, const emel::model::loader::events::load_done &) {
+void on_load_done(void *owner, const emel::model::loader::events::load_done &) noexcept {
   static_cast<emel_fixture *>(owner)->load.done = true;
 }
 
 void on_load_error(void *owner,
-                   const emel::model::loader::events::load_error &ev) {
+                   const emel::model::loader::events::load_error &ev) noexcept {
   auto &fixture = *static_cast<emel_fixture *>(owner);
   fixture.load.error = true;
   fixture.load.err = ev.err;
@@ -288,69 +288,73 @@ bool prebind_gguf_storage(emel_fixture &fixture,
   return true;
 }
 
-emel::error::type run_parse_model(void *owner,
-                                  const emel::model::loader::event::load &req) {
-  auto &fixture = *static_cast<emel_fixture *>(owner);
-  if (req.file_image == nullptr || req.file_size == 0u) {
-    return emel::error::cast(emel::model::loader::error::invalid_request);
-  }
-  const std::span<const uint8_t> file_image{
-      static_cast<const uint8_t *>(req.file_image),
-      static_cast<size_t>(req.file_size),
-  };
+emel::error::type run_parse_model(
+    void *owner, const emel::model::loader::event::load &req) noexcept {
+  try {
+    auto &fixture = *static_cast<emel_fixture *>(owner);
+    if (req.file_image == nullptr || req.file_size == 0u) {
+      return emel::error::cast(emel::model::loader::error::invalid_request);
+    }
+    const std::span<const uint8_t> file_image{
+        static_cast<const uint8_t *>(req.file_image),
+        static_cast<size_t>(req.file_size),
+    };
 
-  fixture.gguf = {};
-  const emel::gguf::loader::event::bind_done_fn bind_done_cb{&fixture,
-                                                             on_bind_done};
-  const emel::gguf::loader::event::bind_error_fn bind_error_cb{&fixture,
-                                                               on_bind_error};
-  const emel::gguf::loader::event::bind_storage bind_ev{
-      std::span<uint8_t>{fixture.kv_arena},
-      std::span<emel::gguf::loader::kv_entry>{fixture.kv_entries},
-      std::span<emel::model::data::tensor_record>{req.model_data.tensors.data(),
-                                                  fixture.gguf_tensor_count},
-      bind_done_cb,
-      bind_error_cb,
-  };
-  if (!fixture.gguf_loader.process_event(bind_ev) || !fixture.gguf.bind_done ||
-      fixture.gguf.bind_error) {
-    return emel::error::cast(emel::model::loader::error::model_invalid);
-  }
+    fixture.gguf = {};
+    const emel::gguf::loader::event::bind_done_fn bind_done_cb{&fixture,
+                                                               on_bind_done};
+    const emel::gguf::loader::event::bind_error_fn bind_error_cb{&fixture,
+                                                                 on_bind_error};
+    const emel::gguf::loader::event::bind_storage bind_ev{
+        std::span<uint8_t>{fixture.kv_arena},
+        std::span<emel::gguf::loader::kv_entry>{fixture.kv_entries},
+        std::span<emel::model::data::tensor_record>{req.model_data.tensors.data(),
+                                                    fixture.gguf_tensor_count},
+        bind_done_cb,
+        bind_error_cb,
+    };
+    if (!fixture.gguf_loader.process_event(bind_ev) || !fixture.gguf.bind_done ||
+        fixture.gguf.bind_error) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
 
-  fixture.gguf = {};
-  const emel::gguf::loader::event::parse_done_fn parse_done_cb{&fixture,
-                                                               on_parse_done};
-  const emel::gguf::loader::event::parse_error_fn parse_error_cb{
-      &fixture, on_parse_error};
-  const emel::gguf::loader::event::parse parse_ev{
-      file_image,
-      parse_done_cb,
-      parse_error_cb,
-  };
-  if (!fixture.gguf_loader.process_event(parse_ev) ||
-      !fixture.gguf.parse_done || fixture.gguf.parse_error) {
-    return emel::error::cast(emel::model::loader::error::model_invalid);
-  }
+    fixture.gguf = {};
+    const emel::gguf::loader::event::parse_done_fn parse_done_cb{&fixture,
+                                                                 on_parse_done};
+    const emel::gguf::loader::event::parse_error_fn parse_error_cb{
+        &fixture, on_parse_error};
+    const emel::gguf::loader::event::parse parse_ev{
+        file_image,
+        parse_done_cb,
+        parse_error_cb,
+    };
+    if (!fixture.gguf_loader.process_event(parse_ev) ||
+        !fixture.gguf.parse_done || fixture.gguf.parse_error) {
+      return emel::error::cast(emel::model::loader::error::model_invalid);
+    }
 
-  req.model_data.n_tensors = fixture.gguf_tensor_count;
-  if (!copy_tensor_names(file_image, req.model_data)) {
+    req.model_data.n_tensors = fixture.gguf_tensor_count;
+    if (!copy_tensor_names(file_image, req.model_data)) {
+      return emel::error::cast(emel::model::loader::error::backend_error);
+    }
+
+    const emel::model::detail::kv_binding binding{
+        .arena = std::span<const uint8_t>{fixture.kv_arena.data(),
+                                          fixture.kv_arena.size()},
+        .entries =
+            std::span<const emel::gguf::loader::kv_entry>{
+                fixture.kv_entries.data(), fixture.kv_entries.size()},
+    };
+    return emel::model::detail::load_hparams_from_gguf(binding, req.model_data)
+               ? emel::error::cast(emel::model::loader::error::none)
+               : emel::error::cast(emel::model::loader::error::model_invalid);
+  } catch (...) {
     return emel::error::cast(emel::model::loader::error::backend_error);
   }
-
-  const emel::model::detail::kv_binding binding{
-      .arena = std::span<const uint8_t>{fixture.kv_arena.data(),
-                                        fixture.kv_arena.size()},
-      .entries =
-          std::span<const emel::gguf::loader::kv_entry>{
-              fixture.kv_entries.data(), fixture.kv_entries.size()},
-  };
-  return emel::model::detail::load_hparams_from_gguf(binding, req.model_data)
-             ? emel::error::cast(emel::model::loader::error::none)
-             : emel::error::cast(emel::model::loader::error::model_invalid);
 }
 
 emel::error::type run_map_layers(void *,
-                                 const emel::model::loader::event::load &req) {
+                                 const emel::model::loader::event::load &req) noexcept {
   int32_t max_block_index = -1;
   for (uint32_t i = 0u; i < req.model_data.n_tensors; ++i) {
     int32_t block_index = -1;
@@ -374,7 +378,7 @@ emel::error::type run_map_layers(void *,
 }
 
 emel::error::type
-run_validate_structure(void *, const emel::model::loader::event::load &req) {
+run_validate_structure(void *, const emel::model::loader::event::load &req) noexcept {
   if (req.model_data.n_tensors == 0u || req.model_data.n_layers <= 0 ||
       req.model_data.weights_data == nullptr ||
       req.model_data.weights_size == 0u) {
@@ -384,7 +388,7 @@ run_validate_structure(void *, const emel::model::loader::event::load &req) {
 }
 
 emel::error::type
-run_validate_architecture(void *, const emel::model::loader::event::load &req) {
+run_validate_architecture(void *, const emel::model::loader::event::load &req) noexcept {
   return emel::model::validate_execution_contract(req.model_data);
 }
 
@@ -675,24 +679,24 @@ struct emel_session {
       formatter_binding = {};
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
-  emel::kernel::matmul::lane_pool parallel_matmul_lanes = {};
+  emel::kernel::matmul::worker_pool parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   initialize_capture initialize = {};
   generation_capture generation = {};
 };
 
 void on_initialize_done(
-    void *owner, const emel::text::generator::events::initialize_done &) {
+    void *owner, const emel::text::generator::events::initialize_done &) noexcept {
   static_cast<emel_session *>(owner)->initialize.done = true;
 }
 
 void on_initialize_error(
-    void *owner, const emel::text::generator::events::initialize_error &) {
+    void *owner, const emel::text::generator::events::initialize_error &) noexcept {
   static_cast<emel_session *>(owner)->initialize.error = true;
 }
 
 void on_generation_done(
-    void *owner, const emel::text::generator::events::generation_done &ev) {
+    void *owner, const emel::text::generator::events::generation_done &ev) noexcept {
   auto &session = *static_cast<emel_session *>(owner);
   session.generation.done = true;
   session.generation.tokens_generated = ev.tokens_generated;
@@ -700,7 +704,7 @@ void on_generation_done(
 }
 
 void on_generation_error(
-    void *owner, const emel::text::generator::events::generation_error &ev) {
+    void *owner, const emel::text::generator::events::generation_error &ev) noexcept {
   auto &session = *static_cast<emel_session *>(owner);
   session.generation.error = true;
   session.generation.err = ev.err;

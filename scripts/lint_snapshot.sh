@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/build_jobs.sh
+source "$ROOT_DIR/scripts/build_jobs.sh"
+
 if ! command -v clang-format >/dev/null 2>&1; then
   echo "error: required tool missing: clang-format" >&2
   exit 1
@@ -10,7 +14,6 @@ if ! command -v git >/dev/null 2>&1; then
   exit 1
 fi
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASELINE="$ROOT_DIR/snapshots/lint/clang_format.txt"
 CURRENT="$(mktemp)"
 trap 'rm -f "$CURRENT"' EXIT

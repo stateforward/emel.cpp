@@ -11,6 +11,10 @@ endif()
 set(EMEL_BENCH_SUITE_FILTER "" CACHE STRING "Build only one bench_runner suite")
 set(REF_IMPL_REPOSITORY "https://github.com/ggml-org/llama.cpp.git" CACHE STRING "")
 set(REF_IMPL_REF "" CACHE STRING "")
+set(EMEL_BENCH_NEEDLE_PYTHON "" CACHE FILEPATH
+    "Python executable for the live Cactus/libneedle needle_graph reference")
+set(EMEL_BENCH_NEEDLE_ROOT "" CACHE PATH
+    "Needle Python package root for the live Cactus/libneedle reference")
 set(EMEL_BENCH_NEEDS_LLAMA ON)
 if(NOT EMEL_BENCH_SUITE_FILTER STREQUAL "")
   set(EMEL_BENCH_NEEDS_LLAMA OFF)
@@ -432,6 +436,43 @@ add_bench_runner_suite(parallel_matmul text/generator/parallel_matmul_bench.cpp
                        EMEL_BENCH_ENABLE_PARALLEL_MATMUL)
 add_bench_runner_suite(weight_streaming model/tensor/window_streaming_bench.cpp
                        EMEL_BENCH_ENABLE_WEIGHT_STREAMING)
+add_bench_runner_suite(needle_graph model/needle/graph_bench.cpp
+                       EMEL_BENCH_ENABLE_NEEDLE_GRAPH)
+if(TARGET bench_runner_suite_needle_graph)
+  target_sources(bench_runner_suite_needle_graph PRIVATE
+                 "${CMAKE_CURRENT_SOURCE_DIR}/../../src/emel/model/needle/request/sm.cpp")
+endif()
+if(EMEL_BENCH_SUITE_FILTER STREQUAL "needle_graph")
+  if(EMEL_BENCH_NEEDLE_PYTHON STREQUAL "" AND
+     DEFINED ENV{EMEL_BENCH_NEEDLE_PYTHON})
+    set(EMEL_BENCH_NEEDLE_PYTHON "$ENV{EMEL_BENCH_NEEDLE_PYTHON}" CACHE FILEPATH "" FORCE)
+  endif()
+  if(EMEL_BENCH_NEEDLE_ROOT STREQUAL "" AND
+     DEFINED ENV{EMEL_BENCH_NEEDLE_ROOT})
+    set(EMEL_BENCH_NEEDLE_ROOT "$ENV{EMEL_BENCH_NEEDLE_ROOT}" CACHE PATH "" FORCE)
+  endif()
+endif()
+
+add_executable(needle_authenticated_exec
+  ${CMAKE_CURRENT_SOURCE_DIR}/needle_authenticated_exec.cpp
+)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_compile_definitions(needle_authenticated_exec
+    PRIVATE
+      _GNU_SOURCE
+  )
+endif()
+
+add_executable(needle_authenticated_exec_tests
+  ${CMAKE_CURRENT_SOURCE_DIR}/needle_authenticated_exec.cpp
+)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_compile_definitions(needle_authenticated_exec_tests
+    PRIVATE
+      _GNU_SOURCE
+      EMEL_AUTHENTICATED_EXEC_TESTING=1
+  )
+endif()
 add_bench_runner_suite(tokenizer_preprocessor_bpe text/tokenizer/preprocessor/bpe_bench.cpp
                        EMEL_BENCH_ENABLE_TOKENIZER_PREPROCESSOR_BPE)
 add_bench_runner_suite(tokenizer_preprocessor_spm text/tokenizer/preprocessor/spm_bench.cpp
@@ -572,7 +613,7 @@ add_executable(bench_runner_tests
   ${CMAKE_CURRENT_SOURCE_DIR}/bench_runner_registry.cpp
 )
 
-add_dependencies(bench_runner_tests bench_runner)
+add_dependencies(bench_runner_tests bench_runner needle_authenticated_exec_tests)
 
 target_include_directories(bench_runner_tests
   PRIVATE
@@ -583,6 +624,7 @@ target_compile_definitions(bench_runner_tests
   PRIVATE
     BENCH_REPO_ROOT=\"${EMEL_ROOT}\"
     BENCH_RUNNER_BINARY_PATH=\"$<TARGET_FILE:bench_runner>\"
+    BENCH_NEEDLE_AUTHENTICATED_EXEC_TEST_PATH="$<TARGET_FILE:needle_authenticated_exec_tests>"
 )
 
 enable_testing()
@@ -717,6 +759,14 @@ target_compile_definitions(quality_gates_tests
   PRIVATE
     BENCH_REPO_ROOT=\"${EMEL_ROOT}\"
 )
+
+if(TARGET emel_needle_eval)
+  add_dependencies(quality_gates_tests emel_needle_eval)
+  target_compile_definitions(quality_gates_tests
+    PRIVATE
+      BENCH_NEEDLE_EVAL_BINARY="$<TARGET_FILE:emel_needle_eval>"
+  )
+endif()
 
 add_test(
   NAME quality_gates_tests

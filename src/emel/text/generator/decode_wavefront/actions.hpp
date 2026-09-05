@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <utility>
 
 #include "emel/graph/sm.hpp"
 #include "emel/text/generator/decode_wavefront/context.hpp"
@@ -56,36 +57,42 @@ struct effect_dispatch_lane {
   }
 };
 
-struct effect_dispatch_parallel_lanes {
-  void operator()(const event::run & ev, context & ctx) const noexcept {
-    for (auto & lane : ev.lanes) {
-      lane.accepted = false;
-    }
+template <size_t lane_index>
+auto effect_make_parallel_lane_task(
+    const event::run & ev,
+    emel::policy::fork_join_start_gate & gate) noexcept {
+  return [&lane = ev.lanes[lane_index], &gate]() noexcept {
+    gate.arrive_and_wait();
+    const emel::graph::event::compute_reserved reserved_compute{lane.compute};
+    lane.accepted = lane.graph.process_event(reserved_compute);
+  };
+}
 
-    // Fork/join over the already-selected lane group. Submission failure leaves
-    // the lane rejected; the explicit post-join guards route that outcome.
-    lane_pool::join_group group{};
+template <size_t... lane_indices>
+size_t effect_submit_parallel_lane_tasks(
+    const event::run & ev, worker_pool & pool, worker_pool::join_group & group,
+    emel::policy::fork_join_start_gate & gate,
+    std::index_sequence<lane_indices...>) noexcept {
+  ((ev.lanes[lane_indices].accepted = false), ...);
+  return pool.try_submit_batch(
+      group, effect_make_parallel_lane_task<lane_indices>(ev, gate)...);
+}
+
+template <size_t lane_count>
+struct effect_dispatch_parallel_lanes {
+  static_assert(lane_count >= 2u && lane_count <= event::k_max_lanes);
+
+  void operator()(const event::run & ev, context & ctx) const noexcept {
+    worker_pool::join_group group{};
     emel::policy::fork_join_start_gate gate{};
-    size_t submitted_lanes = 0u;
-    bool all_submitted = true;
-    for (auto & lane : ev.lanes) {
-      auto * lane_ptr = &lane;
-      const bool submitted =
-          ctx.pool->try_submit(group, [lane_ptr, &gate]() noexcept {
-        gate.arrive_and_wait();
-        auto & current_lane = *lane_ptr;
-        const emel::graph::event::compute_reserved reserved_compute{
-            current_lane.compute};
-        current_lane.accepted =
-            current_lane.graph.process_event(reserved_compute);
-      });
-      submitted_lanes += static_cast<size_t>(submitted);
-      all_submitted = all_submitted && submitted;
-    }
+
+    const size_t submitted_lanes = effect_submit_parallel_lane_tasks(
+        ev, *ctx.pool, group, gate, std::make_index_sequence<lane_count>{});
+
     gate.open_after_arrivals(submitted_lanes);
-    ev.out.all_submitted = all_submitted;
+    ev.out.all_submitted = submitted_lanes == lane_count;
     ev.out.joined = group.wait();
-    ev.out.dispatched_lanes = static_cast<int32_t>(ev.lanes.size());
+    ev.out.dispatched_lanes = static_cast<int32_t>(submitted_lanes);
   }
 };
 
@@ -119,7 +126,6 @@ inline constexpr effect_mark_grouped_lanes effect_mark_grouped_lanes{};
 inline constexpr effect_reject_invalid_request effect_reject_invalid_request{};
 inline constexpr effect_reject_incompatible_lanes effect_reject_incompatible_lanes{};
 inline constexpr effect_reject_parallel_scheduler effect_reject_parallel_scheduler{};
-inline constexpr effect_dispatch_parallel_lanes effect_dispatch_parallel_lanes{};
 inline constexpr effect_commit_done effect_commit_done{};
 inline constexpr effect_on_unexpected effect_on_unexpected{};
 

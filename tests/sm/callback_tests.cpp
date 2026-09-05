@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include <cstdint>
+#include <type_traits>
 #include <utility>
 
 #include "emel/callback.hpp"
@@ -28,6 +29,36 @@ bool add_thunk(void *, const int32_t value) noexcept {
   g_sink += value;
   return true;
 }
+
+bool nothrow_free(const int32_t) noexcept { return true; }
+
+bool throwing_free(const int32_t) { return true; }
+
+using throwing_thunk = bool (*)(void *, int32_t);
+
+struct member_targets {
+  bool nothrow_member(const int32_t) noexcept { return true; }
+  bool throwing_member(const int32_t) { return true; }
+};
+
+template <auto Fn>
+concept free_callback_factory = requires {
+  emel::callback<bool(const int32_t)>::template from<Fn>();
+};
+
+template <auto Fn>
+concept member_callback_factory = requires(member_targets *target) {
+  emel::callback<bool(const int32_t)>::template from<member_targets, Fn>(target);
+};
+
+static_assert(free_callback_factory<&nothrow_free>);
+static_assert(!free_callback_factory<&throwing_free>);
+static_assert(member_callback_factory<&member_targets::nothrow_member>);
+static_assert(!member_callback_factory<&member_targets::throwing_member>);
+static_assert(std::is_constructible_v<emel::callback<bool(const int32_t)>,
+                                      decltype(&add_thunk)>);
+static_assert(!std::is_constructible_v<emel::callback<bool(const int32_t)>,
+                                       throwing_thunk>);
 
 }  // namespace
 

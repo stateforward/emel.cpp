@@ -162,7 +162,7 @@ struct contract {
 
   execution_view execution = {};
   generation_execution_descriptor generation_execution = {};
-  topology topology = {};
+  struct topology topology = {};
   step_plan prefill_plan = {};
   step_plan decode_plan = {};
   quantized_path_audit quantized_audit = {};

@@ -1230,10 +1230,23 @@ inline bool can_run_neon_mul_mat_f32_vector_request(
          is_dense_contiguous(request.src1) && is_dense_contiguous(request.dst);
 }
 
+// Compile-time NEON availability for the f32 GEMV route: without it a
+// forced-true runtime flag could select the NEON route on hosts whose build
+// carries no NEON codegen at all (see the f16/conv/q8 route predicates
+// below, which already gate this way).
+inline bool neon_f32_vector_supported() noexcept {
+#if defined(__aarch64__) || defined(__ARM_NEON)
+  return true;
+#else
+  return false;
+#endif
+}
+
 inline bool
 can_use_neon_mul_mat_f32_vector(const event::op_mul_mat &request,
                                 const bool neon_available) noexcept {
-  return neon_available && can_run_neon_mul_mat_f32_vector_request(request);
+  return neon_f32_vector_supported() && neon_available &&
+         can_run_neon_mul_mat_f32_vector_request(request);
 }
 
 // SVE-capable builds are excluded: the pinned ggml_vec_dot_f16 selects its

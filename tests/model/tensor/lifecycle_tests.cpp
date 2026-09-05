@@ -227,6 +227,46 @@ TEST_CASE("model_tensor_unexpected_event_keeps_machine_dispatchable") {
                    emel::error::cast(emel::model::tensor::error::none)));
 }
 
+TEST_CASE("model_tensor_unexpected_routes_reset_intermediate_states") {
+  namespace sml = stateforward::sml;
+
+  emel::model::tensor::action::context ctx{};
+  stateforward::sml::sm<emel::model::tensor::model, stateforward::sml::testing>
+      machine{ctx};
+
+  const auto check_runtime_route = [&]<class state_type>() {
+    machine.set_current_states(sml::state<state_type>);
+    emel::model::tensor::detail::runtime_status status{};
+    struct unexpected_runtime_event {
+      emel::model::tensor::detail::runtime_status &ctx;
+    };
+    CHECK(machine.process_event(unexpected_runtime_event{status}));
+    CHECK_FALSE(status.ok);
+    CHECK(status.err ==
+          emel::error::cast(emel::model::tensor::error::internal_error));
+    CHECK(machine.is(sml::state<emel::model::tensor::ready>));
+  };
+
+  check_runtime_route
+      .template operator()<emel::model::tensor::bind_tensor_exec>();
+  check_runtime_route
+      .template operator()<emel::model::tensor::evict_tensor_exec>();
+  check_runtime_route.template operator()<
+      emel::model::tensor::capture_tensor_state_exec>();
+
+  machine.set_current_states(
+      sml::state<emel::model::tensor::state_request_mapped_load_decision>);
+  emel::model::tensor::detail::request_mapped_load_status mapped_status{};
+  struct unexpected_status_event {
+    emel::model::tensor::detail::request_mapped_load_status &status;
+  };
+  CHECK(machine.process_event(unexpected_status_event{mapped_status}));
+  CHECK_FALSE(mapped_status.ok);
+  CHECK(mapped_status.err ==
+        emel::error::cast(emel::model::tensor::error::internal_error));
+  CHECK(machine.is(sml::state<emel::model::tensor::ready>));
+}
+
 TEST_CASE("model_tensor_sm_excludes_unreachable_plan_load_decision_state") {
   using machine_t = stateforward::sml::sm<emel::model::tensor::model>;
   using states = typename machine_t::states;

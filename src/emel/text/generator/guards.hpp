@@ -1271,7 +1271,7 @@ struct guard_decode_materialized_parallel_scalar_kernel_ready {
 };
 
 // Streaming window engagement: the owner injected a bound tensor window actor
-// that reported streaming_active at bind. Mirrors the lane-pool capability
+// that reported streaming_active at bind. Mirrors the worker-pool capability
 // gate; composed with route readiness below so the streamed route row sits
 // above its resident siblings only when the window is live.
 struct guard_decode_stream_window_ready {

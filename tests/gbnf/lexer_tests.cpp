@@ -15,7 +15,7 @@ struct probe {
   int32_t err = 0;
 };
 
-bool on_done(void *owner, const emel::gbnf::rule_parser::lexer::events::next_done &ev) {
+bool on_done(void *owner, const emel::gbnf::rule_parser::lexer::events::next_done &ev) noexcept {
   auto *p = static_cast<probe *>(owner);
   p->done_called = true;
   p->has_token = ev.has_token;
@@ -24,7 +24,7 @@ bool on_done(void *owner, const emel::gbnf::rule_parser::lexer::events::next_don
   return true;
 }
 
-bool on_error(void *owner, const emel::gbnf::rule_parser::lexer::events::next_error &ev) {
+bool on_error(void *owner, const emel::gbnf::rule_parser::lexer::events::next_error &ev) noexcept {
   auto *p = static_cast<probe *>(owner);
   p->error_called = true;
   p->err = ev.err;

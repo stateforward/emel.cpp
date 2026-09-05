@@ -43,7 +43,7 @@ using emel::text::generator::detail::quant::QK8_0;
 using emel::text::generator::detail::quant::QK_K;
 
 struct matmul_actor_fixture {
-  emel::kernel::matmul::lane_pool parallel_matmul_lanes = {};
+  emel::kernel::matmul::worker_pool parallel_matmul_lanes = {};
   emel::kernel::matmul::execution_policy policy =
       emel::kernel::matmul::make_auto_execution_policy(parallel_matmul_lanes);
   emel::kernel::matmul::sm actor{policy};
@@ -908,7 +908,8 @@ struct hybrid_chunked_q8_runtime_fixture {
 using hybrid_chunk4_q8_runtime_fixture = hybrid_chunked_q8_runtime_fixture<4>;
 using hybrid_chunk8_q8_runtime_fixture = hybrid_chunked_q8_runtime_fixture<8>;
 
-void fill_nonzero_q4_rows(std::span<block_q4_k> rows) {
+// Only referenced from aarch64-guarded test cases; unused on x86 builds.
+[[maybe_unused]] void fill_nonzero_q4_rows(std::span<block_q4_k> rows) {
   for (size_t row = 0; row < rows.size(); ++row) {
     auto &q4 = rows[row];
     q4.d = emel::kernel::detail::quant::fp32_to_fp16(

@@ -392,3 +392,94 @@ TEST_CASE("memory_hybrid_interleaved_sequences_isolate_and_recycle_blocks") {
   CHECK(seq2_block0 == 0);
   CHECK(seq2_block1 == 1);
 }
+
+TEST_CASE("memory_hybrid_bound_actor_routes_full_lifecycle") {
+  emel::memory::test::recording_kv_actor kv{};
+  hybrid_sm machine{emel::memory::hybrid::bind_kv_actor(kv)};
+  int32_t err = static_cast<int32_t>(
+      emel::error::cast(emel::memory::hybrid::error::none));
+  copy_probe probe{};
+
+  REQUIRE(machine.process_event(event::reserve{
+      .max_sequences = 4, .max_blocks = 4, .block_tokens = 2,
+      .error_out = &err}));
+  REQUIRE(machine.process_event(
+      event::allocate_sequence{.seq_id = 0, .error_out = &err}));
+  REQUIRE(machine.process_event(event::allocate_slots{
+      .seq_id = 0, .token_count = 3, .error_out = &err}));
+  REQUIRE(machine.process_event(event::branch_sequence{
+      .parent_seq_id = 0,
+      .child_seq_id = 1,
+      .copy_state = &copy_state_cb,
+      .copy_state_user_data = &probe,
+      .error_out = &err,
+  }));
+
+  int32_t released_blocks = -1;
+  REQUIRE(machine.process_event(event::rollback_slots{
+      .seq_id = 1,
+      .token_count = 2,
+      .block_count_out = &released_blocks,
+      .error_out = &err,
+  }));
+  CHECK(released_blocks == 1);
+  REQUIRE(machine.process_event(
+      event::free_sequence{.seq_id = 1, .error_out = &err}));
+
+  CHECK(kv.reserve_count == 1);
+  CHECK(kv.allocate_sequence_count == 1);
+  CHECK(kv.allocate_slots_count == 1);
+  CHECK(kv.branch_sequence_count == 1);
+  CHECK(kv.rollback_slots_count == 1);
+  CHECK(kv.free_sequence_count == 1);
+  CHECK(machine.view().sequence_length(0) == 3);
+  CHECK_FALSE(machine.view().is_sequence_active(1));
+}
+
+TEST_CASE("memory_hybrid_invalid_bound_dispatchers_are_no_write_failures") {
+  const auto binding = emel::memory::hybrid::bind_invalid_kv_actor();
+  int32_t err = 17;
+  int32_t block_count = 29;
+  emel::memory::view::snapshot snapshot{};
+
+  CHECK_FALSE(binding.dispatch_reserve(
+      binding.actor, event::reserve{.error_out = &err}));
+  CHECK(err == static_cast<int32_t>(
+                   emel::error::cast(emel::memory::hybrid::error::backend_error)));
+  CHECK_FALSE(binding.dispatch_allocate_sequence(
+      binding.actor, event::allocate_sequence{.error_out = &err}));
+  CHECK_FALSE(binding.dispatch_allocate_slots(
+      binding.actor,
+      event::allocate_slots{.block_count_out = &block_count, .error_out = &err}));
+  CHECK(block_count == 0);
+  CHECK_FALSE(binding.dispatch_branch_sequence(
+      binding.actor, event::branch_sequence{.error_out = &err}));
+  CHECK_FALSE(binding.dispatch_free_sequence(
+      binding.actor, event::free_sequence{.error_out = &err}));
+  block_count = 29;
+  CHECK_FALSE(binding.dispatch_rollback_slots(
+      binding.actor,
+      event::rollback_slots{.block_count_out = &block_count, .error_out = &err}));
+  CHECK(block_count == 0);
+  CHECK_FALSE(binding.dispatch_capture_view(
+      binding.actor,
+      event::capture_view{.snapshot_out = &snapshot, .error_out = &err}));
+  CHECK(snapshot.max_sequences == 0);
+}
+
+TEST_CASE("memory_hybrid_capture_without_destination_rejects_without_writing") {
+  hybrid_sm machine{};
+  int32_t err = static_cast<int32_t>(
+      emel::error::cast(emel::memory::hybrid::error::none));
+
+  REQUIRE(machine.process_event(event::reserve{
+      .max_sequences = 2, .max_blocks = 2, .block_tokens = 2,
+      .error_out = &err}));
+  CHECK_FALSE(machine.process_event(event::capture_view{
+      .snapshot_out = nullptr,
+      .error_out = &err,
+  }));
+  CHECK(err == static_cast<int32_t>(
+                   emel::error::cast(emel::memory::hybrid::error::invalid_request)));
+  CHECK(machine.view().max_sequences == 2);
+}

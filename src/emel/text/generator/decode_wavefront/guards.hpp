@@ -1,5 +1,9 @@
 #pragma once
 
+#include <array>
+#include <cstdint>
+#include <limits>
+
 #include "emel/text/generator/decode_wavefront/context.hpp"
 #include "emel/text/generator/decode_wavefront/events.hpp"
 
@@ -40,32 +44,137 @@ inline bool valid_lane_count(const event::run & ev) noexcept {
   return ev.lanes.size() > 0u && ev.lanes.size() <= event::k_max_lanes;
 }
 
-// Parallel dispatch requires one graph actor per lane: concurrent
-// process_event on a shared actor would break the RTC single-writer
-// contract. Lane count is bounded by k_max_lanes, so the pairwise scan is
-// statically bounded.
-inline bool all_lane_graphs_distinct(const event::run & ev) noexcept {
-  const size_t lane_count = ev.lanes.size();
-  for (size_t i = 0u; i < lane_count; ++i) {
-    for (size_t j = i + 1u; j < lane_count; ++j) {
-      if (&ev.lanes[i].graph == &ev.lanes[j].graph) {
-        return false;
-      }
+// Parallel dispatch requires every lane-owned write surface to be disjoint.
+// Opaque owners have no public extent, so their mechanically visible range is
+// their identity byte. Known mutable actors, outputs, and lifecycle buffers
+// retain their full byte extent, catching cross-category and partial aliases.
+struct guard_writable_range {
+  uintptr_t begin = 0u;
+  uintptr_t end = 0u;
+};
+
+// Native decode owns exactly three mutable lifecycle surfaces: logits plus key
+// and value caches. Model weights and bound inputs are authoritative read-only
+// leaf bindings. A larger mutable manifest is outside this compact admission
+// contract and therefore remains on the ordered serial path.
+inline constexpr size_t guard_max_mutable_lifecycle_ranges = 3u;
+inline constexpr size_t guard_fixed_writable_ranges = 8u;
+inline constexpr size_t guard_max_writable_ranges =
+    guard_fixed_writable_ranges + guard_max_mutable_lifecycle_ranges;
+inline constexpr int32_t guard_max_lifecycle_tensor_count = 65536;
+
+struct guard_lane_writable_ranges {
+  std::array<guard_writable_range, guard_max_writable_ranges> ranges{};
+  size_t count = 0u;
+};
+
+inline bool guard_append_writable_range(guard_lane_writable_ranges & out,
+                                        const void * const pointer,
+                                        const uint64_t bytes) noexcept {
+  if (pointer == nullptr || bytes == 0u ||
+      out.count >= out.ranges.size()) {
+    return false;
+  }
+
+  if constexpr (sizeof(uintptr_t) < sizeof(uint64_t)) {
+    if (bytes > static_cast<uint64_t>(std::numeric_limits<uintptr_t>::max())) {
+      return false;
     }
+  }
+  const uintptr_t begin = reinterpret_cast<uintptr_t>(pointer);
+  const uintptr_t span = static_cast<uintptr_t>(bytes);
+  if (span == 0u ||
+      begin > std::numeric_limits<uintptr_t>::max() - span) {
+    return false;
+  }
+
+  out.ranges[out.count] = guard_writable_range{begin, begin + span};
+  ++out.count;
+  return true;
+}
+
+inline bool guard_append_opaque_owner(guard_lane_writable_ranges & out,
+                                      const void * const owner) noexcept {
+  return owner == nullptr || guard_append_writable_range(out, owner, 1u);
+}
+
+inline bool guard_collect_lane_writable_ranges(
+    const event::lane & lane, guard_lane_writable_ranges & out) noexcept {
+  const auto & compute = lane.compute;
+  if (!guard_append_writable_range(
+          out, &lane.graph, static_cast<uint64_t>(sizeof(lane.graph))) ||
+      !guard_append_writable_range(
+          out, &lane.accepted,
+          static_cast<uint64_t>(sizeof(lane.accepted))) ||
+      !guard_append_writable_range(
+          out, compute.output_out,
+          static_cast<uint64_t>(sizeof(*compute.output_out))) ||
+      lane.mutable_owner == nullptr ||
+      !guard_append_writable_range(out, lane.mutable_owner, 1u) ||
+      !guard_append_opaque_owner(out, compute.compute_ctx) ||
+      !guard_append_opaque_owner(out, compute.memory_sm) ||
+      !guard_append_opaque_owner(out, compute.dispatch_done.object) ||
+      !guard_append_opaque_owner(out, compute.dispatch_error.object) ||
+      compute.lifecycle == nullptr || compute.lifecycle->tensors == nullptr ||
+      compute.lifecycle->tensor_count <= 0 ||
+      compute.lifecycle->tensor_count > guard_max_lifecycle_tensor_count) {
+    return false;
+  }
+
+  size_t mutable_range_count = 0u;
+  for (int32_t tensor_index = 0;
+       tensor_index < compute.lifecycle->tensor_count; ++tensor_index) {
+    const auto & binding = compute.lifecycle->tensors[tensor_index];
+    if (binding.is_leaf) {
+      continue;
+    }
+    if (mutable_range_count >= guard_max_mutable_lifecycle_ranges ||
+        !guard_append_writable_range(out, binding.buffer,
+                                     binding.buffer_bytes)) {
+      return false;
+    }
+    ++mutable_range_count;
   }
   return true;
 }
 
-// Parallel dispatch also requires one caller-owned outcome slot per lane:
-// concurrent workers writing a shared `accepted` bool would race and make
-// the post-join guards misreport (or hide) the failed lane. Aliased slots
-// stay on the serial path, where each lane's outcome is routed before the
-// next lane writes.
-inline bool all_lane_outcomes_distinct(const event::run & ev) noexcept {
+inline bool guard_writable_ranges_overlap(
+    const guard_writable_range lhs,
+    const guard_writable_range rhs) noexcept {
+  return lhs.begin < rhs.end && rhs.begin < lhs.end;
+}
+
+inline bool guard_lane_writable_ranges_overlap(
+    const guard_lane_writable_ranges & lhs,
+    const guard_lane_writable_ranges & rhs) noexcept {
+  for (size_t lhs_index = 0u; lhs_index < lhs.count; ++lhs_index) {
+    for (size_t rhs_index = 0u; rhs_index < rhs.count; ++rhs_index) {
+      if (guard_writable_ranges_overlap(lhs.ranges[lhs_index],
+                                        rhs.ranges[rhs_index])) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Each manifest is scanned once. Subsequent cross-lane work is capped at
+// k_max_lanes^2 * guard_max_writable_ranges^2 and performs no allocation.
+inline bool guard_parallel_payloads_disjoint(const event::run & ev) noexcept {
+  std::array<guard_lane_writable_ranges, event::k_max_lanes> lane_ranges{};
   const size_t lane_count = ev.lanes.size();
-  for (size_t i = 0u; i < lane_count; ++i) {
-    for (size_t j = i + 1u; j < lane_count; ++j) {
-      if (&ev.lanes[i].accepted == &ev.lanes[j].accepted) {
+  for (size_t lane_index = 0u; lane_index < lane_count; ++lane_index) {
+    if (!guard_collect_lane_writable_ranges(ev.lanes[lane_index],
+                                            lane_ranges[lane_index])) {
+      return false;
+    }
+  }
+
+  for (size_t lhs_index = 0u; lhs_index < lane_count; ++lhs_index) {
+    for (size_t rhs_index = lhs_index + 1u; rhs_index < lane_count;
+         ++rhs_index) {
+      if (guard_lane_writable_ranges_overlap(lane_ranges[lhs_index],
+                                             lane_ranges[rhs_index])) {
         return false;
       }
     }
@@ -102,16 +211,17 @@ struct guard_multi_lane_compatible {
 struct guard_serial_dispatch {
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
     return ctx.pool == nullptr || ev.lanes.size() == 1u ||
-           !detail::all_lane_graphs_distinct(ev) ||
-           !detail::all_lane_outcomes_distinct(ev);
+           !detail::guard_parallel_payloads_disjoint(ev);
   }
 };
 
-struct guard_parallel_dispatch {
+template <size_t lane_count>
+struct guard_parallel_lane_count {
+  static_assert(lane_count >= 2u && lane_count <= event::k_max_lanes);
+
   bool operator()(const event::run & ev, const action::context & ctx) const noexcept {
-    return ctx.pool != nullptr && ev.lanes.size() > 1u &&
-           detail::all_lane_graphs_distinct(ev) &&
-           detail::all_lane_outcomes_distinct(ev);
+    return ctx.pool != nullptr && ev.lanes.size() == lane_count &&
+           detail::guard_parallel_payloads_disjoint(ev);
   }
 };
 

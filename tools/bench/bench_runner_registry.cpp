@@ -18,8 +18,8 @@ constexpr test_case make_test_case(const append_case_fn emel_fn,
   };
 }
 
-const std::array<test_case, 36> & all_runner_cases() {
-  static const std::array<test_case, 36> cases = {{
+const std::array<test_case, 37> & all_runner_cases() {
+  static const std::array<test_case, 37> cases = {{
     make_test_case(append_emel_batch_planner_cases,
                    append_reference_batch_planner_cases,
                    "batch_planner"),
@@ -80,6 +80,9 @@ const std::array<test_case, 36> & all_runner_cases() {
     make_test_case(append_emel_weight_streaming_cases,
                    append_reference_weight_streaming_cases,
                    "weight_streaming"),
+    make_test_case(append_emel_needle_graph_cases,
+                   append_reference_needle_graph_cases,
+                   "needle_graph"),
     make_test_case(append_emel_tokenizer_preprocessor_bpe_cases,
                    append_reference_tokenizer_preprocessor_bpe_cases,
                    "tokenizer_preprocessor_bpe"),

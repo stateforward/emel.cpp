@@ -979,12 +979,12 @@ size_t count_occurrences(const std::string_view source,
   return count;
 }
 
-void noop_probe_done(const emel::gguf::loader::events::probe_done &) {}
-void noop_probe_error(const emel::gguf::loader::events::probe_error &) {}
-void noop_bind_done(const emel::gguf::loader::events::bind_done &) {}
-void noop_bind_error(const emel::gguf::loader::events::bind_error &) {}
-void noop_parse_done(const emel::gguf::loader::events::parse_done &) {}
-void noop_parse_error(const emel::gguf::loader::events::parse_error &) {}
+void noop_probe_done(const emel::gguf::loader::events::probe_done &) noexcept {}
+void noop_probe_error(const emel::gguf::loader::events::probe_error &) noexcept {}
+void noop_bind_done(const emel::gguf::loader::events::bind_done &) noexcept {}
+void noop_bind_error(const emel::gguf::loader::events::bind_error &) noexcept {}
+void noop_parse_done(const emel::gguf::loader::events::parse_done &) noexcept {}
+void noop_parse_error(const emel::gguf::loader::events::parse_error &) noexcept {}
 
 using parse_callback_fn = emel::error::type (*)(
     void *, const emel::model::loader::event::load &) noexcept;
@@ -1690,6 +1690,39 @@ TEST_CASE("model loader unexpected events mark runtime context internal") {
         emel::error::cast(emel::model::loader::error::internal_error));
 }
 
+TEST_CASE("model loader unexpected routes reset representative phase states") {
+  namespace sml = stateforward::sml;
+
+  emel::model::loader::action::context action_ctx{};
+  stateforward::sml::sm<emel::model::loader::model,
+                        stateforward::sml::testing>
+      machine{action_ctx};
+
+  const auto check_route = [&]<class state_type>() {
+    machine.set_current_states(sml::state<state_type>);
+    emel::model::loader::event::load_ctx ctx{};
+    struct unexpected_runtime_event {
+      emel::model::loader::event::load_ctx &ctx;
+    };
+    CHECK(machine.process_event(unexpected_runtime_event{ctx}));
+    CHECK(ctx.err ==
+          emel::error::cast(emel::model::loader::error::internal_error));
+    CHECK(machine.is(sml::state<emel::model::loader::ready>));
+  };
+
+  check_route.template operator()<emel::model::loader::request_decision>();
+  check_route.template operator()<emel::model::loader::parsing>();
+  check_route.template operator()<
+      emel::model::loader::state_tensor_plan_decision>();
+  check_route.template operator()<
+      emel::model::loader::state_io_load_decision>();
+  check_route.template operator()<emel::model::loader::mapping_layers>();
+  check_route.template operator()<
+      emel::model::loader::structure_validation_decision>();
+  check_route.template operator()<
+      emel::model::loader::architecture_validation_decision>();
+}
+
 TEST_CASE("model loader preserves parser weight metadata on model-path load") {
   auto model = std::make_unique<emel::model::data>();
   emel::model::loader::sm machine{};
@@ -2311,11 +2344,12 @@ TEST_CASE(
   }
 }
 
-TEST_CASE("io boundary closeout tests avoid actor internal reach-through") {
-  const std::array test_sources{
-      "tests/io/loader/lifecycle_tests.cpp",
-      "tests/model/tensor/lifecycle_tests.cpp",
-      "tests/model/loader/lifecycle_tests.cpp",
+TEST_CASE("maintained io boundary consumers avoid actor internal reach-through") {
+  const std::array maintained_sources{
+      "tools/bench/generation_bench.cpp",
+      "tools/bench/diarization/sortformer_fixture.hpp",
+      "tools/embedded_size/emel_probe/main.cpp",
+      "tools/paritychecker/parity_engines.cpp",
   };
   const std::array forbidden{
       std::string{"#include \"emel/io/loader/"} + "actions.hpp\"",
@@ -2338,7 +2372,7 @@ TEST_CASE("io boundary closeout tests avoid actor internal reach-through") {
       std::string{"emel::model::loader::"} + "guard::",
   };
 
-  for (const auto *source_path : test_sources) {
+  for (const auto *source_path : maintained_sources) {
     CAPTURE(source_path);
     const std::string source = read_text_file(repo_root() / source_path);
     for (const auto &needle : forbidden) {

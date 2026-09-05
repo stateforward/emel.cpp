@@ -31,7 +31,7 @@ struct token_step_result {
   int32_t err = k_ok;
   size_t error_pos = 0;
 
-  bool on_done(const next_done &ev) {
+  bool on_done(const next_done &ev) noexcept {
     done_called = true;
     token = ev.token;
     has_token = ev.has_token;
@@ -39,7 +39,7 @@ struct token_step_result {
     return true;
   }
 
-  bool on_error(const next_error &ev) {
+  bool on_error(const next_error &ev) noexcept {
     error_called = true;
     err = ev.err;
     error_pos = ev.error_pos;
@@ -345,4 +345,102 @@ TEST_CASE("jinja_lexer_handles_open_expression_trailing_dash") {
   REQUIRE(result.tokens.size() == 1);
   CHECK(result.tokens[0].type ==
         emel::text::jinja::token_type::open_expression);
+}
+
+TEST_CASE("jinja_lexer_emits_each_operator_and_delimiter_kind") {
+  lexer_result result = tokenize_with_machine(
+      "{{ (a,b.c[0:1] | d) <= e >= f == g != h < i > j + k - l ~ m * n / o % p = q }}");
+
+  CHECK(result.error == k_ok);
+  const auto count_type = [&result](const emel::text::jinja::token_type type) {
+    size_t count = 0;
+    for (const auto & token : result.tokens) {
+      count += static_cast<size_t>(token.type == type);
+    }
+    return count;
+  };
+
+  CHECK(count_type(emel::text::jinja::token_type::open_paren) == 1);
+  CHECK(count_type(emel::text::jinja::token_type::close_paren) == 1);
+  CHECK(count_type(emel::text::jinja::token_type::open_square_bracket) == 1);
+  CHECK(count_type(emel::text::jinja::token_type::close_square_bracket) == 1);
+  CHECK(count_type(emel::text::jinja::token_type::comma) == 1);
+  CHECK(count_type(emel::text::jinja::token_type::dot) == 1);
+  CHECK(count_type(emel::text::jinja::token_type::colon) == 1);
+  CHECK(count_type(emel::text::jinja::token_type::pipe) == 1);
+  CHECK(count_type(emel::text::jinja::token_type::comparison_binary_operator) == 6);
+  CHECK(count_type(emel::text::jinja::token_type::additive_binary_operator) == 3);
+  CHECK(count_type(emel::text::jinja::token_type::multiplicative_binary_operator) == 3);
+  CHECK(count_type(emel::text::jinja::token_type::equals) == 1);
+}
+
+TEST_CASE("jinja_lexer_distinguishes_unary_operator_from_signed_number") {
+  lexer_result result = tokenize_with_machine("{{ +value - 2 }}");
+
+  CHECK(result.error == k_ok);
+  REQUIRE(result.tokens.size() >= 6);
+  CHECK(result.tokens[1].type == emel::text::jinja::token_type::unary_operator);
+  CHECK(result.tokens[1].value == "+");
+  CHECK(result.tokens[2].type == emel::text::jinja::token_type::identifier);
+  CHECK(result.tokens[3].type == emel::text::jinja::token_type::additive_binary_operator);
+  CHECK(result.tokens[4].type == emel::text::jinja::token_type::numeric_literal);
+  CHECK(result.tokens[4].value == "2");
+}
+
+TEST_CASE("jinja_lexer_keeps_expression_close_inside_object_until_curly_closes") {
+  lexer_result result = tokenize_with_machine("{{ {'key': 1} }}");
+
+  CHECK(result.error == k_ok);
+  REQUIRE(result.tokens.size() >= 7);
+  CHECK(result.tokens[1].type == emel::text::jinja::token_type::open_curly_bracket);
+  CHECK(result.tokens[result.tokens.size() - 2].type ==
+        emel::text::jinja::token_type::close_curly_bracket);
+  CHECK(result.tokens.back().type == emel::text::jinja::token_type::close_expression);
+}
+
+TEST_CASE("jinja_lexer_empty_quoted_strings_are_literals") {
+  lexer_result result = tokenize_with_machine("{{ '' \"\" }}");
+
+  CHECK(result.error == k_ok);
+  REQUIRE(result.tokens.size() >= 4);
+  CHECK(result.tokens[1].type == emel::text::jinja::token_type::string_literal);
+  CHECK(result.tokens[1].value.empty());
+  CHECK(result.tokens[2].type == emel::text::jinja::token_type::string_literal);
+  CHECK(result.tokens[2].value.empty());
+}
+
+TEST_CASE("jinja_lexer_dispatches_cursor_past_end_error") {
+  std::string source = "{{ x }}";
+  cursor cur{
+      source,
+      source.size() + 1,
+      0,
+      0,
+      emel::text::jinja::token_type::close_statement,
+      false,
+      false,
+  };
+  token_step_result step{};
+  const next ev{
+      cur,
+      next::done_callback::from<token_step_result, &token_step_result::on_done>(&step),
+      next::error_callback::from<token_step_result, &token_step_result::on_error>(&step),
+  };
+
+  emel::text::jinja::parser::lexer::sm machine{};
+  CHECK(machine.process_event(ev));
+  CHECK_FALSE(step.done_called);
+  CHECK(step.error_called);
+  CHECK(step.err == emel::text::jinja::parser::to_error_code(error::invalid_request));
+  CHECK(step.error_pos == cur.offset);
+}
+
+TEST_CASE("jinja_lexer_normalization_removes_single_trailing_newline") {
+  lexer_result plain = tokenize_with_machine("text\n");
+  lexer_result normalized_cr = tokenize_with_machine("text\r");
+
+  CHECK(plain.error == k_ok);
+  CHECK(normalized_cr.error == k_ok);
+  CHECK(plain.source == "text");
+  CHECK(normalized_cr.source == "text");
 }

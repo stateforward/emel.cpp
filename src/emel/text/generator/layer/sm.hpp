@@ -372,7 +372,16 @@ template <emel::text::generator::attention_mode mode,
           emel::kernel::matmul::lane_mode lanes,
           emel::text::generator::detail::window_mode wmode>
 struct scalar_actor {
+  // sml's policy-less back-end embeds aux::pool<> (a zero-size array); g++
+  // -Wpedantic flags members of such types at the declaration site.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
   scalar_sm<mode, route, lanes, wmode> machine{};
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
   bool process_event(const event::scalar_run &ev) noexcept {
     return machine.process_event(ev);
@@ -383,7 +392,16 @@ template <emel::text::generator::attention_mode mode,
           emel::text::generator::detail::chunk4_rhs_route route,
           emel::kernel::matmul::lane_mode lanes>
 struct chunk4_actor {
+  // sml's policy-less back-end embeds aux::pool<> (a zero-size array); g++
+  // -Wpedantic flags members of such types at the declaration site.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
   chunk4_sm<mode, route, lanes> machine{};
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
   bool process_event(const event::chunk4_run &ev) noexcept {
     return machine.process_event(ev);
@@ -393,7 +411,16 @@ struct chunk4_actor {
 template <emel::text::generator::attention_mode mode,
           emel::kernel::matmul::lane_mode lanes>
 struct chunk8_actor {
+  // sml's policy-less back-end embeds aux::pool<> (a zero-size array); g++
+  // -Wpedantic flags members of such types at the declaration site.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
   chunk8_sm<mode, lanes> machine{};
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
   bool process_event(const event::chunk8_run &ev) noexcept {
     return machine.process_event(ev);

@@ -461,6 +461,24 @@ TEST_CASE("kernel_backends_accept_dispatch_event") {
   CHECK(any_machine.process_event(event));
 }
 
+TEST_CASE("kernel any rejects unsupported kinds without changing backend") {
+  const auto unsupported = static_cast<emel::kernel::kernel_kind>(255u);
+  static_assert(!emel::kernel::any::is_supported_kind(unsupported));
+
+  emel::kernel::any machine{emel::kernel::kernel_kind::aarch64};
+  REQUIRE(machine.kind() == emel::kernel::kernel_kind::aarch64);
+
+  CHECK_FALSE(machine.set_kind(unsupported));
+  CHECK(machine.kind() == emel::kernel::kernel_kind::aarch64);
+
+  CHECK_FALSE(machine.process_event(
+      emel::kernel::event::configure_kind{unsupported}));
+  CHECK(machine.kind() == emel::kernel::kernel_kind::aarch64);
+
+  emel::kernel::any constructed{unsupported};
+  CHECK(constructed.kind() == emel::kernel::detect_host_kind());
+}
+
 TEST_CASE("kernel_backends_expose_explicit_op_transitions") {
   float src0[8] = {0.0f, 1.0f, 2.0f, 3.0f, 0.0f, 1.0f, 2.0f, 3.0f};
   float src1[8] = {3.0f, 2.0f, 1.0f, 0.0f, 3.0f, 2.0f, 1.0f, 0.0f};

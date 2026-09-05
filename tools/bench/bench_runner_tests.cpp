@@ -19,9 +19,15 @@
 #include "bench_runner_contract.hpp"
 #include "bench_runner_registry.hpp"
 #include "generation_workload_manifest.hpp"
+#include "model/needle/request_aggregation.hpp"
+#include "model/needle/request_fixture_contract.hpp"
 
+#if defined(_WIN32)
+#include <process.h>
+#endif
 #if !defined(_WIN32)
 #include <sys/wait.h>
+#include <unistd.h>
 #endif
 
 namespace {
@@ -45,6 +51,26 @@ std::filesystem::path bench_runner_binary_path() {
 std::filesystem::path bench_moshi_lm_compare_wrapper_path() {
   return repo_root() / "scripts" / "bench_moshi_lm_compare.sh";
 }
+
+std::filesystem::path cactus_reference_driver_path() {
+  return repo_root() / "tools" / "bench" / "model" / "needle" /
+         "cactus_reference.py";
+}
+std::filesystem::path needle_authenticated_exec_test_path() {
+#ifdef BENCH_NEEDLE_AUTHENTICATED_EXEC_TEST_PATH
+  return BENCH_NEEDLE_AUTHENTICATED_EXEC_TEST_PATH;
+#else
+  return std::filesystem::path("needle_authenticated_exec_tests");
+#endif
+}
+std::string needle_clean_environment_prefix() {
+  return "env -u LD_PRELOAD -u LD_LIBRARY_PATH -u LD_AUDIT "
+         "-u DYLD_LIBRARY_PATH -u DYLD_INSERT_LIBRARIES "
+         "-u DYLD_FRAMEWORK_PATH -u DYLD_FALLBACK_LIBRARY_PATH "
+         "-u DYLD_FALLBACK_FRAMEWORK_PATH -u PYTHONPATH -u PYTHONHOME "
+         "-u PYTHONSTARTUP -u PYTHONINSPECT ";
+}
+
 
 constexpr const char *k_bounded_generation_workload_id =
     "lfm2_single_user_hello_max_tokens_1_v1";
@@ -166,6 +192,14 @@ process_capture run_command_capture(const std::string &command,
   capture.exit_code = WEXITSTATUS(status);
 #endif
   return capture;
+}
+
+std::uint64_t current_process_id() noexcept {
+#if defined(_WIN32)
+  return static_cast<std::uint64_t>(::_getpid());
+#else
+  return static_cast<std::uint64_t>(::getpid());
+#endif
 }
 
 process_capture run_bench_runner_capture(const std::vector<std::string> &args,
@@ -446,6 +480,93 @@ process_capture run_suite_bench_capture(const std::string &suite,
   return capture;
 }
 
+std::size_t count_benchmark_rows(const std::string_view output) {
+  std::size_t count = 0u;
+  std::size_t cursor = 0u;
+  while (cursor < output.size()) {
+    const std::size_t end = output.find('\n', cursor);
+    const std::string_view line =
+        end == std::string_view::npos
+            ? output.substr(cursor)
+            : output.substr(cursor, end - cursor);
+    if (!line.empty() && line.front() != '#') {
+      ++count;
+    }
+    cursor = end == std::string_view::npos ? output.size() : end + 1u;
+  }
+  return count;
+}
+
+process_capture run_needle_graph_bench_capture(const std::string &mode,
+                                               const std::string &tag) {
+  static std::uint64_t invocation = 0u;
+  const std::filesystem::path tmp_root =
+      std::filesystem::temp_directory_path() /
+      ("emel-bench-runner-tests-" + std::to_string(current_process_id()));
+  std::error_code ec;
+  REQUIRE(std::filesystem::create_directory(tmp_root, ec));
+  REQUIRE_FALSE(ec);
+#if !defined(_WIN32)
+  std::filesystem::permissions(
+      tmp_root, std::filesystem::perms::owner_all,
+      std::filesystem::perm_options::replace, ec);
+  REQUIRE_FALSE(ec);
+#endif
+  const std::filesystem::path tmp_dir =
+      tmp_root / (tag + "-" + std::to_string(++invocation));
+  std::filesystem::remove_all(tmp_dir, ec);
+  REQUIRE_FALSE(ec);
+  REQUIRE(std::filesystem::create_directories(tmp_dir));
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+
+  std::string command;
+#if defined(_WIN32)
+  command = "set EMEL_BENCH_NEEDLE_REQUEST_COMPARE=1 && ";
+  command += "set EMEL_BENCH_SUITE=needle_graph && ";
+  command += "set EMEL_BENCH_ITERS=1 && ";
+  command += "set EMEL_BENCH_RUNS=1 && ";
+  command += "set EMEL_BENCH_WARMUP_ITERS=0 && ";
+  command += "set EMEL_BENCH_WARMUP_RUNS=0 && ";
+  command += "set EMEL_BENCH_NEEDLE_GRAPH_DECODE_ITERS=1 && ";
+  command += "set EMEL_BENCH_NEEDLE_GRAPH_PREFILL_ITERS=1 && ";
+  command += "set EMEL_BENCH_NEEDLE_HADAMARD_ITERS=1 && ";
+  command += "set EMEL_BENCH_NEEDLE_FWHT_ITERS=1 && ";
+  command += "set EMEL_BENCH_NEEDLE_SWA_ITERS=1 && ";
+  command += quote_arg_windows(bench_runner_binary_path().string());
+  command += " --mode=" + mode + " > ";
+  command += quote_arg_windows(stdout_path.string());
+  command += " 2> ";
+  command += quote_arg_windows(stderr_path.string());
+#else
+  command = "ulimit -s 8192; ";
+  command += "EMEL_BENCH_NEEDLE_REQUEST_COMPARE=1 ";
+  command += "EMEL_BENCH_SUITE=needle_graph ";
+  command += "EMEL_BENCH_ITERS=1 ";
+  command += "EMEL_BENCH_RUNS=1 ";
+  command += "EMEL_BENCH_WARMUP_ITERS=0 ";
+  command += "EMEL_BENCH_WARMUP_RUNS=0 ";
+  command += "EMEL_BENCH_NEEDLE_GRAPH_DECODE_ITERS=1 ";
+  command += "EMEL_BENCH_NEEDLE_GRAPH_PREFILL_ITERS=1 ";
+  command += "EMEL_BENCH_NEEDLE_HADAMARD_ITERS=1 ";
+  command += "EMEL_BENCH_NEEDLE_FWHT_ITERS=1 ";
+  command += "EMEL_BENCH_NEEDLE_SWA_ITERS=1 ";
+  command += quote_arg_posix(bench_runner_binary_path().string());
+  command += " --mode=" + mode + " > ";
+  command += quote_arg_posix(stdout_path.string());
+  command += " 2> ";
+  command += quote_arg_posix(stderr_path.string());
+#endif
+
+  const process_capture capture =
+      run_command_capture(command, stdout_path, stderr_path);
+  std::filesystem::remove_all(tmp_dir, ec);
+  CHECK_FALSE(ec);
+  std::filesystem::remove(tmp_root, ec);
+  CHECK_FALSE(ec);
+  return capture;
+}
+
 process_capture run_diarization_bench_capture(const std::string &mode,
                                               const bool emit_jsonl = false) {
   const std::filesystem::path tmp_dir =
@@ -539,6 +660,14 @@ std::uint64_t parse_named_metric(const std::string &haystack,
   }
   return value;
 }
+double parse_named_double(const std::string &haystack, const std::string &name) {
+  const std::string needle = name + "=";
+  const size_t pos = haystack.find(needle);
+  if (pos == std::string::npos) {
+    return 0.0;
+  }
+  return std::stod(haystack.substr(pos + needle.size()));
+}
 
 std::string find_line_with_prefix(const std::string &haystack,
                                   const std::string &prefix) {
@@ -554,6 +683,1261 @@ std::string find_line_with_prefix(const std::string &haystack,
   return haystack.substr(pos, line_end - pos);
 }
 } // namespace
+
+TEST_CASE("needle request aggregation independently ranks phase metrics") {
+  using emel::bench::needle_request::aggregate_runs;
+  using emel::bench::needle_request::run_sample;
+  const std::vector<run_sample> samples = {
+      {.wall_ns = 10.0, .prefill_ns = 300.0, .decode_ns = 2000.0,
+       .prompt_tokens = 100u, .decode_tokens = 20u, .envelopes = {"same"}},
+      {.wall_ns = 20.0, .prefill_ns = 100.0, .decode_ns = 3000.0,
+       .prompt_tokens = 100u, .decode_tokens = 20u, .envelopes = {"same"}},
+      {.wall_ns = 30.0, .prefill_ns = 200.0, .decode_ns = 1000.0,
+       .prompt_tokens = 100u, .decode_tokens = 20u, .envelopes = {"same"}},
+  };
+  run_sample aggregated;
+  REQUIRE(aggregate_runs(samples, aggregated));
+  CHECK(aggregated.wall_ns == doctest::Approx(20.0));
+  CHECK(aggregated.prefill_ns == doctest::Approx(200.0));
+  CHECK(aggregated.decode_ns == doctest::Approx(2000.0));
+  CHECK(aggregated.prompt_tokens == 100u);
+  CHECK(aggregated.decode_tokens == 20u);
+  CHECK(aggregated.envelopes == std::vector<std::string>{"same"});
+
+  std::vector<run_sample> unstable = samples;
+  unstable.back().envelopes = {"different"};
+  CHECK_FALSE(aggregate_runs(unstable, aggregated));
+  unstable = samples;
+  unstable.back().prompt_tokens += 1u;
+  CHECK_FALSE(aggregate_runs(unstable, aggregated));
+  unstable = samples;
+  unstable.back().decode_tokens += 1u;
+  CHECK_FALSE(aggregate_runs(unstable, aggregated));
+}
+
+TEST_CASE("needle request fixture rejects altered token ids") {
+  using emel::bench::needle_request::token_ids_match;
+  const std::array<int32_t, 4> canonical = {1, 2, 3, 4};
+  std::array<int32_t, 4> actual = canonical;
+  CHECK(token_ids_match(canonical, actual));
+  actual[2] = 99;
+  CHECK_FALSE(token_ids_match(canonical, actual));
+  const std::array<int32_t, 3> truncated = {1, 2, 3};
+  CHECK_FALSE(token_ids_match(canonical, truncated));
+}
+
+TEST_CASE("needle cactus boundary rejects substituted inputs and invalid values") {
+#if !defined(_WIN32)
+  const std::string program = R"PY(
+import contextlib
+import importlib.util
+import json
+import io
+import math
+import os
+import pathlib
+import sys
+import tempfile
+import types
+
+spec = importlib.util.spec_from_file_location("cactus_reference", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+def rejected(call):
+    try:
+        call()
+    except SystemExit:
+        return
+    raise AssertionError("boundary accepted invalid input")
+
+root = pathlib.Path(tempfile.mkdtemp())
+substitute = root / "substitute.cact"
+substitute.write_bytes(b"not the canonical model")
+rejected(lambda: module.validate_canonical_input(
+    substitute, module.MODEL_SHA256, "model"))
+rejected(lambda: module.validate_canonical_path(
+    substitute, pathlib.Path(sys.argv[1]).resolve().parents[3] /
+    module.MODEL_RELATIVE_PATH, "model"))
+rejected(lambda: module.exact_int(True, "runs", minimum=1))
+rejected(lambda: module.exact_int(33, "runs", minimum=1))
+for value in (True, 0, -1, math.nan, math.inf, -math.inf, "1"):
+    rejected(lambda value=value: module.positive_finite_number(value, "metric"))
+fake_package = root / "needle"
+fake_package.mkdir()
+fake_init = fake_package / "__init__.py"
+fake_init.write_text("__version__ = '2.0.8'\n")
+rejected(lambda: module.validate_needle_package(root))
+
+fake_module = types.SimpleNamespace(
+    __version__="substitute", __file__=str(fake_init), Needle=object,
+    _library_path=lambda: root / "libneedle.so")
+rejected(lambda: module.validate_needle_module_identity(fake_module, fake_package))
+fake_module.__version__ = module.NEEDLE_PACKAGE_VERSION
+fake_module.__file__ = str(root / "other.py")
+rejected(lambda: module.validate_needle_module_identity(fake_module, fake_package))
+
+fake_library = root / "libneedle.so"
+fake_library.write_bytes(b"not the canonical native runtime")
+fake_module.__file__ = str(fake_init)
+rejected(lambda: module.validate_needle_native_library(fake_module))
+os.environ["NEEDLE_LIB_PATH"] = str(fake_library)
+rejected(lambda: module.validate_needle_native_library(fake_module))
+del os.environ["NEEDLE_LIB_PATH"]
+reference = {
+    "schema": module.SCHEMA,
+    "lane": "reference",
+    "backend_id": "cactus.libneedle.native",
+    "backend_language": "python_ctypes_native",
+    "reference_source": "live",
+    "model_id": module.MODEL_ID,
+    "model_path": module.MODEL_RELATIVE_PATH,
+    "fixture_id": module.FIXTURE_ID,
+    "workload_id": module.WORKLOAD_ID,
+    "thread_count": 1,
+    "thread_contract": module.THREAD_CONTRACT,
+    "prompt_rows": module.PROMPT_ROWS,
+    "max_new_tokens": module.MAX_NEW_TOKENS,
+    "sampling_id": module.CACTUS_SAMPLING_ID,
+    "stop_id": module.CACTUS_STOP_ID,
+    "warmup_iterations": 1,
+    "warmup_runs": 1,
+    "iterations": 1,
+    "runs": 1,
+    "wall_ns_per_request": 1.0,
+    "prefill_tokens_per_second": 1.0,
+    "decode_tokens_per_second": 1.0,
+    "phase_rate_semantics": module.PHASE_NONCOMPARABLE_REASON,
+    "needle_package_version": module.NEEDLE_PACKAGE_VERSION,
+    "needle_package_tree_sha256": module.NEEDLE_PACKAGE_TREE_SHA256,
+    "needle_native_library_sha256": module.NEEDLE_NATIVE_LIBRARY_SHA256,
+    "normalized_envelopes": [{"success": True}] * module.PROMPT_ROWS,
+}
+module.validate_reference(reference)
+class FakeEngine:
+    def reset(self):
+        pass
+    def complete(self, query, max_new_tokens):
+        return {"success": True, "function_calls": [], "prefill_tps": 1.0,
+                "decode_tps": 1.0, "peak_ram_mb": 1.0}
+
+saved = {name: getattr(module, name) for name in (
+    "validate_canonical_path", "validate_canonical_input", "load_requests",
+    "validate_needle_package", "import_needle", "validate_needle_native_library")}
+module.validate_canonical_path = lambda *args, **kwargs: None
+module.validate_canonical_input = lambda *args, **kwargs: None
+module.load_requests = lambda path: [("system", [], f"query-{index}")
+                                    for index in range(module.PROMPT_ROWS)]
+module.validate_needle_package = lambda *args, **kwargs: root / "needle"
+module.import_needle = lambda *args, **kwargs: types.SimpleNamespace(
+    Needle=lambda **kwargs: FakeEngine())
+module.validate_needle_native_library = lambda *args, **kwargs: root / "libneedle.so"
+live_record = module.run_reference(types.SimpleNamespace(
+    model=str(root / "model.cact"), fixture=str(root / "fixture.tsv"),
+    needle_root=str(root), staged=False, warmup_iterations=0, warmup_runs=0,
+    iterations=1, runs=1))
+assert live_record["needle_package_tree_sha256"] == module.NEEDLE_PACKAGE_TREE_SHA256
+module.validate_reference(live_record)
+for name, value in saved.items():
+    setattr(module, name, value)
+for key, value in (("runs", True), ("wall_ns_per_request", math.nan),
+                   ("decode_tokens_per_second", 0.0),
+                   ("sampling_id", module.EMEL_SAMPLING_ID),
+                   ("needle_package_version", "2.0.7"),
+                   ("needle_package_tree_sha256", "0" * 64),
+                   ("needle_native_library_sha256", "f" * 64)):
+    invalid = dict(reference)
+    invalid[key] = value
+    rejected(lambda invalid=invalid: module.validate_reference(invalid))
+
+def emel_text(metric="1.0", runs="1", envelope=None):
+    envelope = envelope or {"success": True}
+    envelope_hex = module.canonical_envelope(envelope).encode().hex()
+    rows = [
+        f"# needle_request_envelope: workload_id={module.WORKLOAD_ID} row={row} hex={envelope_hex}"
+        for row in range(module.PROMPT_ROWS)
+    ]
+    common = ("model_id=route_w4_qat_cact "
+              "workload_id=needle_heldout_first4_greedy80_eos_v1 "
+              "backend_id=emel_needle_request_serial route=serial "
+              "fixture_id=tests/fixtures/cact/needle-heldout-prompts.tsv "
+              "thread_count=1 thread_contract=single_thread "
+              "prompt_rows=4 max_new_tokens=80 sampling_id=" + module.EMEL_SAMPLING_ID + " "
+              "stop_id=" + module.EMEL_STOP_ID + " phase_tokens_per_batch=1 "
+              "warmup_iterations=1 warmup_runs=1 phase_rate_semantics=" +
+              module.PHASE_NONCOMPARABLE_REASON)
+    for phase in ("wall", "prefill", "decode"):
+        rows.append(f"# needle_graph: lane=emel case=x {common} phase={phase}")
+        rows.append(f"x ns_per_op={metric} tokens_per_second={metric} iter=1 runs={runs}")
+    return "\n".join(rows) + "\n"
+
+bad_emel = root / "bad-emel.txt"
+for text in (emel_text("nan"), emel_text("0"), emel_text("1", "33")):
+    bad_emel.write_text(text)
+    rejected(lambda: module.parse_emel(bad_emel))
+for key, expected, wrong in (
+        ("thread_contract", module.EMEL_THREAD_CONTRACT, "wrong_contract"),
+        ("prompt_rows", str(module.PROMPT_ROWS), str(module.PROMPT_ROWS - 1)),
+        ("max_new_tokens", str(module.MAX_NEW_TOKENS),
+         str(module.MAX_NEW_TOKENS - 1))):
+    bad_emel.write_text(
+        emel_text().replace(f"{key}={expected}", f"{key}={wrong}"))
+    rejected(lambda: module.parse_emel(bad_emel))
+
+wrong_marker_masked_by_metric = root / "wrong-marker-masked-by-metric.txt"
+wrong_marker_masked_by_metric.write_text(
+    emel_text().replace("thread_contract=single_thread ",
+                        "thread_contract=wrong_contract ").replace(
+        " iter=1 runs=1", " thread_contract=single_thread iter=1 runs=1"))
+rejected(lambda: module.parse_emel(wrong_marker_masked_by_metric))
+
+marker_metric_collision = root / "marker-metric-collision.txt"
+marker_metric_collision.write_text(
+    emel_text().replace(" iter=1 runs=1",
+                        " backend_id=emel_needle_request_serial iter=1 runs=1"))
+rejected(lambda: module.parse_emel(marker_metric_collision))
+
+unexpected_metric_metadata = root / "unexpected-metric-metadata.txt"
+unexpected_metric_metadata.write_text(
+    emel_text().replace(" iter=1 runs=1", " metadata=unexpected iter=1 runs=1"))
+rejected(lambda: module.parse_emel(unexpected_metric_metadata))
+
+duplicate_metric_key = root / "duplicate-metric-key.txt"
+duplicate_metric_key.write_text(
+    emel_text().replace(" iter=1 runs=1", " iter=1 iter=1 runs=1"))
+rejected(lambda: module.parse_emel(duplicate_metric_key))
+
+old_contract_emel = root / "old-contract-emel.txt"
+old_contract_emel.write_text(
+    emel_text().replace(
+        "backend_id=emel_needle_request_serial route=serial ",
+        "backend_id=emel_needle_request_parallel4 route=parallel4 ").replace(
+        "thread_count=1 thread_contract=single_thread ",
+        "thread_count=4 thread_contract=bounded_fork_join_3_workers_plus_owner "))
+rejected(lambda: module.parse_emel(old_contract_emel))
+
+good_emel = root / "good-emel.txt"
+good_emel.write_text(emel_text())
+parsed = module.parse_emel(good_emel)
+assert parsed["backend_id"] == "emel_needle_request_serial"
+assert parsed["thread_count"] == module.THREAD_COUNT == 1
+large_envelope = {"success": True, "reasoning": "x" * 2048}
+large_emel = root / "large-emel.txt"
+large_emel.write_text(emel_text(envelope=large_envelope))
+large_parsed = module.parse_emel(large_emel)
+assert large_parsed["normalized_envelopes"] == [large_envelope] * module.PROMPT_ROWS
+unordered_json = '{"success":true,"function_calls":[{"name":"route","arguments":{"z":1,"a":2}}]}'
+unordered_emel = root / "unordered-emel.txt"
+unordered_hex = unordered_json.encode().hex()
+unordered_emel.write_text(emel_text().replace(
+    module.canonical_envelope({"success": True}).encode().hex(), unordered_hex))
+unordered_parsed = module.parse_emel(unordered_emel)
+assert unordered_parsed["normalized_envelopes"][0]["function_calls"][0]["name"] == "route"
+
+mismatch_reference = dict(reference)
+mismatch_reference["normalized_envelopes"] = [{"success": False}] * module.PROMPT_ROWS
+mismatch_reference_path = root / "mismatch-reference.json"
+mismatch_reference_path.write_text(json.dumps(mismatch_reference))
+with contextlib.redirect_stdout(io.StringIO()) as mismatch_output:
+    module.compare(types.SimpleNamespace(
+        emel_input=str(good_emel), reference_input=str(mismatch_reference_path)))
+assert "output_parity=mismatch" in mismatch_output.getvalue()
+assert "comparable=true" not in mismatch_output.getvalue()
+assert "ratio=" not in mismatch_output.getvalue()
+assert parsed["thread_contract"] == module.THREAD_CONTRACT == "single_thread"
+reference_path = root / "reference.json"
+reference_path.write_text(json.dumps(reference))
+with contextlib.redirect_stdout(io.StringIO()) as exact_output:
+    module.compare(types.SimpleNamespace(
+        emel_input=str(good_emel), reference_input=str(reference_path)))
+assert "output_parity=exact" in exact_output.getvalue()
+assert "wall_comparison=noncomparable_closed_reference_contract" in exact_output.getvalue()
+assert "comparable=true" not in exact_output.getvalue()
+assert "ratio=" not in exact_output.getvalue()
+)PY";
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-cactus-boundary";
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::string command =
+      "python3 -B -c " + quote_arg_posix(program) + " " +
+      quote_arg_posix(cactus_reference_driver_path().string()) + " > " +
+      quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+  const process_capture capture =
+      run_command_capture(command, stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+#endif
+}
+
+TEST_CASE("needle cactus rejects substituted package before executing it") {
+#if !defined(_WIN32)
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-cactus-timeout";
+  const std::filesystem::path needle_root = tmp_dir / "needle_root";
+  const std::filesystem::path needle_package = needle_root / "needle";
+  std::filesystem::create_directories(needle_package);
+  const std::filesystem::path import_sentinel = tmp_dir / "imported.txt";
+  write_file(needle_package / "__init__.py",
+             "from pathlib import Path\nPath(r\"" +
+                 import_sentinel.generic_string() +
+                 "\").write_text(\"executed\")\n");
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::filesystem::path output_path = tmp_dir / "reference.json";
+  const std::string command =
+      "python3 -B " + quote_arg_posix(cactus_reference_driver_path().string()) +
+      " run-reference --model " +
+      quote_arg_posix((repo_root() / "tests" / "models" /
+                       "route-w4-qat.cact").string()) +
+      " --fixture " +
+      quote_arg_posix((repo_root() / "tests" / "fixtures" / "cact" /
+                       "needle-heldout-prompts.tsv").string()) +
+      " --needle-root " + quote_arg_posix(needle_root.string()) +
+      " --warmup-iterations 0 --warmup-runs 0 --iterations 1 --runs 1" +
+      " --timeout-seconds 1 --output " + quote_arg_posix(output_path.string()) +
+      " > " + quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+  const process_capture capture =
+      run_command_capture(command, stdout_path, stderr_path);
+  CHECK(capture.exit_code != 0);
+  CHECK(capture.stderr_text.find("Needle package tree SHA-256 mismatch") !=
+        std::string::npos);
+  CHECK_FALSE(std::filesystem::exists(import_sentinel));
+  CHECK_FALSE(std::filesystem::exists(output_path));
+#endif
+}
+
+TEST_CASE("needle cactus direct worker reentry is unavailable") {
+#if !defined(_WIN32)
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-worker-reentry";
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path sentinel = tmp_dir / "imported.txt";
+  const std::filesystem::path needle_root = tmp_dir / "needle-root";
+  const std::filesystem::path needle_package = needle_root / "needle";
+  std::filesystem::create_directories(needle_package);
+  write_file(needle_package / "__init__.py",
+             "from pathlib import Path\nPath(r\"" +
+                 sentinel.generic_string() +
+                 "\").write_text(\"executed\")\n");
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::string command =
+      "python3 -I -S -B " +
+      quote_arg_posix(cactus_reference_driver_path().string()) +
+      " run-reference-worker --staged --model ignored --fixture ignored" +
+      " --needle-root " + quote_arg_posix(needle_root.string()) +
+      " --output " + quote_arg_posix((tmp_dir / "output.json").string()) +
+      " > " + quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+  const process_capture capture =
+      run_command_capture(command, stdout_path, stderr_path);
+  CHECK(capture.exit_code != 0);
+  CHECK(capture.stderr_text.find("invalid choice: 'run-reference-worker'") !=
+        std::string::npos);
+  CHECK_FALSE(std::filesystem::exists(sentinel));
+#endif
+}
+
+TEST_CASE("needle cactus supervisor forks only over staged authenticated bytes") {
+#if !defined(_WIN32)
+  const std::string program = R"PY(
+import argparse
+import hashlib
+import importlib.util
+import os
+import pathlib
+import sys
+import tempfile
+
+spec = importlib.util.spec_from_file_location("cactus_reference", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+root = pathlib.Path(tempfile.mkdtemp())
+needle_root = root / "needle-root"
+package_root = needle_root / "needle"
+package_root.mkdir(parents=True)
+library = root / "libneedle.so"
+model = root / "model.cact"
+fixture = root / "fixture.tsv"
+output = root / "reference.json"
+library_bytes = b"authenticated native library"
+model_bytes = b"authenticated model"
+fixture_bytes = b"authenticated fixture"
+library.write_bytes(library_bytes)
+model.write_bytes(model_bytes)
+fixture.write_bytes(fixture_bytes)
+init_bytes = (
+    "__version__ = '2.0.8'\n"
+    "class Needle: pass\n"
+    "def _library_path():\n"
+    f"    return {str(library)!r}\n"
+).encode()
+(package_root / "__init__.py").write_bytes(init_bytes)
+sha256 = lambda data: hashlib.sha256(data).hexdigest()
+module.MODEL_SHA256 = sha256(model_bytes)
+module.FIXTURE_SHA256 = sha256(fixture_bytes)
+module.NEEDLE_PACKAGE_INIT_SHA256 = sha256(init_bytes)
+module.NEEDLE_PACKAGE_TREE_SHA256 = module.sha256_python_tree(package_root)
+module.NEEDLE_NATIVE_LIBRARY_SHA256 = sha256(library_bytes)
+module.validate_canonical_path = lambda path, expected, name: None
+os.environ["NEEDLE_TELEMETRY"] = "1"
+os.environ["NEEDLE_TELEMETRY_URL"] = "https://attacker.invalid/collect"
+os.environ.pop("DO_NOT_TRACK", None)
+
+captured = {}
+def fake_fork(args, staged_model, staged_fixture, staged_root,
+              staged_library, timeout, environment):
+    (package_root / "__init__.py").write_bytes(
+        b"raise RuntimeError('swapped package executed')\n")
+    model.write_bytes(b"swapped model")
+    fixture.write_bytes(b"swapped fixture")
+    library.write_bytes(b"swapped native library")
+    staged_package = staged_root / "needle"
+    assert staged_model != model
+    assert staged_fixture != fixture
+    assert staged_root != needle_root
+    assert staged_model.read_bytes() == model_bytes
+    assert staged_fixture.read_bytes() == fixture_bytes
+    assert (staged_package / "__init__.py").read_bytes() == init_bytes
+    assert staged_library.read_bytes() == library_bytes
+    assert module.sha256_python_tree(
+        staged_package, allow_native_library=staged_library
+    ) == module.NEEDLE_PACKAGE_TREE_SHA256
+    assert module.sha256_file(staged_library) == module.NEEDLE_NATIVE_LIBRARY_SHA256
+    assert environment["NEEDLE_LIB_PATH"] == str(staged_library)
+    assert environment["NEEDLE_TELEMETRY"] == "0"
+    assert environment["DO_NOT_TRACK"] == "1"
+    assert "NEEDLE_TELEMETRY_URL" not in environment
+    assert not (set(module.INJECTION_ENVIRONMENT_VARIABLES) &
+                (set(environment) - {"NEEDLE_LIB_PATH"}))
+    pathlib.Path(args.output).write_text('{"ok": true}\n')
+    captured["stage"] = staged_root.parent
+
+module.run_forked_reference = fake_fork
+module.run_reference_subprocess(argparse.Namespace(
+    timeout_seconds=5, model=str(model), fixture=str(fixture),
+    needle_root=str(needle_root), warmup_iterations=0, warmup_runs=0,
+    iterations=1, runs=1, output=str(output)))
+assert not captured["stage"].exists()
+)PY";
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-staged-authentication";
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::string command =
+      "python3 -I -S -B -c " + quote_arg_posix(program) + " " +
+      quote_arg_posix(cactus_reference_driver_path().string()) + " > " +
+      quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+  const process_capture capture =
+      run_command_capture(command, stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+#endif
+}
+
+TEST_CASE("needle cactus authenticated child forces telemetry off") {
+#if !defined(_WIN32)
+  const std::string program = R"PY(
+import argparse
+import importlib.util
+import json
+import os
+import pathlib
+import sys
+import tempfile
+
+spec = importlib.util.spec_from_file_location("cactus_reference", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+root = pathlib.Path(tempfile.mkdtemp())
+output = root / "output.json"
+args = argparse.Namespace(warmup_iterations=0, warmup_runs=0, iterations=1,
+                          runs=1, output=str(output))
+paths = [root / name for name in ("model", "fixture", "package", "library")]
+for path in paths:
+    path.mkdir() if path.name == "package" else path.write_bytes(b"x")
+
+def capture_environment(_args):
+    return {
+        "needle_telemetry": os.environ.get("NEEDLE_TELEMETRY"),
+        "do_not_track": os.environ.get("DO_NOT_TRACK"),
+        "telemetry_url_present": "NEEDLE_TELEMETRY_URL" in os.environ,
+    }
+
+module.run_reference = capture_environment
+module.run_forked_reference(
+    args, paths[0], paths[1], paths[2], paths[3], 10,
+    {"NEEDLE_TELEMETRY": "1", "DO_NOT_TRACK": "",
+     "NEEDLE_TELEMETRY_URL": "https://attacker.invalid/collect"})
+
+record = json.loads(output.read_text())
+assert record == {
+    "needle_telemetry": "0",
+    "do_not_track": "1",
+    "telemetry_url_present": False,
+}
+)PY";
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-telemetry-isolation";
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::string command =
+      "python3 -I -S -B -c " + quote_arg_posix(program) + " " +
+      quote_arg_posix(cactus_reference_driver_path().string()) + " > " +
+      quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+  const process_capture capture =
+      run_command_capture(command, stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+#endif
+}
+TEST_CASE("needle cactus output ignores predictable sibling symlink") {
+#if !defined(_WIN32)
+  const std::string program = R"PY(
+import importlib.util
+import pathlib
+import sys
+import tempfile
+
+spec = importlib.util.spec_from_file_location("cactus_reference", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+root = pathlib.Path(tempfile.mkdtemp())
+output = root / "reference.json"
+sentinel = root / "sentinel"
+sentinel.write_text("unchanged")
+(root / "reference.json.tmp").symlink_to(sentinel)
+module.write_reference_output({"ok": True}, output)
+assert output.read_text() == '{"ok": true}\n'
+assert sentinel.read_text() == "unchanged"
+assert (root / "reference.json.tmp").is_symlink()
+)PY";
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-output-symlink";
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::string command =
+      "python3 -I -S -B -c " + quote_arg_posix(program) + " " +
+      quote_arg_posix(cactus_reference_driver_path().string()) + " > " +
+      quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+  const process_capture capture =
+      run_command_capture(command, stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+#endif
+}
+
+
+TEST_CASE("needle cactus supervisor reaps live child on timeout exception and signal") {
+#if !defined(_WIN32)
+  const std::string program = R"PY(
+import argparse
+import importlib.util
+import os
+import pathlib
+import signal
+import sys
+import tempfile
+import time
+
+spec = importlib.util.spec_from_file_location("cactus_reference", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+root = pathlib.Path(tempfile.mkdtemp())
+args = argparse.Namespace(warmup_iterations=0, warmup_runs=0, iterations=1,
+                          runs=1, output=str(root / "output.json"))
+staged = root / "staged"
+staged.mkdir()
+model = staged / "model"
+fixture = staged / "fixture"
+package = staged / "package"
+library = staged / "library"
+for path in (model, fixture, library):
+    path.write_bytes(b"x")
+package.mkdir()
+
+def assert_reaped(pid, failure):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return
+    raise AssertionError(failure)
+
+original_handlers = {sig: signal.getsignal(sig)
+                     for sig in module.SUPERVISOR_SIGNALS}
+real_monotonic = time.monotonic
+real_sleep = time.sleep
+
+timeout_worker_path = root / "timeout-worker.pid"
+def timeout_worker(_args):
+    timeout_worker_path.write_text(str(os.getpid()))
+    real_sleep(60)
+module.run_reference = timeout_worker
+timeout_now = 0
+def timeout_monotonic():
+    global timeout_now
+    timeout_now += 1
+    if timeout_now == 2:
+        deadline = real_monotonic() + 5
+        while not timeout_worker_path.exists() and real_monotonic() < deadline:
+            real_sleep(0.001)
+    return timeout_now
+module.time.monotonic = timeout_monotonic
+module.time.sleep = lambda _seconds: None
+try:
+    module.run_forked_reference(args, model, fixture, package, library, 1, {})
+    raise AssertionError("timeout was swallowed")
+except SystemExit as exc:
+    assert "exceeded 1s timeout" in str(exc)
+finally:
+    module.time.monotonic = real_monotonic
+    module.time.sleep = real_sleep
+assert_reaped(int(timeout_worker_path.read_text()), "timeout left worker alive")
+assert {sig: signal.getsignal(sig) for sig in module.SUPERVISOR_SIGNALS} == original_handlers
+
+exception_worker_path = root / "exception-worker.pid"
+def exception_worker(_args):
+    exception_worker_path.write_text(str(os.getpid()))
+    real_sleep(60)
+module.run_reference = exception_worker
+calls = 0
+def parent_exception():
+    global calls
+    calls += 1
+    if calls == 1:
+        return real_monotonic()
+    deadline = real_monotonic() + 5
+    while not exception_worker_path.exists() and real_monotonic() < deadline:
+        real_sleep(0.001)
+    raise RuntimeError("parent wait failure")
+module.time.monotonic = parent_exception
+try:
+    module.run_forked_reference(args, model, fixture, package, library, 10, {})
+    raise AssertionError("parent exception was swallowed")
+except RuntimeError as exc:
+    assert str(exc) == "parent wait failure"
+finally:
+    module.time.monotonic = real_monotonic
+assert_reaped(int(exception_worker_path.read_text()), "exception left worker alive")
+assert {sig: signal.getsignal(sig) for sig in module.SUPERVISOR_SIGNALS} == original_handlers
+
+signal_worker_path = root / "signal-worker.pid"
+supervisor = os.fork()
+if supervisor == 0:
+    def signal_worker(_args):
+        signal_worker_path.write_text(str(os.getpid()))
+        real_sleep(60)
+    module.run_reference = signal_worker
+    module.run_forked_reference(args, model, fixture, package, library, 10, {})
+    os._exit(0)
+deadline = real_monotonic() + 5
+while not signal_worker_path.exists() and real_monotonic() < deadline:
+    real_sleep(0.001)
+assert signal_worker_path.exists(), "signal worker did not start"
+os.kill(supervisor, signal.SIGTERM)
+waited, status = os.waitpid(supervisor, 0)
+assert waited == supervisor
+assert os.WIFEXITED(status) and os.WEXITSTATUS(status) == 128 + signal.SIGTERM
+assert_reaped(int(signal_worker_path.read_text()), "signal left worker alive")
+)PY";
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-supervisor-lifecycle";
+  std::error_code ec;
+  std::filesystem::remove_all(tmp_dir, ec);
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::string command =
+      "python3 -I -S -B -c " + quote_arg_posix(program) + " " +
+      quote_arg_posix(cactus_reference_driver_path().string()) + " > " +
+      quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+  const process_capture capture =
+      run_command_capture(command, stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+#endif
+}
+
+TEST_CASE("needle cactus supervisor uses an explicit safe worker environment") {
+#if !defined(_WIN32)
+  const std::string program = R"PY(
+import argparse
+import importlib.util
+import os
+import pathlib
+import sys
+import tempfile
+
+spec = importlib.util.spec_from_file_location("cactus_reference", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+for name in module.WORKER_ENVIRONMENT_ALLOWLIST:
+    os.environ.pop(name, None)
+for name in module.INJECTION_ENVIRONMENT_VARIABLES:
+    os.environ[name] = "injected"
+os.environ.update(HOME="/safe-home", XDG_CACHE_HOME="/safe-cache",
+                  TMPDIR="/safe-temp", LANG="C.UTF-8", LC_ALL="C",
+                  NEEDLE_THREADS="1", UNRELATED_SECRET="must-not-pass")
+root = pathlib.Path(tempfile.mkdtemp())
+needle_root = root / "needle-root"
+(needle_root / "needle").mkdir(parents=True)
+model = root / "model"
+fixture = root / "fixture"
+model.write_bytes(b"model")
+fixture.write_bytes(b"fixture")
+module.copy_authenticated_file = lambda source, destination, name: destination.write_bytes(source.read_bytes())
+module.stage_needle_package = lambda source, destination: destination / "needle"
+module.import_needle = lambda root, package: object()
+module.stage_needle_native_library = lambda needle, package: package / "libneedle.so"
+module.validate_canonical_input = lambda path, expected, name: None
+module.validate_canonical_path = lambda path, expected, name: None
+module.validate_needle_package = lambda root, **kwargs: root / "needle"
+captured = {}
+def fake_fork(args, staged_model, staged_fixture, staged_root,
+              staged_library, timeout, environment):
+    captured.update(timeout=timeout, environment=environment,
+                    staged_library=staged_library)
+module.run_forked_reference = fake_fork
+module.run_reference_subprocess(argparse.Namespace(
+    timeout_seconds=5, model=str(model), fixture=str(fixture),
+    needle_root=str(needle_root), warmup_iterations=0, warmup_runs=0,
+    iterations=1, runs=1, output=str(root / "output.json")))
+assert captured["timeout"] == 5
+worker_env = captured["environment"]
+assert worker_env == {
+    "HOME": "/safe-home", "XDG_CACHE_HOME": "/safe-cache",
+    "TMPDIR": "/safe-temp", "LANG": "C.UTF-8", "LC_ALL": "C",
+    "NEEDLE_THREADS": "1", "PYTHONNOUSERSITE": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "NEEDLE_LIB_PATH": str(captured["staged_library"]),
+}
+assert not (set(module.INJECTION_ENVIRONMENT_VARIABLES) &
+            (set(worker_env) - {"NEEDLE_LIB_PATH"}))
+assert "UNRELATED_SECRET" not in worker_env
+)PY";
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-worker-environment";
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::string command =
+      "python3 -I -S -B -c " + quote_arg_posix(program) + " " +
+      quote_arg_posix(cactus_reference_driver_path().string()) + " > " +
+      quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+  const process_capture capture =
+      run_command_capture(command, stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+#endif
+}
+TEST_CASE("needle cactus aggregates iterations within runs before median") {
+#if !defined(_WIN32)
+  const std::string program = R"PY(
+import importlib.util
+import sys
+
+spec = importlib.util.spec_from_file_location("cactus_reference", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+assert module.median_run_means([[1.0, 99.0], [60.0, 60.0], [70.0, 70.0]],
+                               "sample") == 60.0
+)PY";
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-run-aggregation";
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::string command =
+      "python3 -I -S -B -c " + quote_arg_posix(program) + " " +
+      quote_arg_posix(cactus_reference_driver_path().string()) + " > " +
+      quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+  const process_capture capture =
+      run_command_capture(command, stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stderr_text.empty());
+#endif
+}
+
+
+TEST_CASE("needle canonical compare has pinned model and retokenizes fixture") {
+  const std::string wrapper =
+      read_file(repo_root() / "scripts" / "bench.sh");
+  const std::string driver = read_file(cactus_reference_driver_path());
+  const std::string graph = read_file(
+      repo_root() / "tools" / "bench" / "model" / "needle" /
+      "graph_bench.cpp");
+  CHECK(wrapper.find("EMEL_BENCH_NEEDLE_MODEL is unsupported") !=
+        std::string::npos);
+  CHECK(driver.find("MODEL_SHA256 =") != std::string::npos);
+  CHECK(driver.find("FIXTURE_SHA256 =") != std::string::npos);
+  CHECK(driver.find("NEEDLE_PACKAGE_TREE_SHA256 =") != std::string::npos);
+  CHECK(driver.find("NEEDLE_NATIVE_LIBRARY_SHA256 =") != std::string::npos);
+  CHECK(driver.find("NEEDLE_PACKAGE_VERSION = \"2.0.8\"") != std::string::npos);
+  CHECK(wrapper.find("NEEDLE_LIB_PATH is unsupported") != std::string::npos);
+  CHECK(wrapper.find("NEEDLE_PYTHON_SHA256=") != std::string::npos);
+  CHECK(wrapper.find("validate_needle_python \"${EMEL_BENCH_NEEDLE_PYTHON}\"") !=
+        std::string::npos);
+  CHECK(wrapper.find("NEEDLE_AUTHENTICATED_EXEC=") != std::string::npos);
+  CHECK(wrapper.find("needle_authenticated_exec") != std::string::npos);
+  CHECK(wrapper.find("NEEDLE_PYTHON_STAGE_DIR=") == std::string::npos);
+  CHECK(wrapper.find("sha256sum \"$staged_python\"") == std::string::npos);
+  CHECK(wrapper.find("local python_executable=\"$NEEDLE_PYTHON_EXECUTABLE\"") !=
+        std::string::npos);
+  CHECK(wrapper.find("validate_needle_python \"$python_executable\"") ==
+        std::string::npos);
+  CHECK(graph.find("request_fixture_token_id_mismatch") != std::string::npos);
+  CHECK(graph.find("request.text = row.prompt") != std::string::npos);
+  CHECK(graph.find("actual != row.token_ids") != std::string::npos);
+  CHECK(driver.find("cactus_public_sampling_unverified") != std::string::npos);
+  CHECK(driver.find("cactus_public_stop_unverified") != std::string::npos);
+  CHECK(driver.find("closed_reference_request_contract_missing_formatter_constraint_sampling_stop") !=
+        std::string::npos);
+  CHECK(driver.find("comparable=true") == std::string::npos);
+  CHECK(driver.find("wall_comparison=noncomparable_closed_reference_contract") !=
+        std::string::npos);
+  CHECK(driver.find("ratio=") == std::string::npos);
+  CHECK(graph.find("phase_rate_semantics=closed_reference_phase_contract_missing_token_counts_and_timestamps") !=
+        std::string::npos);
+  CHECK(wrapper.find("EMEL_BENCH_NEEDLE_TIMEOUT_SECONDS") !=
+        std::string::npos);
+  CHECK(driver.find("worker_environment({\"NEEDLE_LIB_PATH\": str(staged_library)})") !=
+        std::string::npos);
+  CHECK(driver.find("median_run_means") != std::string::npos);
+  CHECK(graph.find("proof_status=measurement_only") != std::string::npos);
+  CHECK(graph.find("out.comparable = false;") != std::string::npos);
+  CHECK(wrapper.find("resolve_needle_python") != std::string::npos);
+  CHECK(wrapper.find("readlink -f \"$python_executable\" 2>/dev/null") !=
+        std::string::npos);
+}
+TEST_CASE("needle compare default build still provisions authenticated exec") {
+  const std::string wrapper = read_file(repo_root() / "scripts" / "bench.sh");
+  const std::size_t configure_begin =
+      wrapper.find("configure_bench_build() {");
+  REQUIRE(configure_begin != std::string::npos);
+  const std::size_t configure_end =
+      wrapper.find("\nupdate_snapshot_baseline() {", configure_begin);
+  REQUIRE(configure_end != std::string::npos);
+  const std::string configure =
+      wrapper.substr(configure_begin, configure_end - configure_begin);
+  CHECK(configure.find("if [[ \"$SUITE_FILTER\" == \"needle_graph\" ]]") !=
+        std::string::npos);
+  CHECK(configure.find("if [[ \"$build_suite_filter\" == \"needle_graph\" ]]") ==
+        std::string::npos);
+  CHECK(configure.find("bench_runner needle_authenticated_exec") !=
+        std::string::npos);
+  CHECK(configure.find(
+            "NEEDLE_AUTHENTICATED_EXEC=\"$build_dir/needle_authenticated_exec\"") !=
+        std::string::npos);
+}
+
+
+TEST_CASE("needle authenticated exec resists source replacement after authentication") {
+#if defined(__linux__)
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-authenticated-exec-race";
+  std::error_code ec;
+  std::filesystem::remove_all(tmp_dir, ec);
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path configured = tmp_dir / "python";
+  const std::filesystem::path replacement = tmp_dir / "replacement";
+  const std::filesystem::path original_marker = tmp_dir / "original-ran";
+  const std::filesystem::path replacement_marker = tmp_dir / "replacement-ran";
+  const std::filesystem::path ready = tmp_dir / "ready";
+  const std::filesystem::path proceed = tmp_dir / "continue";
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::filesystem::path status_path = tmp_dir / "status.txt";
+  std::filesystem::copy_file("/usr/bin/python3.12", configured);
+  std::filesystem::copy_file("/bin/false", replacement);
+  make_executable(configured);
+  make_executable(replacement);
+  const std::string digest_command =
+      "sha256sum " + quote_arg_posix(configured.string()) +
+      " | cut -d' ' -f1";
+  std::array<char, 128> digest_buffer{};
+  FILE *digest_pipe = popen(digest_command.c_str(), "r");
+  REQUIRE(digest_pipe != nullptr);
+  REQUIRE(std::fgets(digest_buffer.data(),
+                     static_cast<int>(digest_buffer.size()), digest_pipe) != nullptr);
+  REQUIRE(pclose(digest_pipe) == 0);
+  std::string digest = digest_buffer.data();
+  while (!digest.empty() && (digest.back() == '\n' || digest.back() == '\r')) {
+    digest.pop_back();
+  }
+
+  const std::string helper =
+      quote_arg_posix(needle_authenticated_exec_test_path().string());
+  const std::string command =
+      "set -eu; EMEL_AUTHENTICATED_EXEC_TEST_READY=" +
+      quote_arg_posix(ready.string()) +
+      " EMEL_AUTHENTICATED_EXEC_TEST_CONTINUE=" + quote_arg_posix(proceed.string()) +
+      " " + helper + " " + quote_arg_posix(configured.string()) + " " +
+      quote_arg_posix(digest) + " -- " + quote_arg_posix(configured.string()) +
+      " -I -S -B -c " +
+      quote_arg_posix("open('" + original_marker.string() +
+                      "','w').write('original')") +
+      " > " + quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string()) + " & child=$!; "
+      "while [ ! -e " + quote_arg_posix(ready.string()) + " ]; do sleep 0.01; done; "
+      "mv -f " + quote_arg_posix(replacement.string()) + " " +
+      quote_arg_posix(configured.string()) + "; : > " +
+      quote_arg_posix(proceed.string()) + "; wait $child; printf '%s' $? > " +
+      quote_arg_posix(status_path.string());
+  const process_capture capture =
+      run_command_capture(command, stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(read_file(status_path) == "0");
+  CHECK(capture.stderr_text.empty());
+  CHECK(std::filesystem::exists(original_marker));
+  CHECK_FALSE(std::filesystem::exists(replacement_marker));
+#endif
+}
+
+TEST_CASE("needle authenticated exec rejects the wrong interpreter hash") {
+#if defined(__linux__)
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-authenticated-exec-wrong-hash";
+  std::error_code ec;
+  std::filesystem::remove_all(tmp_dir, ec);
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path configured = tmp_dir / "python";
+  const std::filesystem::path marker = tmp_dir / "ran";
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  write_file(configured,
+             "#!/bin/sh\nprintf ran > " + quote_arg_posix(marker.string()) + "\n");
+  make_executable(configured);
+  const process_capture capture = run_command_capture(
+      quote_arg_posix(needle_authenticated_exec_test_path().string()) + " " +
+          quote_arg_posix(configured.string()) + " " + std::string(64u, '0') +
+          " -- " + quote_arg_posix(configured.string()) + " > " +
+          quote_arg_posix(stdout_path.string()) + " 2> " +
+          quote_arg_posix(stderr_path.string()),
+      stdout_path, stderr_path);
+  CHECK(capture.exit_code != 0);
+  CHECK(capture.stderr_text.find("configured Needle Python SHA-256 mismatch") !=
+        std::string::npos);
+  CHECK_FALSE(std::filesystem::exists(marker));
+#endif
+}
+
+TEST_CASE("needle authenticated exec closes interpreter memfd across exec") {
+#if defined(__linux__)
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-authenticated-exec-cloexec";
+  std::error_code ec;
+  std::filesystem::remove_all(tmp_dir, ec);
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::string program =
+      "import os,pathlib; leaked=[]; "
+      "[(leaked.append(str(p)) if 'emel-needle-python' in "
+      "os.readlink(p) else None) for p in pathlib.Path('/proc/self/fd').iterdir() "
+      "if p.exists()]; assert not leaked, leaked; print('cloexec-ok')";
+  const process_capture capture = run_command_capture(
+      quote_arg_posix(needle_authenticated_exec_test_path().string()) + " " +
+          quote_arg_posix("/usr/bin/python3.12") + " " +
+          "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118" +
+          " -- /usr/bin/python3.12 -I -S -B -c " + quote_arg_posix(program) +
+          " > " + quote_arg_posix(stdout_path.string()) + " 2> " +
+          quote_arg_posix(stderr_path.string()),
+      stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stdout_text == "cloexec-ok\n");
+  CHECK(capture.stderr_text.empty());
+#endif
+}
+
+TEST_CASE("needle authenticated exec accepts every allowlisted environment variable") {
+#if defined(__linux__)
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-authenticated-exec-full-environment";
+  std::error_code ec;
+  std::filesystem::remove_all(tmp_dir, ec);
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::string environment =
+      "HOME=/tmp XDG_CACHE_HOME=/tmp TMPDIR=/tmp TMP=/tmp TEMP=/tmp "
+      "LANG=C LANGUAGE=C LC_ALL=C LC_CTYPE=C LC_NUMERIC=C LC_TIME=C "
+      "LC_COLLATE=C LC_MONETARY=C LC_MESSAGES=C LC_PAPER=C LC_NAME=C "
+      "LC_ADDRESS=C LC_TELEPHONE=C LC_MEASUREMENT=C LC_IDENTIFICATION=C "
+      "NEEDLE_THREADS=1 ";
+  const std::string program =
+      "import os; names=('HOME','XDG_CACHE_HOME','TMPDIR','TMP','TEMP','LANG',"
+      "'LANGUAGE','LC_ALL','LC_CTYPE','LC_NUMERIC','LC_TIME','LC_COLLATE',"
+      "'LC_MONETARY','LC_MESSAGES','LC_PAPER','LC_NAME','LC_ADDRESS',"
+      "'LC_TELEPHONE','LC_MEASUREMENT','LC_IDENTIFICATION','NEEDLE_THREADS'); "
+      "assert all(name in os.environ for name in names); print('full-env-ok')";
+  const process_capture capture = run_command_capture(
+      environment + quote_arg_posix(needle_authenticated_exec_test_path().string()) +
+          " /usr/bin/python3.12 "
+          "1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118" +
+          " -- /usr/bin/python3.12 -I -S -B -c " + quote_arg_posix(program) +
+          " > " + quote_arg_posix(stdout_path.string()) + " 2> " +
+          quote_arg_posix(stderr_path.string()),
+      stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stdout_text == "full-env-ok\n");
+  CHECK(capture.stderr_text.empty());
+#endif
+}
+
+TEST_CASE("needle compare wrapper rejects model, library override, and unbounded counts") {
+#if !defined(_WIN32)
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-wrapper-boundaries";
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path fake_python = tmp_dir / "python";
+  const std::filesystem::path fake_needle = tmp_dir / "needle";
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  write_file(fake_python, "#!/bin/sh\nexit 0\n");
+  make_executable(fake_python);
+  std::filesystem::create_directories(fake_needle);
+  const std::string base =
+      needle_clean_environment_prefix() +
+      "EMEL_BENCH_NEEDLE_PYTHON=" + quote_arg_posix(fake_python.string()) +
+      " EMEL_BENCH_NEEDLE_ROOT=" + quote_arg_posix(fake_needle.string()) + " ";
+  const std::string wrapper =
+      quote_arg_posix((repo_root() / "scripts" / "bench.sh").string()) +
+      " --compare --suite=needle_graph --system > " +
+      quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+  process_capture capture = run_command_capture(
+      base + "EMEL_BENCH_NEEDLE_REQUEST_RUNS=26 " + wrapper,
+      stdout_path, stderr_path);
+  CHECK(capture.exit_code != 0);
+  CHECK(capture.stderr_text.find(
+            "EMEL_BENCH_NEEDLE_REQUEST_RUNS must be an integer in [1, 25]") !=
+        std::string::npos);
+  capture = run_command_capture(
+      base + "EMEL_BENCH_NEEDLE_REQUEST_WARMUP_RUNS=0 " + wrapper,
+      stdout_path, stderr_path);
+  CHECK(capture.exit_code != 0);
+  CHECK(capture.stderr_text.find(
+            "EMEL_BENCH_NEEDLE_REQUEST_WARMUP_RUNS must be an integer in [1, 25]") !=
+        std::string::npos);
+  capture = run_command_capture(
+      base + "EMEL_BENCH_NEEDLE_REQUEST_ITERS=33 " + wrapper,
+      stdout_path, stderr_path);
+  CHECK(capture.exit_code != 0);
+  CHECK(capture.stderr_text.find(
+            "EMEL_BENCH_NEEDLE_REQUEST_ITERS must be an integer in [1, 32]") !=
+        std::string::npos);
+  capture = run_command_capture(
+      base + "EMEL_BENCH_NEEDLE_MODEL=/tmp/substitute " + wrapper,
+      stdout_path, stderr_path);
+  CHECK(capture.exit_code != 0);
+  CHECK(capture.stderr_text.find("EMEL_BENCH_NEEDLE_MODEL is unsupported") !=
+        std::string::npos);
+  capture = run_command_capture(
+      base + "NEEDLE_LIB_PATH=/tmp/substitute " + wrapper,
+      stdout_path, stderr_path);
+  CHECK(capture.exit_code != 0);
+  CHECK(capture.stderr_text.find("NEEDLE_LIB_PATH is unsupported") !=
+        std::string::npos);
+  capture = run_command_capture(base + wrapper, stdout_path, stderr_path);
+  CHECK(capture.exit_code != 0);
+  CHECK(capture.stderr_text.find("Needle Python SHA-256 mismatch") !=
+        std::string::npos);
+  capture = run_command_capture(
+      needle_clean_environment_prefix() +
+          "EMEL_BENCH_NEEDLE_PYTHON=" + quote_arg_posix(fake_needle.string()) +
+          " EMEL_BENCH_NEEDLE_ROOT=" + quote_arg_posix(fake_needle.string()) +
+          " " + wrapper,
+      stdout_path, stderr_path);
+  CHECK(capture.exit_code != 0);
+  CHECK(capture.stderr_text.find(
+            "cannot resolve canonical regular-file Needle Python executable") !=
+        std::string::npos);
+#endif
+}
+
+TEST_CASE("needle compare wrapper count contract matches runner semantics") {
+  const std::string wrapper = read_file(repo_root() / "scripts" / "bench.sh");
+  CHECK(wrapper.find("NEEDLE_REQUEST_MAX_ITERATIONS=32") !=
+        std::string::npos);
+  CHECK(wrapper.find("NEEDLE_REQUEST_MAX_RUNS=25") != std::string::npos);
+  CHECK(wrapper.find(
+            "\"$DEFAULT_NEEDLE_REQUEST_RUNS\" 1 \"$NEEDLE_REQUEST_MAX_RUNS\"") !=
+        std::string::npos);
+  CHECK(wrapper.find(
+            "\"$DEFAULT_NEEDLE_REQUEST_WARMUP_RUNS\" 1 \"$NEEDLE_REQUEST_MAX_RUNS\"") !=
+        std::string::npos);
+  CHECK(wrapper.find(
+            "\"$DEFAULT_NEEDLE_REQUEST_ITERS\" 1 \"$NEEDLE_REQUEST_MAX_ITERATIONS\"") !=
+        std::string::npos);
+  CHECK(wrapper.find(
+            "\"$DEFAULT_NEEDLE_REQUEST_WARMUP_ITERS\" 0 \"$NEEDLE_REQUEST_MAX_ITERATIONS\"") !=
+        std::string::npos);
+}
+TEST_CASE("needle compare wrapper rejects injection before launching Python") {
+#if !defined(_WIN32)
+  const std::array<std::string_view, 12> injection_variables = {
+      "LD_PRELOAD",
+      "LD_LIBRARY_PATH",
+      "LD_AUDIT",
+      "DYLD_LIBRARY_PATH",
+      "DYLD_INSERT_LIBRARIES",
+      "DYLD_FRAMEWORK_PATH",
+      "DYLD_FALLBACK_LIBRARY_PATH",
+      "DYLD_FALLBACK_FRAMEWORK_PATH",
+      "PYTHONPATH",
+      "PYTHONHOME",
+      "PYTHONSTARTUP",
+      "PYTHONINSPECT",
+  };
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-wrapper-injection";
+  const std::filesystem::path fake_needle = tmp_dir / "needle";
+  const std::filesystem::path sentinel = tmp_dir / "python-launched.txt";
+  const std::filesystem::path fake_python = tmp_dir / "python";
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  std::filesystem::create_directories(fake_needle);
+  write_file(fake_python,
+             "#!/bin/sh\nprintf launched > " +
+                 quote_arg_posix(sentinel.string()) + "\nexit 0\n");
+  make_executable(fake_python);
+
+  const std::string base =
+      "EMEL_BENCH_NEEDLE_PYTHON=" + quote_arg_posix(fake_python.string()) +
+      " EMEL_BENCH_NEEDLE_ROOT=" + quote_arg_posix(fake_needle.string()) + " ";
+  const std::string wrapper =
+      quote_arg_posix((repo_root() / "scripts" / "bench.sh").string()) +
+      " --compare --suite=needle_graph --system > " +
+      quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+
+  for (const std::string_view variable : injection_variables) {
+    std::filesystem::remove(sentinel);
+    const process_capture capture = run_command_capture(
+        needle_clean_environment_prefix() + std::string{variable} +
+            "=injected " + base + wrapper,
+        stdout_path, stderr_path);
+    CHECK(capture.exit_code != 0);
+    CHECK(capture.stderr_text.find(
+              "error: dynamic-loader/Python injection variable is set: " +
+              std::string{variable}) != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(sentinel));
+  }
+#endif
+}
+
+
+TEST_CASE("needle graph emits live request metadata without recorded rows") {
+#if defined(__x86_64__) || defined(_M_X64)
+  const process_capture snapshot =
+      run_needle_graph_bench_capture("emel", "needle-graph-emel");
+  REQUIRE(snapshot.exit_code == 0);
+  CHECK(snapshot.stderr_text.find("error:") == std::string::npos);
+  CHECK(snapshot.stdout_text.find("libneedle-recorded") == std::string::npos);
+  CHECK(snapshot.stdout_text.find("measurement_only") == std::string::npos);
+  CHECK(snapshot.stdout_text.find(
+            "workload_id=needle_heldout_first4_greedy80_eos_v1") !=
+        std::string::npos);
+  CHECK(snapshot.stdout_text.find(
+            "reference=live_cactus_native phase=wall ") != std::string::npos);
+  CHECK(snapshot.stdout_text.find(
+            "fixture_id=tests/fixtures/cact/needle-heldout-prompts.tsv") !=
+        std::string::npos);
+  CHECK(snapshot.stdout_text.find(
+            "backend_id=emel_needle_request_serial route=serial") !=
+        std::string::npos);
+  CHECK(snapshot.stdout_text.find(
+            "thread_count=1"
+            " thread_contract=single_thread"
+            " prompt_rows=4") != std::string::npos);
+  CHECK(snapshot.stdout_text.find("emel_needle_request_parallel4") ==
+        std::string::npos);
+  const std::string graph_source = read_file(
+      repo_root() / "tools" / "bench" / "model" / "needle" /
+      "graph_bench.cpp");
+  CHECK(graph_source.find("needle::request::sm adapter") != std::string::npos);
+  CHECK(graph_source.find("run_request_batch(adapter, rows)") !=
+        std::string::npos);
+  CHECK(graph_source.find("run_request_batch<needle::graph::sm>") ==
+        std::string::npos);
+  CHECK(snapshot.stdout_text.find(
+            "max_new_tokens=80 sampling_id=greedy_argmax_v1 "
+            "stop_id=eos_or_max80_v1") != std::string::npos);
+  CHECK(snapshot.stdout_text.find(
+            "needle/graph/request_heldout_first4_greedy80/prefill ") !=
+        std::string::npos);
+  CHECK(snapshot.stdout_text.find(
+            "needle/graph/request_heldout_first4_greedy80/decode ") !=
+        std::string::npos);
+  CHECK(snapshot.stdout_text.find(
+            "phase_rate_semantics=closed_reference_phase_contract_missing_token_counts_and_timestamps") !=
+        std::string::npos);
+  const std::string prefill_line = find_line_with_prefix(
+      snapshot.stdout_text,
+      "needle/graph/request_heldout_first4_greedy80/prefill ns_per_op=");
+  REQUIRE_FALSE(prefill_line.empty());
+  const double prefill_ns = parse_named_double(prefill_line, "ns_per_op");
+  const double prefill_tps =
+      parse_named_double(prefill_line, "tokens_per_second");
+  REQUIRE(prefill_ns > 0.0);
+  CHECK(prefill_tps * prefill_ns / 1000000000.0 ==
+        doctest::Approx(336.75).epsilon(0.0001));
+  CHECK(snapshot.stdout_text.find("phase_tokens_per_batch=1347 ") !=
+        std::string::npos);
+#endif
+}
+
+TEST_CASE("needle graph compare wrapper hard fails without live reference") {
+#if !defined(_WIN32)
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-missing-reference";
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::string command =
+      needle_clean_environment_prefix() +
+      "env -u EMEL_BENCH_NEEDLE_PYTHON -u EMEL_BENCH_NEEDLE_ROOT " +
+      quote_arg_posix((repo_root() / "scripts" / "bench.sh").string()) +
+      " --compare --suite=needle_graph --system > " +
+      quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+  const process_capture capture =
+      run_command_capture(command, stdout_path, stderr_path);
+  CHECK(capture.exit_code != 0);
+  CHECK(capture.stderr_text.find("EMEL_BENCH_NEEDLE_PYTHON is required") !=
+        std::string::npos);
+#endif
+}
 
 TEST_CASE(
     "bench_runner generation compare keeps bounded maintained Liquid fixture") {
@@ -692,6 +2076,43 @@ TEST_CASE("benchmark measurement clamps zero runs and iterations") {
   CHECK(calls == 1u);
   CHECK(measured.iterations == 1u);
   CHECK(measured.runs == 1u);
+}
+
+TEST_CASE("benchmark run setup executes outside timing for every run") {
+  emel::bench::config cfg = {};
+  cfg.iterations = 3u;
+  cfg.runs = 5u;
+  cfg.warmup_iterations = 2u;
+  cfg.warmup_runs = 1u;
+  std::uint32_t setup_calls = 0u;
+  std::uint32_t measured_calls = 0u;
+  std::uint32_t calls_since_setup = 0u;
+  bool fixed_run_extent = true;
+
+  const auto measured = emel::bench::measure_case_with_run_setup(
+      "bench/run_setup", cfg,
+      [&]() {
+        if (setup_calls > 0u) {
+          const std::uint32_t expected_calls =
+              setup_calls == 1u ? cfg.warmup_iterations : cfg.iterations;
+          fixed_run_extent =
+              fixed_run_extent && calls_since_setup == expected_calls;
+        }
+        ++setup_calls;
+        calls_since_setup = 0u;
+      },
+      [&]() {
+        ++measured_calls;
+        ++calls_since_setup;
+      });
+
+  CHECK(setup_calls == cfg.warmup_runs + cfg.runs);
+  CHECK(measured_calls ==
+        cfg.warmup_iterations * cfg.warmup_runs + cfg.iterations * cfg.runs);
+  CHECK(calls_since_setup == cfg.iterations);
+  CHECK(fixed_run_extent);
+  CHECK(measured.iterations == cfg.iterations);
+  CHECK(measured.runs == cfg.runs);
 }
 
 TEST_CASE("bench runner contract rejects malformed process payloads") {
@@ -1146,6 +2567,24 @@ TEST_CASE(
   CHECK(has_generation_model);
   CHECK(has_generation_script);
 
+  const auto needle_records = manifest::records_for("needle_graph");
+  bool has_live_reference_driver = false;
+  bool has_request_fixture = false;
+  bool has_compare_wrapper = false;
+  for (const auto &record : needle_records) {
+    has_live_reference_driver =
+        has_live_reference_driver ||
+        record.path == "tools/bench/model/needle/cactus_reference.py";
+    has_request_fixture =
+        has_request_fixture ||
+        record.path == "tests/fixtures/cact/needle-heldout-prompts.tsv";
+    has_compare_wrapper =
+        has_compare_wrapper || record.path == "scripts/bench.sh";
+  }
+  CHECK(has_live_reference_driver);
+  CHECK(has_request_fixture);
+  CHECK(has_compare_wrapper);
+
   const auto speech_lm_records = manifest::records_for("speech_lm_moshi");
   bool has_speech_lm_script = false;
   bool has_speech_lm_setup = false;
@@ -1169,6 +2608,85 @@ TEST_CASE(
   CHECK(has_speech_lm_moshi_binding);
   CHECK(has_personaplex_emel_runner);
   CHECK(manifest::records_for("missing_runner").empty());
+}
+
+TEST_CASE("needle combined snapshot compare filters only live diagnostics") {
+  const std::string wrapper = read_file(repo_root() / "scripts" / "bench.sh");
+  CHECK(wrapper.find(
+            "if [[ \"$SUITE_FILTER\" == \"needle_graph\" ]]; then\n"
+            "    EMEL_BENCH_NEEDLE_REQUEST_COMPARE=1 run_bench_runner \"$build_dir\" --mode=emel > \"$snapshot_output\"\n"
+            "    run_needle_graph_compare \"$build_dir\" > \"$compare_output\"") !=
+        std::string::npos);
+
+#if !defined(_WIN32)
+  const std::filesystem::path tmp_dir =
+      std::filesystem::temp_directory_path() / "emel-bench-runner-tests" /
+      "needle-snapshot-filter";
+  std::filesystem::create_directories(tmp_dir);
+  const std::filesystem::path snapshot_path = tmp_dir / "snapshot.txt";
+  const std::filesystem::path current_path = tmp_dir / "current.txt";
+  const std::filesystem::path stdout_path = tmp_dir / "stdout.txt";
+  const std::filesystem::path stderr_path = tmp_dir / "stderr.txt";
+  const std::string wrapper_command =
+      "EMEL_BENCH_TEST_SNAPSHOT_OUTPUT=" +
+      quote_arg_posix(snapshot_path.string()) +
+      " EMEL_BENCH_TEST_CURRENT_SNAPSHOT=" +
+      quote_arg_posix(current_path.string()) +
+      " EMEL_BENCH_TEST_SUITE_FILTER=needle_graph "
+      "EMEL_BENCH_TEST_SNAPSHOT_FILTER=1 " +
+      quote_arg_posix((repo_root() / "scripts" / "bench.sh").string()) +
+      " > " + quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+
+  write_file(snapshot_path,
+             "# needle_graph: lane=emel case=needle/graph/request "
+             "reference=live_cactus_native comparable=false\n"
+             "needle/graph/request ns_per_op=100 tokens_per_second=10\n");
+  process_capture capture = run_command_capture(
+      wrapper_command, stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stdout_text == "live-diagnostics-only\n");
+  CHECK(read_file(current_path).empty());
+
+  write_file(snapshot_path,
+             "# needle_graph: lane=emel case=needle/graph/request "
+             "reference=live_cactus_native comparable=false\n"
+             "needle/graph/request ns_per_op=100 tokens_per_second=10\n"
+             "# ordinary_suite: lane=emel case=ordinary/new_case\n"
+             "ordinary/new_case ns_per_op=200\n");
+  capture = run_command_capture(wrapper_command, stdout_path, stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stdout_text == "baseline-required\n");
+  CHECK(read_file(current_path) == "ordinary/new_case ns_per_op=200\n");
+
+  const std::string global_wrapper_command =
+      "EMEL_BENCH_TEST_SNAPSHOT_OUTPUT=" +
+      quote_arg_posix(snapshot_path.string()) +
+      " EMEL_BENCH_TEST_CURRENT_SNAPSHOT=" +
+      quote_arg_posix(current_path.string()) +
+      " EMEL_BENCH_TEST_SNAPSHOT_FILTER=1 " +
+      quote_arg_posix((repo_root() / "scripts" / "bench.sh").string()) +
+      " > " + quote_arg_posix(stdout_path.string()) + " 2> " +
+      quote_arg_posix(stderr_path.string());
+  capture = run_command_capture(global_wrapper_command, stdout_path,
+                                stderr_path);
+  CHECK(capture.exit_code == 0);
+  CHECK(capture.stdout_text == "baseline-required\n");
+  CHECK(read_file(current_path).find("needle/graph/request ns_per_op=100") !=
+        std::string::npos);
+  CHECK(read_file(current_path).find("ordinary/new_case ns_per_op=200") !=
+        std::string::npos);
+
+  const std::string compare_gate =
+      read_file(repo_root() / "scripts" / "bench_compare_gate.awk");
+  CHECK(compare_gate.find("new benchmark entry without baseline") !=
+        std::string::npos);
+  CHECK(compare_gate.find("live_cactus_native") == std::string::npos);
+
+  std::error_code ec;
+  std::filesystem::remove_all(tmp_dir, ec);
+  CHECK_FALSE(ec);
+#endif
 }
 
 TEST_CASE(

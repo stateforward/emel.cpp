@@ -10,7 +10,7 @@ namespace emel::text::generator::decode_wavefront {
 // Public alias for the lane thread pool the sm constructor requires, so callers
 // (integrators, benchmarks) can name it without reaching into the action
 // namespace.
-using lane_pool = action::lane_pool;
+using worker_pool = action::worker_pool;
 
 struct state_idle {};
 struct state_validation_decision {};
@@ -62,8 +62,38 @@ struct model {
       // pool-backed multi-lane groups fork/join once inside the RTC chain.
       , sml::state<state_parallel_decision> <= sml::state<state_group_ready>
                  + sml::completion<event::run>
-                 [ guard::guard_parallel_dispatch{} ]
-                 / action::effect_dispatch_parallel_lanes
+                 [ guard::guard_parallel_lane_count<2>{} ]
+                 / action::effect_dispatch_parallel_lanes<2>{}
+
+      , sml::state<state_parallel_decision> <= sml::state<state_group_ready>
+                 + sml::completion<event::run>
+                 [ guard::guard_parallel_lane_count<3>{} ]
+                 / action::effect_dispatch_parallel_lanes<3>{}
+
+      , sml::state<state_parallel_decision> <= sml::state<state_group_ready>
+                 + sml::completion<event::run>
+                 [ guard::guard_parallel_lane_count<4>{} ]
+                 / action::effect_dispatch_parallel_lanes<4>{}
+
+      , sml::state<state_parallel_decision> <= sml::state<state_group_ready>
+                 + sml::completion<event::run>
+                 [ guard::guard_parallel_lane_count<5>{} ]
+                 / action::effect_dispatch_parallel_lanes<5>{}
+
+      , sml::state<state_parallel_decision> <= sml::state<state_group_ready>
+                 + sml::completion<event::run>
+                 [ guard::guard_parallel_lane_count<6>{} ]
+                 / action::effect_dispatch_parallel_lanes<6>{}
+
+      , sml::state<state_parallel_decision> <= sml::state<state_group_ready>
+                 + sml::completion<event::run>
+                 [ guard::guard_parallel_lane_count<7>{} ]
+                 / action::effect_dispatch_parallel_lanes<7>{}
+
+      , sml::state<state_parallel_decision> <= sml::state<state_group_ready>
+                 + sml::completion<event::run>
+                 [ guard::guard_parallel_lane_count<8>{} ]
+                 / action::effect_dispatch_parallel_lanes<8>{}
 
       , sml::state<state_lane0_decision> <= sml::state<state_group_ready>
                  + sml::completion<event::run>
@@ -291,7 +321,7 @@ struct sm : public emel::co_sm<model, action::context, static_co_policy> {
   using base_type::visit_current_states;
 
   sm() = default;
-  explicit sm(action::lane_pool & pool) : base_type(action::context{.pool = &pool}) {}
+  explicit sm(action::worker_pool & pool) : base_type(action::context{.pool = &pool}) {}
 
   bool process_event(const event::run & ev) {
     return base_type::process_event(ev);

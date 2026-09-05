@@ -192,7 +192,7 @@ struct callback_scope {
   }
 };
 
-void on_probe_done(const emel::gguf::loader::events::probe_done & ev) {
+void on_probe_done(const emel::gguf::loader::events::probe_done & ev) noexcept {
   if (g_callback_state == nullptr) {
     return;
   }
@@ -201,7 +201,7 @@ void on_probe_done(const emel::gguf::loader::events::probe_done & ev) {
   g_callback_state->probe_requirements = ev.requirements_out;
 }
 
-void on_probe_error(const emel::gguf::loader::events::probe_error & ev) {
+void on_probe_error(const emel::gguf::loader::events::probe_error & ev) noexcept {
   if (g_callback_state == nullptr) {
     return;
   }
@@ -210,13 +210,13 @@ void on_probe_error(const emel::gguf::loader::events::probe_error & ev) {
   g_callback_state->probe_error = ev.err;
 }
 
-void on_bind_done(const emel::gguf::loader::events::bind_done &) {
+void on_bind_done(const emel::gguf::loader::events::bind_done &) noexcept {
   if (g_callback_state != nullptr) {
     ++g_callback_state->bind_done_count;
   }
 }
 
-void on_bind_error(const emel::gguf::loader::events::bind_error & ev) {
+void on_bind_error(const emel::gguf::loader::events::bind_error & ev) noexcept {
   if (g_callback_state == nullptr) {
     return;
   }
@@ -225,13 +225,13 @@ void on_bind_error(const emel::gguf::loader::events::bind_error & ev) {
   g_callback_state->bind_error = ev.err;
 }
 
-void on_parse_done(const emel::gguf::loader::events::parse_done &) {
+void on_parse_done(const emel::gguf::loader::events::parse_done &) noexcept {
   if (g_callback_state != nullptr) {
     ++g_callback_state->parse_done_count;
   }
 }
 
-void on_parse_error(const emel::gguf::loader::events::parse_error & ev) {
+void on_parse_error(const emel::gguf::loader::events::parse_error & ev) noexcept {
   if (g_callback_state == nullptr) {
     return;
   }

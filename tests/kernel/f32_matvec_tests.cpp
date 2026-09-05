@@ -30,15 +30,19 @@ struct outcome_counts {
   const f32_matvec::event::prepare_f32 *error_request = nullptr;
 };
 
-void count_done(void *object, const f32_matvec::events::dispatch_done<
-                                  f32_matvec::event::prepare_f32> &outcome) {
+void count_done(
+    void *object,
+    const f32_matvec::events::dispatch_done<f32_matvec::event::prepare_f32>
+        &outcome) noexcept {
   auto &counts = *static_cast<outcome_counts *>(object);
   ++counts.done;
   counts.done_request = &outcome.request;
 }
 
-void count_error(void *object, const f32_matvec::events::dispatch_error<
-                                   f32_matvec::event::prepare_f32> &outcome) {
+void count_error(
+    void *object,
+    const f32_matvec::events::dispatch_error<f32_matvec::event::prepare_f32>
+        &outcome) noexcept {
   auto &counts = *static_cast<outcome_counts *>(object);
   ++counts.error;
   counts.error_request = &outcome.request;
@@ -348,7 +352,8 @@ TEST_CASE("f32 matvec dispatch is allocation-free and reports deltas") {
       .inner = 2u,
       .rows = 4u,
   };
-  const f32_matvec::event::execute_request execute_request{
+  // Only dispatched on aarch64; unused on x86 builds.
+  [[maybe_unused]] const f32_matvec::event::execute_request execute_request{
       .weights = std::span<const float>{packed},
       .input = std::span<const float>{input},
       .output = std::span<float>{output},

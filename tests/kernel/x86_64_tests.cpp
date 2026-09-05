@@ -2230,3 +2230,243 @@ TEST_CASE("kernel_x86_64_add_and_mul_broadcast_row_variants") {
   };
   CHECK_FALSE(machine.process_event(bad_ev));
 }
+
+TEST_CASE("kernel_x86_64_simd_elementwise_vectors_and_tails_are_exact") {
+  if (!emel::kernel::x86_64::detail::avx2_intrinsics_compiled ||
+      !emel::kernel::x86_64::detail::detect_avx2()) {
+    return;
+  }
+
+  constexpr uint64_t count = 9u;
+  std::array<float, count> lhs{-9.0f, -8.0f, -7.0f, -6.0f, -5.0f,
+                               -4.0f, -3.0f, -2.0f, -1.0f};
+  std::array<float, count> rhs{1.0f, 2.0f, 4.0f, 8.0f, 16.0f,
+                               32.0f, 64.0f, 128.0f, 256.0f};
+  std::array<float, count> dst{};
+
+  const auto check = [&](const auto &request, const auto expected) {
+    dst.fill(std::numeric_limits<float>::quiet_NaN());
+    x86_64_sm machine{
+        emel::kernel::x86_64::action::context{true, {}, 0}};
+    REQUIRE(machine.process_event(request));
+    for (size_t i = 0; i < dst.size(); ++i) {
+      CHECK(dst[i] == doctest::Approx(expected(i)));
+    }
+  };
+
+  check(emel::kernel::event::op_dup{
+            .src0 = make_src(lhs.data(), dtype::f32, count),
+            .dst = make_dst(dst.data(), dtype::f32, count),
+        },
+        [&](const size_t i) { return lhs[i]; });
+  check(emel::kernel::event::op_add{
+            .src0 = make_src(lhs.data(), dtype::f32, count),
+            .src1 = make_src(rhs.data(), dtype::f32, count),
+            .dst = make_dst(dst.data(), dtype::f32, count),
+        },
+        [&](const size_t i) { return lhs[i] + rhs[i]; });
+  check(emel::kernel::event::op_sub{
+            .src0 = make_src(lhs.data(), dtype::f32, count),
+            .src1 = make_src(rhs.data(), dtype::f32, count),
+            .dst = make_dst(dst.data(), dtype::f32, count),
+        },
+        [&](const size_t i) { return lhs[i] - rhs[i]; });
+  check(emel::kernel::event::op_div{
+            .src0 = make_src(lhs.data(), dtype::f32, count),
+            .src1 = make_src(rhs.data(), dtype::f32, count),
+            .dst = make_dst(dst.data(), dtype::f32, count),
+        },
+        [&](const size_t i) { return lhs[i] / rhs[i]; });
+  check(emel::kernel::event::op_mul{
+            .src0 = make_src(lhs.data(), dtype::f32, count),
+            .src1 = make_src(rhs.data(), dtype::f32, count),
+            .dst = make_dst(dst.data(), dtype::f32, count),
+        },
+        [&](const size_t i) { return lhs[i] * rhs[i]; });
+  check(emel::kernel::event::op_sqr{
+            .src0 = make_src(lhs.data(), dtype::f32, count),
+            .dst = make_dst(dst.data(), dtype::f32, count),
+        },
+        [&](const size_t i) { return lhs[i] * lhs[i]; });
+
+  std::array<float, count> positive{0.25f, 1.0f, 2.25f, 4.0f, 6.25f,
+                                    9.0f, 12.25f, 16.0f, 20.25f};
+  check(emel::kernel::event::op_sqrt{
+            .src0 = make_src(positive.data(), dtype::f32, count),
+            .dst = make_dst(dst.data(), dtype::f32, count),
+        },
+        [&](const size_t i) { return std::sqrt(positive[i]); });
+
+  std::array<float, count> unary_out{};
+  emel::kernel::event::op_unary unary{
+      .src0 = make_src(lhs.data(), dtype::f32, count),
+      .dst = make_dst(unary_out.data(), dtype::f32, count),
+      .subop = emel::kernel::event::unary_subop::abs,
+  };
+  x86_64_sm unary_machine{
+      emel::kernel::x86_64::action::context{true, {}, 0}};
+  REQUIRE(unary_machine.process_event(unary));
+  for (size_t i = 0; i < unary_out.size(); ++i) {
+    CHECK(unary_out[i] == doctest::Approx(std::fabs(lhs[i])));
+  }
+  unary.subop = emel::kernel::event::unary_subop::neg;
+  REQUIRE(unary_machine.process_event(unary));
+  for (size_t i = 0; i < unary_out.size(); ++i) {
+    CHECK(unary_out[i] == doctest::Approx(-lhs[i]));
+  }
+  unary.subop = emel::kernel::event::unary_subop::relu;
+  REQUIRE(unary_machine.process_event(unary));
+  for (const float value : unary_out) {
+    CHECK(value == 0.0f);
+  }
+}
+
+TEST_CASE("kernel_x86_64_f16_shared_routes_cover_variants_and_tails") {
+  x86_64_sm machine{emel::kernel::x86_64::action::context{false, {}, 0}};
+
+  constexpr size_t k = 3;
+  constexpr size_t m = 2;
+  constexpr size_t n = 2;
+  // The f16 route uses ggml layout: src0 stores m k-element rows, src1
+  // stores n k-element columns, and dst stores m-element columns.
+  const std::array<float, k * m> lhs_values{1.0f, 2.0f, -1.0f,
+                                             0.5f, 3.0f, 4.0f};
+  const std::array<float, k * n> rhs_values{2.0f, -1.0f, 0.5f,
+                                             1.0f, 2.0f, -2.0f};
+  const auto lhs = to_fp16_storage(lhs_values);
+  const auto rhs = to_fp16_storage(rhs_values);
+  std::array<float, m * n> matmul_out{};
+  const emel::kernel::event::op_mul_mat matmul{
+      .src0 = make_src(lhs.data(), dtype::f16, k, m),
+      .src1 = make_src(rhs.data(), dtype::f16, k, n),
+      .dst = make_dst(matmul_out.data(), dtype::f32, m, n),
+  };
+  REQUIRE(machine.process_event(matmul));
+
+  std::array<float, m * n> matmul_expected{};
+  for (size_t col = 0; col < n; ++col) {
+    for (size_t row = 0; row < m; ++row) {
+      double dot = 0.0;
+      for (size_t inner = 0; inner < k; ++inner) {
+        dot += static_cast<double>(lhs_values[row * k + inner] *
+                                   rhs_values[col * k + inner]);
+      }
+      matmul_expected[row + col * m] = static_cast<float>(dot);
+    }
+  }
+  for (size_t i = 0; i < matmul_out.size(); ++i) {
+    CHECK(matmul_out[i] == doctest::Approx(matmul_expected[i]));
+  }
+
+  std::array<block_q4_k, 2> q4_rows{};
+  fill_q4_block(q4_rows[0], 71u);
+  fill_q4_block(q4_rows[1], 83u);
+  int32_t index = 1;
+  std::array<float, QK_K> q4_out{};
+  std::array<float, QK_K> q4_expected{};
+  emel::kernel::detail::quant::dequantize_row_q4_k(q4_rows.data() + 1,
+                                                   q4_expected.data(), QK_K);
+  const emel::kernel::event::op_get_rows gather_q4{
+      .src0 = make_quantized_src(q4_rows.data(), dtype::q4_k, QK_K, 2),
+      .src1 = make_src(&index, dtype::i32, 1),
+      .dst = make_dst(q4_out.data(), dtype::f32, QK_K, 1),
+  };
+  REQUIRE(machine.process_event(gather_q4));
+  for (size_t i = 0; i < q4_out.size(); ++i) {
+    CHECK(q4_out[i] == doctest::Approx(q4_expected[i]));
+  }
+
+  float im2col_input[4] = {1.0f, -2.0f, 3.5f, 4.0f};
+  float kernel_shape[3] = {};
+  std::array<uint16_t, 12> columns{};
+  emel::kernel::event::op_im2col im2col{
+      .src0 = make_src(kernel_shape, dtype::f32, 3, 1),
+      .src1 = make_src(im2col_input, dtype::f32, 4, 1),
+      .dst = make_dst(columns.data(), dtype::f16, 3, 4),
+  };
+  set_op_param_i32(im2col, 0u, 1);
+  set_op_param_i32(im2col, 1u, 0);
+  set_op_param_i32(im2col, 2u, 1);
+  set_op_param_i32(im2col, 3u, 0);
+  set_op_param_i32(im2col, 4u, 1);
+  set_op_param_i32(im2col, 5u, 0);
+  set_op_param_i32(im2col, 6u, 0);
+  REQUIRE(machine.process_event(im2col));
+  const std::array<float, 12> expected_columns{0.0f, 1.0f, -2.0f,
+                                               1.0f, -2.0f, 3.5f,
+                                               -2.0f, 3.5f, 4.0f,
+                                               3.5f, 4.0f, 0.0f};
+  for (size_t i = 0; i < columns.size(); ++i) {
+    CHECK(emel::kernel::detail::quant::fp16_to_fp32(columns[i]) ==
+          doctest::Approx(expected_columns[i]));
+  }
+
+  const std::array<float, 2> weight_values{3.0f, 5.0f};
+  const auto weights = to_fp16_storage(weight_values);
+  float conv_input[2] = {1.0f, 2.0f};
+  float conv_out[4] = {};
+  emel::kernel::event::op_conv_transpose_1d conv{
+      .src0 = make_src(weights.data(), dtype::f16, 2, 1, 1),
+      .src1 = make_src(conv_input, dtype::f32, 2, 1),
+      .dst = make_dst(conv_out, dtype::f32, 4, 1),
+  };
+  set_op_param_i32(conv, 0u, 2);
+  set_op_param_i32(conv, 1u, 0);
+  set_op_param_i32(conv, 2u, 1);
+  REQUIRE(machine.process_event(conv));
+  CHECK(conv_out[0] == doctest::Approx(3.0f));
+  CHECK(conv_out[1] == doctest::Approx(5.0f));
+  CHECK(conv_out[2] == doctest::Approx(6.0f));
+  CHECK(conv_out[3] == doctest::Approx(10.0f));
+}
+
+TEST_CASE("kernel_x86_64_rejections_report_failure_and_preserve_output") {
+  float lhs[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+  float rhs[4] = {4.0f, 3.0f, 2.0f, 1.0f};
+  float dst[4] = {91.0f, 92.0f, 93.0f, 94.0f};
+  const auto before = std::to_array(dst);
+  emel::kernel::event::op_sub invalid{
+      .src0 = make_src(lhs, dtype::f32, 4),
+      .src1 = make_src(rhs, dtype::f32, 3),
+      .dst = make_dst(dst, dtype::f32, 4),
+  };
+
+  emel::kernel::x86_64::action::context ctx{false, {}, 41u};
+  emel::kernel::x86_64::event::dispatch_ctx dispatch_ctx{};
+  const emel::kernel::x86_64::event::dispatch_op_sub dispatch{invalid,
+                                                              dispatch_ctx};
+  CHECK(emel::kernel::x86_64::guard::invalid_op_sub{}(dispatch, ctx));
+  emel::kernel::x86_64::action::reject_invalid_op_sub(dispatch, ctx);
+  CHECK(dispatch_ctx.outcome ==
+        emel::kernel::x86_64::events::phase_outcome::failed);
+  CHECK(dispatch_ctx.err == static_cast<int32_t>(emel::error::cast(
+                                emel::kernel::x86_64::error::invalid_request)));
+  CHECK(ctx.dispatch_generation == 42u);
+  CHECK(std::equal(std::begin(dst), std::end(dst), before.begin()));
+
+  x86_64_sm machine{emel::kernel::x86_64::action::context{false, {}, 0}};
+  CHECK_FALSE(machine.process_event(invalid));
+  CHECK(std::equal(std::begin(dst), std::end(dst), before.begin()));
+
+  auto excessive_params = invalid;
+  excessive_params.src1 = make_src(rhs, dtype::f32, 4);
+  excessive_params.op_params_size =
+      static_cast<uint32_t>(excessive_params.op_params.size() + 1u);
+  CHECK_FALSE(machine.process_event(excessive_params));
+  CHECK(std::equal(std::begin(dst), std::end(dst), before.begin()));
+
+  auto aliased_timestep = emel::kernel::event::op_rope{
+      .src0 = make_src(dst, dtype::f32, 4, 1, 1),
+      .src1 = make_src(reinterpret_cast<int32_t *>(rhs), dtype::i32, 1),
+      .dst = make_dst(dst, dtype::f32, 4, 1, 1),
+  };
+  set_op_param_i32(aliased_timestep, 1u, 4);
+  set_op_param_i32(aliased_timestep, 2u,
+                   emel::kernel::detail::rope_mode_timestep);
+  set_op_param_f32(aliased_timestep, 5u, 10000.0f);
+  set_op_param_f32(aliased_timestep, 6u, 1.0f);
+  set_op_param_f32(aliased_timestep, 7u, 0.0f);
+  set_op_param_f32(aliased_timestep, 8u, 1.0f);
+  CHECK_FALSE(machine.process_event(aliased_timestep));
+  CHECK(std::equal(std::begin(dst), std::end(dst), before.begin()));
+}

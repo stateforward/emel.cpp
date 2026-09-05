@@ -12,7 +12,7 @@
 namespace {
 
 emel::error::type sampler_shift_scores(int32_t &, float &candidate_scores,
-                                       int32_t &candidate_count, int32_t &) {
+                                       int32_t &candidate_count, int32_t &) noexcept {
   for (int32_t i = 0; i < candidate_count; ++i) {
     (&candidate_scores)[i] = -1.0f;
   }
@@ -23,7 +23,7 @@ emel::error::type sampler_shift_scores(int32_t &, float &candidate_scores,
 emel::error::type sampler_select_argmax(int32_t &candidate_ids,
                                         float &candidate_scores,
                                         int32_t &candidate_count,
-                                        int32_t &selected_token_out) {
+                                        int32_t &selected_token_out) noexcept {
   int32_t best_idx = 0;
   float best_score = (&candidate_scores)[0];
   for (int32_t i = 1; i < candidate_count; ++i) {
@@ -37,24 +37,24 @@ emel::error::type sampler_select_argmax(int32_t &candidate_ids,
 }
 
 emel::error::type sampler_select_fixed(int32_t &, float &, int32_t &,
-                                       int32_t &selected_token_out) {
+                                       int32_t &selected_token_out) noexcept {
   selected_token_out = 7;
   return emel::error::cast(emel::logits::sampler::error::none);
 }
 
 emel::error::type sampler_select_first(int32_t &candidate_ids, float &,
-                                       int32_t &, int32_t &selected_token_out) {
+                                       int32_t &, int32_t &selected_token_out) noexcept {
   selected_token_out = (&candidate_ids)[0];
   return emel::error::cast(emel::logits::sampler::error::none);
 }
 
-emel::error::type sampler_error(int32_t &, float &, int32_t &, int32_t &) {
+emel::error::type sampler_error(int32_t &, float &, int32_t &, int32_t &) noexcept {
   return emel::error::cast(emel::logits::sampler::error::backend_error);
 }
 
 emel::error::type sampler_set_invalid_candidate_count(int32_t &, float &,
                                                       int32_t &candidate_count,
-                                                      int32_t &) {
+                                                      int32_t &) noexcept {
   candidate_count = 0;
   return emel::error::cast(emel::logits::sampler::error::none);
 }

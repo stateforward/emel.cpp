@@ -354,6 +354,89 @@ TEST_CASE("tokenizer_fragment_guards_and_append_action") {
       emel::text::tokenizer::action::fragment_kind::raw_text;
   CHECK(emel::text::tokenizer::guard::more_fragments_raw{}(runtime_ev));
 }
+TEST_CASE("tokenizer_raw_fragment_routes_explicit_needle_and_standard") {
+  auto &vocab = make_vocab_for_specials();
+  emel::text::tokenizer::action::context ctx{};
+  ctx.vocab = &vocab;
+
+  std::array<int32_t, 4> tokens = {};
+  int32_t token_count = 0;
+  emel::text::tokenizer::event::tokenize tok_ev = {};
+  tok_ev.vocab = &vocab;
+  tok_ev.token_ids_out = tokens.data();
+  tok_ev.token_capacity = static_cast<int32_t>(tokens.size());
+  tok_ev.token_count_out = &token_count;
+
+  std::array<emel::text::tokenizer::action::fragment, 2> fragments = {};
+  emel::text::tokenizer::event::tokenize_ctx tok_ctx = {};
+  tok_ctx.fragments = fragments.data();
+  tok_ctx.fragment_capacity = fragments.size();
+  tok_ctx.fragment_count = 1;
+  tok_ctx.fragments[0].kind =
+      emel::text::tokenizer::action::fragment_kind::raw_text;
+  emel::text::tokenizer::event::tokenize_runtime runtime_ev{tok_ev, tok_ctx};
+
+  vocab.tokenizer_pre_id = emel::model::data::tokenizer_pre::NEEDLE;
+  tok_ctx.global_dummy_prefix_pending = true;
+  CHECK(emel::text::tokenizer::guard::raw_fragment_is_needle_first{}(
+      runtime_ev));
+  CHECK_FALSE(emel::text::tokenizer::guard::raw_fragment_is_needle_subsequent{}(
+      runtime_ev));
+  CHECK_FALSE(emel::text::tokenizer::guard::raw_fragment_is_standard{}(
+      runtime_ev));
+
+  tok_ctx.global_dummy_prefix_pending = false;
+  CHECK(emel::text::tokenizer::guard::raw_fragment_is_needle_subsequent{}(
+      runtime_ev));
+  CHECK_FALSE(emel::text::tokenizer::guard::raw_fragment_is_needle_first{}(
+      runtime_ev));
+
+  vocab.tokenizer_pre_id = emel::model::data::tokenizer_pre::GPT2;
+  CHECK(emel::text::tokenizer::guard::raw_fragment_is_standard{}(runtime_ev));
+  CHECK_FALSE(emel::text::tokenizer::guard::raw_fragment_is_needle_first{}(
+      runtime_ev));
+  CHECK_FALSE(emel::text::tokenizer::guard::raw_fragment_is_needle_subsequent{}(
+      runtime_ev));
+}
+TEST_CASE("tokenizer_raw_fragment_actions_preserve_route_state") {
+  auto &vocab = make_vocab_for_specials();
+  emel::text::tokenizer::action::context ctx{};
+  ctx.vocab = &vocab;
+
+  std::array<int32_t, 2> tokens = {};
+  int32_t token_count = 0;
+  emel::text::tokenizer::event::tokenize tok_ev = {};
+  tok_ev.vocab = &vocab;
+  tok_ev.token_ids_out = tokens.data();
+  tok_ev.token_capacity = static_cast<int32_t>(tokens.size());
+  tok_ev.token_count_out = &token_count;
+
+  std::array<emel::text::tokenizer::action::fragment, 1> fragments = {};
+  fragments[0].kind =
+      emel::text::tokenizer::action::fragment_kind::raw_text;
+  emel::text::tokenizer::event::tokenize_ctx tok_ctx = {};
+  tok_ctx.fragments = fragments.data();
+  tok_ctx.fragment_capacity = fragments.size();
+  tok_ctx.fragment_count = 1;
+  emel::text::tokenizer::event::tokenize_runtime runtime_ev{tok_ev, tok_ctx};
+
+  vocab.tokenizer_pre_id = emel::model::data::tokenizer_pre::NEEDLE;
+  tok_ctx.global_dummy_prefix_pending = true;
+  emel::text::tokenizer::action::dispatch_encode_raw_fragment_needle_first(
+      runtime_ev, ctx);
+  CHECK_FALSE(tok_ctx.global_dummy_prefix_pending);
+
+  tok_ctx.global_dummy_prefix_pending = true;
+  emel::text::tokenizer::action::dispatch_encode_raw_fragment_needle_subsequent(
+      runtime_ev, ctx);
+  CHECK_FALSE(tok_ctx.global_dummy_prefix_pending);
+
+  tok_ctx.global_dummy_prefix_pending = true;
+  vocab.tokenizer_pre_id = emel::model::data::tokenizer_pre::GPT2;
+  emel::text::tokenizer::action::dispatch_encode_raw_fragment_standard(
+      runtime_ev, ctx);
+  CHECK(tok_ctx.global_dummy_prefix_pending);
+}
 
 TEST_CASE("tokenizer_actions_status_helpers") {
   auto &vocab = make_vocab_for_specials();

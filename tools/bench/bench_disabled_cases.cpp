@@ -225,6 +225,11 @@ void append_emel_weight_streaming_cases(std::vector<result> &, const config &) {
 void append_reference_weight_streaming_cases(std::vector<result> &, const config &) {}
 #endif
 
+#ifndef EMEL_BENCH_ENABLE_NEEDLE_GRAPH
+void append_emel_needle_graph_cases(std::vector<result> &, const config &) {}
+void append_reference_needle_graph_cases(std::vector<result> &, const config &) {}
+#endif
+
 #ifndef EMEL_BENCH_ENABLE_TOKENIZER_PREPROCESSOR_BPE
 void append_emel_tokenizer_preprocessor_bpe_cases(std::vector<result> &, const config &) {}
 void append_reference_tokenizer_preprocessor_bpe_cases(std::vector<result> &, const config &) {}

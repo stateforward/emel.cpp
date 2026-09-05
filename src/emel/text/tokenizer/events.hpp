@@ -60,6 +60,7 @@ struct tokenize_ctx {
   size_t fragment_count = 0;
   size_t fragment_index = 0;
   bool preprocessed = false;
+  bool global_dummy_prefix_pending = false;
   bool preprocess_accepted = false;
   int32_t preprocess_err_code = error_code(error::none);
   bool encode_accepted = false;

@@ -36,7 +36,7 @@ struct context {
       : parallel_matmul_lanes(policy.parallel_matmul_lanes),
         kernel_kind(policy.kernel_kind), active_lanes(policy.active_lanes),
         kernel(policy.kernel_kind),
-        lanes(new (std::nothrow) lane_storage{policy.kernel_kind}) {
+        lanes(new(std::nothrow) lane_storage{policy.kernel_kind}) {
     // Lane actors are large (~67 KiB each). One construction-time allocation
     // keeps the owning actor portable on platforms with small thread stacks;
     // dispatch reuses this stable storage and never allocates.
@@ -45,7 +45,7 @@ struct context {
     }
   }
 
-  lane_pool *parallel_matmul_lanes = nullptr;
+  worker_pool *parallel_matmul_lanes = nullptr;
   emel::kernel::kernel_kind kernel_kind = emel::kernel::kernel_kind::x86_64;
   size_t active_lanes = 1u;
   emel::kernel::sm kernel = {};

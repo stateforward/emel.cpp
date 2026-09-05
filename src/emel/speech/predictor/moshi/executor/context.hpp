@@ -53,7 +53,7 @@ struct dependencies {
   emel::kernel::matmul::sm &matmul;
   emel::kernel::matmul::lane_mode matmul_lane_mode =
       emel::kernel::matmul::lane_mode::serial;
-  emel::kernel::matmul::lane_pool *attention_lanes = nullptr;
+  emel::kernel::matmul::worker_pool *attention_lanes = nullptr;
   std::size_t active_attention_lanes = 1u;
   emel::logits::sampler::sm *sampler = nullptr;
   policies policy = {};
@@ -98,7 +98,7 @@ struct context {
         matmul(deps.matmul), matmul_lane_mode(deps.matmul_lane_mode),
         attention_lanes(deps.attention_lanes),
         active_attention_lanes(deps.active_attention_lanes),
-        attention_actors(new (std::nothrow) attention_lane_storage{}),
+        attention_actors(new(std::nothrow) attention_lane_storage{}),
         sampler(deps.sampler), policy(deps.policy), capacity(deps.capacity) {
     // Attention actors own substantial reusable scratch. One construction-time
     // allocation avoids oversized parent and thread stacks; same-RTC inference
@@ -117,7 +117,7 @@ struct context {
   emel::kernel::sm &kernel;
   emel::kernel::matmul::sm &matmul;
   const emel::kernel::matmul::lane_mode matmul_lane_mode;
-  emel::kernel::matmul::lane_pool *attention_lanes = nullptr;
+  emel::kernel::matmul::worker_pool *attention_lanes = nullptr;
   const std::size_t active_attention_lanes;
   std::unique_ptr<attention_lane_storage> attention_actors = {};
   emel::logits::sampler::sm *sampler = nullptr;

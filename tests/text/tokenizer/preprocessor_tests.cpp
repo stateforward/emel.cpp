@@ -13,6 +13,7 @@
 #include "emel/text/tokenizer/preprocessor/actions.hpp"
 #include "emel/text/tokenizer/preprocessor/bpe/actions.hpp"
 #include "emel/text/tokenizer/preprocessor/bpe/sm.hpp"
+#include "emel/text/tokenizer/preprocessor/ugm/sm.hpp"
 #include "emel/text/tokenizer/preprocessor/detail.hpp"
 #include "emel/text/tokenizer/preprocessor/fallback/actions.hpp"
 
@@ -724,6 +725,209 @@ TEST_CASE("tokenizer_preprocessor_partition_bpe_failure") {
       partition_bpe_no_specials{};
   partition_bpe_no_specials(runtime_ev, ctx);
   CHECK(runtime_ctx.err == emel::text::tokenizer::preprocessor::error::invalid_request);
+}
+
+TEST_CASE("tokenizer_preprocessor_any_switches_variants_and_reports_last_result") {
+  auto & fallback_vocab = make_vocab_with_specials();
+  auto & bpe_vocab = make_bpe_vocab();
+  std::array<emel::text::tokenizer::preprocessor::fragment,
+             emel::text::tokenizer::preprocessor::k_max_fragments>
+      fragments = {};
+  size_t count = 0;
+  int32_t err = -1;
+
+  emel::text::tokenizer::preprocessor::any machine(
+      emel::text::tokenizer::preprocessor::preprocessor_kind::fallback);
+  CHECK(machine.kind() == emel::text::tokenizer::preprocessor::preprocessor_kind::fallback);
+  emel::text::tokenizer::preprocessor::event::preprocess fallback_ev(
+      fallback_vocab, "ABBB", true,
+      std::span<emel::text::tokenizer::preprocessor::fragment>(fragments), count, err);
+  CHECK(machine.process_event(fallback_ev));
+  CHECK(count == 2);
+  CHECK(machine.last_error() ==
+        emel::text::tokenizer::preprocessor::error_code(
+            emel::text::tokenizer::preprocessor::error::none));
+
+  machine.set_kind(emel::text::tokenizer::preprocessor::preprocessor_kind::bpe);
+  CHECK(machine.kind() == emel::text::tokenizer::preprocessor::preprocessor_kind::bpe);
+  count = 99;
+  err = -1;
+  emel::text::tokenizer::preprocessor::event::preprocess bpe_ev(
+      bpe_vocab, "hello world", false,
+      std::span<emel::text::tokenizer::preprocessor::fragment>(fragments.data(), 1), count, err);
+  CHECK_FALSE(machine.process_event(bpe_ev));
+  CHECK(count == 0);
+  CHECK(machine.last_error() ==
+        emel::text::tokenizer::preprocessor::error_code(
+            emel::text::tokenizer::preprocessor::error::invalid_request));
+}
+
+TEST_CASE("tokenizer_preprocessor_bpe_empty_inputs_succeed_on_each_special_path") {
+  for (const bool parse_special : {false, true}) {
+    CAPTURE(parse_special);
+    auto & vocab = make_bpe_vocab_with_specials();
+    std::array<emel::text::tokenizer::preprocessor::fragment,
+               emel::text::tokenizer::preprocessor::k_max_fragments>
+        fragments = {};
+    size_t count = 99;
+    bool preprocessed = false;
+    int32_t err = -1;
+    emel::text::tokenizer::preprocessor::event::preprocess ev(
+        vocab, "", parse_special,
+        std::span<emel::text::tokenizer::preprocessor::fragment>(fragments), count, err);
+    ev.preprocessed_out = &preprocessed;
+
+    emel::text::tokenizer::preprocessor::bpe::sm machine{};
+    CHECK(machine.process_event(ev));
+    CHECK(count == 0);
+    CHECK(machine.fragment_count() == 0);
+    CHECK(preprocessed);
+    CHECK(err == emel::text::tokenizer::preprocessor::error_code(
+                     emel::text::tokenizer::preprocessor::error::none));
+  }
+}
+
+TEST_CASE("tokenizer_preprocessor_bpe_skip_special_preserves_control_text") {
+  auto & vocab = make_bpe_vocab_with_specials();
+  std::array<emel::text::tokenizer::preprocessor::fragment,
+             emel::text::tokenizer::preprocessor::k_max_fragments>
+      fragments = {};
+  size_t count = 0;
+  int32_t err = -1;
+  emel::text::tokenizer::preprocessor::event::preprocess ev(
+      vocab, "A BBB", false,
+      std::span<emel::text::tokenizer::preprocessor::fragment>(fragments), count, err);
+
+  emel::text::tokenizer::preprocessor::bpe::sm machine{};
+  CHECK(machine.process_event(ev));
+  REQUIRE(count >= 2);
+  CHECK(fragments[0].kind == emel::text::tokenizer::preprocessor::fragment_kind::token);
+  CHECK(fragments[0].token == 0);
+  bool saw_control_text = false;
+  for (size_t idx = 1; idx < count; ++idx) {
+    saw_control_text = saw_control_text ||
+        (fragments[idx].kind == emel::text::tokenizer::preprocessor::fragment_kind::raw_text &&
+         fragments[idx].text.find("BBB") != std::string_view::npos);
+  }
+  CHECK(saw_control_text);
+}
+
+TEST_CASE("tokenizer_preprocessor_bpe_rejects_missing_and_oversized_output_buffers") {
+  auto & vocab = make_bpe_vocab();
+  size_t count = 99;
+  int32_t err = -1;
+  emel::text::tokenizer::preprocessor::bpe::sm machine{};
+
+  emel::text::tokenizer::preprocessor::event::preprocess missing(
+      vocab, "x", false, std::span<emel::text::tokenizer::preprocessor::fragment>{}, count, err);
+  CHECK_FALSE(machine.process_event(missing));
+  CHECK(count == 0);
+  CHECK(err == emel::text::tokenizer::preprocessor::error_code(
+                   emel::text::tokenizer::preprocessor::error::invalid_request));
+
+  std::array<emel::text::tokenizer::preprocessor::fragment,
+             emel::text::tokenizer::preprocessor::k_max_fragments + 1>
+      oversized = {};
+  count = 99;
+  err = -1;
+  emel::text::tokenizer::preprocessor::event::preprocess too_large(
+      vocab, "x", false,
+      std::span<emel::text::tokenizer::preprocessor::fragment>(oversized), count, err);
+  CHECK_FALSE(machine.process_event(too_large));
+  CHECK(count == 0);
+  CHECK(err == emel::text::tokenizer::preprocessor::error_code(
+                   emel::text::tokenizer::preprocessor::error::invalid_request));
+}
+
+TEST_CASE("tokenizer_preprocessor_bpe_unexpected_event_recovers_on_next_request") {
+  struct unknown_event {};
+  auto & vocab = make_bpe_vocab();
+  emel::text::tokenizer::preprocessor::bpe::sm machine{};
+  (void)machine.process_event(unknown_event{});
+  CHECK(machine.is(stateforward::sml::state<
+                    emel::text::tokenizer::preprocessor::bpe::unexpected>));
+
+  std::array<emel::text::tokenizer::preprocessor::fragment,
+             emel::text::tokenizer::preprocessor::k_max_fragments>
+      fragments = {};
+  size_t count = 0;
+  int32_t err = -1;
+  emel::text::tokenizer::preprocessor::event::preprocess ev(
+      vocab, "hello", false,
+      std::span<emel::text::tokenizer::preprocessor::fragment>(fragments), count, err);
+  CHECK(machine.process_event(ev));
+  CHECK(count == 1);
+  CHECK(fragments[0].text == "hello");
+}
+
+TEST_CASE("tokenizer_preprocessor_ugm_supports_raw_special_and_empty_inputs") {
+  auto & vocab = make_vocab_with_specials();
+  vocab.tokenizer_model_id = emel::model::data::tokenizer_model::UGM;
+  std::array<emel::text::tokenizer::preprocessor::fragment,
+             emel::text::tokenizer::preprocessor::k_max_fragments>
+      fragments = {};
+  emel::text::tokenizer::preprocessor::ugm::sm machine{};
+
+  size_t count = 0;
+  int32_t err = -1;
+  emel::text::tokenizer::preprocessor::event::preprocess raw(
+      vocab, "plain", false,
+      std::span<emel::text::tokenizer::preprocessor::fragment>(fragments), count, err);
+  CHECK(machine.process_event(raw));
+  REQUIRE(count == 1);
+  CHECK(fragments[0].kind == emel::text::tokenizer::preprocessor::fragment_kind::raw_text);
+  CHECK(fragments[0].text == "plain");
+
+  count = 0;
+  err = -1;
+  emel::text::tokenizer::preprocessor::event::preprocess special(
+      vocab, "ABBB", true,
+      std::span<emel::text::tokenizer::preprocessor::fragment>(fragments), count, err);
+  CHECK(machine.process_event(special));
+  REQUIRE(count == 2);
+  CHECK(fragments[0].kind == emel::text::tokenizer::preprocessor::fragment_kind::token);
+  CHECK(fragments[0].token == 0);
+  CHECK(fragments[1].kind == emel::text::tokenizer::preprocessor::fragment_kind::token);
+  CHECK(fragments[1].token == 1);
+
+  count = 99;
+  bool preprocessed = false;
+  err = -1;
+  emel::text::tokenizer::preprocessor::event::preprocess empty(
+      vocab, "", false,
+      std::span<emel::text::tokenizer::preprocessor::fragment>(fragments), count, err);
+  empty.preprocessed_out = &preprocessed;
+  CHECK(machine.process_event(empty));
+  CHECK(count == 0);
+  CHECK(preprocessed);
+}
+
+TEST_CASE("tokenizer_preprocessor_ugm_rejects_invalid_output_capacities") {
+  auto & vocab = make_vocab_with_specials();
+  vocab.tokenizer_model_id = emel::model::data::tokenizer_model::UGM;
+  emel::text::tokenizer::preprocessor::ugm::sm machine{};
+  size_t count = 99;
+  int32_t err = -1;
+
+  std::array<emel::text::tokenizer::preprocessor::fragment, 1> one = {};
+  emel::text::tokenizer::preprocessor::event::preprocess zero(
+      vocab, "x", false,
+      std::span<emel::text::tokenizer::preprocessor::fragment>(one.data(), 0), count, err);
+  CHECK_FALSE(machine.process_event(zero));
+  CHECK(count == 0);
+
+  std::array<emel::text::tokenizer::preprocessor::fragment,
+             emel::text::tokenizer::preprocessor::k_max_fragments + 1>
+      oversized = {};
+  count = 99;
+  err = -1;
+  emel::text::tokenizer::preprocessor::event::preprocess too_large(
+      vocab, "x", false,
+      std::span<emel::text::tokenizer::preprocessor::fragment>(oversized), count, err);
+  CHECK_FALSE(machine.process_event(too_large));
+  CHECK(count == 0);
+  CHECK(err == emel::text::tokenizer::preprocessor::error_code(
+                   emel::text::tokenizer::preprocessor::error::invalid_request));
 }
 
 }  // namespace

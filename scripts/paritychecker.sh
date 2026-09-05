@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/build_jobs.sh
+source "$ROOT_DIR/scripts/build_jobs.sh"
+# shellcheck source=scripts/zig_toolchain.sh
+source "$ROOT_DIR/scripts/zig_toolchain.sh"
+
+
 for tool in cmake ctest ninja zig; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "error: required tool missing: $tool" >&2
@@ -8,15 +15,10 @@ for tool in cmake ctest ninja zig; do
   fi
 done
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="$ROOT_DIR/build/paritychecker_zig"
 zig_bin="$(command -v zig)"
 selected_runners=()
 
-# shellcheck source=build_jobs.sh
-source "$ROOT_DIR/scripts/build_jobs.sh"
-# shellcheck source=scripts/zig_toolchain.sh
-source "$ROOT_DIR/scripts/zig_toolchain.sh"
 
 usage() {
   cat >&2 <<'USAGE'

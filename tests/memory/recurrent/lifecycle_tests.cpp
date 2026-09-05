@@ -292,3 +292,54 @@ TEST_CASE("memory_recurrent_view_snapshot_tracks_state") {
   CHECK(snapshot.lookup_kv_block(0, 0) == -1);
   CHECK(snapshot.lookup_recurrent_slot(0) >= 0);
 }
+
+TEST_CASE("memory_recurrent_default_capacity_and_idempotent_free") {
+  recurrent_sm machine{};
+  int32_t err = static_cast<int32_t>(
+      emel::error::cast(emel::memory::recurrent::error::none));
+
+  REQUIRE(machine.process_event(event::reserve{.error_out = &err}));
+  REQUIRE(machine.process_event(
+      event::allocate_sequence{.seq_id = 0, .error_out = &err}));
+  const int32_t slot = machine.view().lookup_recurrent_slot(0);
+  REQUIRE(slot >= 0);
+  REQUIRE(machine.process_event(
+      event::allocate_sequence{.seq_id = 0, .error_out = &err}));
+  CHECK(machine.view().lookup_recurrent_slot(0) == slot);
+
+  REQUIRE(machine.process_event(
+      event::free_sequence{.seq_id = 0, .error_out = &err}));
+  REQUIRE(machine.process_event(
+      event::free_sequence{.seq_id = 0, .error_out = &err}));
+  CHECK_FALSE(machine.view().is_sequence_active(0));
+}
+
+TEST_CASE("memory_recurrent_rejects_length_overflow_and_null_capture") {
+  recurrent_sm machine{};
+  int32_t err = static_cast<int32_t>(
+      emel::error::cast(emel::memory::recurrent::error::none));
+
+  REQUIRE(machine.process_event(event::reserve{
+      .max_sequences = 1, .max_blocks = 1, .error_out = &err}));
+  REQUIRE(machine.process_event(
+      event::allocate_sequence{.seq_id = 0, .error_out = &err}));
+  REQUIRE(machine.process_event(event::allocate_slots{
+      .seq_id = 0, .token_count = INT32_MAX, .error_out = &err}));
+
+  int32_t block_count = 41;
+  CHECK_FALSE(machine.process_event(event::allocate_slots{
+      .seq_id = 0,
+      .token_count = 1,
+      .block_count_out = &block_count,
+      .error_out = &err,
+  }));
+  CHECK(err == static_cast<int32_t>(
+                   emel::error::cast(emel::memory::recurrent::error::invalid_request)));
+  CHECK(block_count == 0);
+  CHECK(machine.view().sequence_length(0) == INT32_MAX);
+
+  CHECK_FALSE(machine.process_event(
+      event::capture_view{.snapshot_out = nullptr, .error_out = &err}));
+  CHECK(err == static_cast<int32_t>(
+                   emel::error::cast(emel::memory::recurrent::error::invalid_request)));
+}

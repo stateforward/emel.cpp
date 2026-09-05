@@ -157,6 +157,42 @@ TEST_CASE("io mmap reports state_ready via visit_current_states after a full "
   std::filesystem::remove(path);
 }
 
+TEST_CASE("io mmap repeated whole-file maps require explicit release") {
+  emel::io::mmap::sm strategy{};
+  const auto payload = make_payload(4096u, 0x5Au);
+  const auto path = make_temp_file("repeated_whole_file_release", payload);
+  const std::string path_str = path.string();
+
+  for (uint32_t iteration = 0u;
+       iteration < emel::io::mmap::k_max_mappings + 1u; ++iteration) {
+    map_owner_state map_owner{};
+    const emel::io::mmap::event::map_tensor_request request{
+        .tensor_id = 610,
+        .file_index = 0u,
+        .file_offset = 0u,
+        .byte_size = payload.size(),
+        .file_path = path_str,
+    };
+    emel::io::mmap::event::map_tensor map_request{request};
+    map_request.on_done = {&map_owner, on_map_done};
+    map_request.on_error = {&map_owner, on_map_error};
+    REQUIRE(strategy.process_event(map_request));
+    REQUIRE(map_owner.done);
+    REQUIRE(map_owner.buffer_bytes == payload.size());
+
+    release_owner_state release_owner{};
+    emel::io::mmap::event::release_mapping release_request{610,
+                                                           map_owner.handle};
+    release_request.on_done = {&release_owner, on_release_done};
+    release_request.on_error = {&release_owner, on_release_error};
+    REQUIRE(strategy.process_event(release_request));
+    REQUIRE(release_owner.done);
+    CHECK_FALSE(release_owner.error);
+  }
+
+  std::filesystem::remove(path);
+}
+
 TEST_CASE("io mmap validation rejection does not consume a slot") {
   emel::io::mmap::sm strategy{};
 

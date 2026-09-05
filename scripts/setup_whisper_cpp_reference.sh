@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/build_jobs.sh
+source "$ROOT_DIR/scripts/build_jobs.sh"
 # shellcheck source=scripts/zig_toolchain.sh
 source "$ROOT_DIR/scripts/zig_toolchain.sh"
 REFERENCE_DIR="${EMEL_WHISPER_CPP_SOURCE_DIR:-$ROOT_DIR/build/whisper_cpp_reference/src}"

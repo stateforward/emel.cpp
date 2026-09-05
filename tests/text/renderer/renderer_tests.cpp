@@ -85,7 +85,7 @@ struct callback_recorder {
 };
 
 bool on_initialize_done(void * owner,
-                  const emel::text::renderer::events::initialize_done &) {
+                  const emel::text::renderer::events::initialize_done &) noexcept {
   if (owner == nullptr) {
     return false;
   }
@@ -94,7 +94,7 @@ bool on_initialize_done(void * owner,
 }
 
 bool on_initialize_error(void * owner,
-                   const emel::text::renderer::events::initialize_error & ev) {
+                   const emel::text::renderer::events::initialize_error & ev) noexcept {
   if (owner == nullptr) {
     return false;
   }
@@ -105,7 +105,7 @@ bool on_initialize_error(void * owner,
 }
 
 bool on_render_done(void * owner,
-                    const emel::text::renderer::events::rendering_done & ev) {
+                    const emel::text::renderer::events::rendering_done & ev) noexcept {
   if (owner == nullptr) {
     return false;
   }
@@ -117,7 +117,7 @@ bool on_render_done(void * owner,
 }
 
 bool on_render_error(void * owner,
-                     const emel::text::renderer::events::rendering_error & ev) {
+                     const emel::text::renderer::events::rendering_error & ev) noexcept {
   if (owner == nullptr) {
     return false;
   }
@@ -128,7 +128,7 @@ bool on_render_error(void * owner,
 }
 
 bool on_flush_done(void * owner,
-                   const emel::text::renderer::events::flush_done & ev) {
+                   const emel::text::renderer::events::flush_done & ev) noexcept {
   if (owner == nullptr) {
     return false;
   }
@@ -140,7 +140,7 @@ bool on_flush_done(void * owner,
 }
 
 bool on_flush_error(void * owner,
-                    const emel::text::renderer::events::flush_error & ev) {
+                    const emel::text::renderer::events::flush_error & ev) noexcept {
   if (owner == nullptr) {
     return false;
   }

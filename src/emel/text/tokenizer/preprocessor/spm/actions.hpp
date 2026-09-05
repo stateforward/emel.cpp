@@ -36,15 +36,34 @@ struct partition_no_specials {
   }
 };
 
+
+struct effect_insert_needle_dummy_prefix {
+  template <class runtime_event_type>
+  void operator()(const runtime_event_type & runtime_ev,
+                  context &) const noexcept {
+    const auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
+    static constexpr char k_space = ' ';
+    for (size_t i = ev.ctx.fragment_count; i > 0u; --i) {
+      ev.request.fragments_out[i] = ev.request.fragments_out[i - 1u];
+    }
+    fragment & prefix = ev.request.fragments_out[0];
+    prefix.kind = fragment_kind::raw_text;
+    prefix.text = std::string_view{&k_space, 1u};
+    prefix.token = -1;
+    ++ev.ctx.fragment_count;
+  }
+};
 struct partition_non_bpe_parse_special {
   template <class runtime_event_type>
-  void operator()(const runtime_event_type & runtime_ev, context & ctx) const noexcept {
+  void operator()(const runtime_event_type & runtime_ev,
+                  context & ctx) const noexcept {
     const auto & ev = pdetail::unwrap_runtime_event(runtime_ev);
     size_t fragment_count = 0;
     const bool ok = pdetail::partition_with_specials_parse_enabled(
-      ev.request.text, ctx.special_cache, ev.request.fragments_out, fragment_count);
+        ev.request.text, ctx.special_cache, ev.request.fragments_out,
+        fragment_count);
     emel::text::tokenizer::preprocessor::action::detail::set_phase_result(
-      runtime_ev, ok, fragment_count, true);
+        runtime_ev, ok, fragment_count, true);
   }
 };
 
@@ -64,5 +83,6 @@ inline constexpr set_empty_partition_result set_empty_partition_result{};
 inline constexpr partition_no_specials partition_no_specials{};
 inline constexpr partition_non_bpe_parse_special partition_non_bpe_parse_special{};
 inline constexpr partition_non_bpe_skip_special partition_non_bpe_skip_special{};
+inline constexpr effect_insert_needle_dummy_prefix effect_insert_needle_dummy_prefix{};
 
 }  // namespace emel::text::tokenizer::preprocessor::spm::action

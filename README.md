@@ -99,6 +99,11 @@ Individual gates live in `scripts/build_with_zig.sh`, `scripts/test_with_coverag
 `scripts/test_with_sanitizers.sh`, `scripts/fuzz_smoke.sh`, `scripts/lint_snapshot.sh`,
 and `scripts/bench.sh`.
 
+Repository build and gate scripts require a kernel-enforced aggregate process-tree memory
+envelope. Linux uses a verified systemd user scope capped at 50% of effective memory with swap
+disabled. These scripts intentionally fail closed on macOS because macOS provides no supported
+native aggregate descendant memory controller.
+
 ### Why Zig for builds
 
 Zig’s C/C++ toolchain gives us consistent, fast, cross-platform builds without forcing a full
@@ -125,6 +130,7 @@ environments, while Zig remains the default for day-to-day builds.
 - [`.planning/architecture/batch_planner_modes_sequential.md`](.planning/architecture/batch_planner_modes_sequential.md)
 - [`.planning/architecture/batch_planner_modes_simple.md`](.planning/architecture/batch_planner_modes_simple.md)
 - [`.planning/architecture/batch_planner.md`](.planning/architecture/batch_planner.md)
+- [`.planning/architecture/cact_loader.md`](.planning/architecture/cact_loader.md)
 - [`.planning/architecture/diarization_sortformer_executor.md`](.planning/architecture/diarization_sortformer_executor.md)
 - [`.planning/architecture/diarization_sortformer_pipeline.md`](.planning/architecture/diarization_sortformer_pipeline.md)
 - [`.planning/architecture/diarization_sortformer_request.md`](.planning/architecture/diarization_sortformer_request.md)
@@ -168,9 +174,16 @@ environments, while Zig remains the default for day-to-day builds.
 - [`.planning/architecture/io_staged_read.md`](.planning/architecture/io_staged_read.md)
 - [`.planning/architecture/kernel_aarch64.md`](.planning/architecture/kernel_aarch64.md)
 - [`.planning/architecture/kernel_attention.md`](.planning/architecture/kernel_attention.md)
+- [`.planning/architecture/kernel_cq.md`](.planning/architecture/kernel_cq.md)
+- [`.planning/architecture/kernel_engram.md`](.planning/architecture/kernel_engram.md)
 - [`.planning/architecture/kernel_f32_matvec.md`](.planning/architecture/kernel_f32_matvec.md)
+- [`.planning/architecture/kernel_hadamard.md`](.planning/architecture/kernel_hadamard.md)
 - [`.planning/architecture/kernel_matmul.md`](.planning/architecture/kernel_matmul.md)
+- [`.planning/architecture/kernel_mhc.md`](.planning/architecture/kernel_mhc.md)
+- [`.planning/architecture/kernel_rope.md`](.planning/architecture/kernel_rope.md)
+- [`.planning/architecture/kernel_swa.md`](.planning/architecture/kernel_swa.md)
 - [`.planning/architecture/kernel_x86_64.md`](.planning/architecture/kernel_x86_64.md)
+- [`.planning/architecture/kernel_zcrms.md`](.planning/architecture/kernel_zcrms.md)
 - [`.planning/architecture/logits_sampler.md`](.planning/architecture/logits_sampler.md)
 - [`.planning/architecture/logits_validator.md`](.planning/architecture/logits_validator.md)
 - [`.planning/architecture/memory_hybrid.md`](.planning/architecture/memory_hybrid.md)
@@ -178,6 +191,8 @@ environments, while Zig remains the default for day-to-day builds.
 - [`.planning/architecture/memory_recurrent.md`](.planning/architecture/memory_recurrent.md)
 - [`.planning/architecture/memory_streaming.md`](.planning/architecture/memory_streaming.md)
 - [`.planning/architecture/model_loader.md`](.planning/architecture/model_loader.md)
+- [`.planning/architecture/model_needle_graph.md`](.planning/architecture/model_needle_graph.md)
+- [`.planning/architecture/model_needle.md`](.planning/architecture/model_needle.md)
 - [`.planning/architecture/model_tensor.md`](.planning/architecture/model_tensor.md)
 - [`.planning/architecture/model_tensor_window.md`](.planning/architecture/model_tensor_window.md)
 - [`.planning/architecture/speech_codec_mimi_decoder.md`](.planning/architecture/speech_codec_mimi_decoder.md)
@@ -213,6 +228,7 @@ environments, while Zig remains the default for day-to-day builds.
 - [`.planning/architecture/text_jinja_parser_program_parser_statement_parser.md`](.planning/architecture/text_jinja_parser_program_parser_statement_parser.md)
 - [`.planning/architecture/text_jinja_parser.md`](.planning/architecture/text_jinja_parser.md)
 - [`.planning/architecture/text_renderer.md`](.planning/architecture/text_renderer.md)
+- [`.planning/architecture/text_tokenizer_needle.md`](.planning/architecture/text_tokenizer_needle.md)
 - [`.planning/architecture/text_tokenizer_preprocessor_bpe.md`](.planning/architecture/text_tokenizer_preprocessor_bpe.md)
 - [`.planning/architecture/text_tokenizer_preprocessor_fallback.md`](.planning/architecture/text_tokenizer_preprocessor_fallback.md)
 - [`.planning/architecture/text_tokenizer_preprocessor_plamo2.md`](.planning/architecture/text_tokenizer_preprocessor_plamo2.md)

@@ -1,0 +1,55 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-09-03T14:16:06Z",
+  "phase": "terminal",
+  "phase_name": "cact-needle runtime completion and publication",
+  "phase_dir": ".planning",
+  "plan": 5,
+  "task": 5,
+  "total_tasks": 5,
+  "status": "completed",
+  "runtime_source_head": "a7fd218463cf50f239dea69819e7114c14774556",
+  "branch": "feat/cact-needle-runtime",
+  "pull_request": {
+    "number": 116,
+    "state": "open",
+    "contains_runtime_source_head": true,
+    "current": true,
+    "merge_authority_required": true
+  },
+  "completed_tasks": [
+    {"id": 0, "name": "Native cact loader, Needle graph, exact CQ kernels, tokenizer parity, and heldout evaluator", "status": "done"},
+    {"id": 1, "name": "Exact CQ and maintained native runtime performance work", "status": "done"},
+    {"id": 2, "name": "Upstream SML scheduler cutover and wavefront ownership repairs", "status": "done"},
+    {"id": 3, "name": "Runtime-source-head tests, heldout evaluation, scoped gate, and blind reviews", "status": "done"},
+    {"id": 4, "name": "Publish runtime source head to PR #116 and close control-plane state", "status": "done"}
+  ],
+  "remaining_tasks": [],
+  "blockers": [],
+  "source_blockers": [],
+  "authority_gates": [
+    {"description": "PR #116 merge requires explicit owner authority; no merge is claimed.", "type": "authority"}
+  ],
+  "human_actions_pending": [
+    {"action": "Review open/current PR #116 and merge only with explicit owner authority."}
+  ],
+  "decisions": [
+    {"decision": "Accept maintained performance when native EMEL beats the Cactus engine.", "rationale": "This is the maintained user-approved acceptance criterion; cross-backend diagnostics remain comparable=false and support no ratio or equivalence claim.", "phase": "terminal"},
+    {"decision": "Treat 435 tok/s only as historical theoretical roofline/stretch context.", "rationale": "It is not a required acceptance gate and is not claimed achieved.", "phase": "terminal"},
+    {"decision": "Do not update lint or timing snapshots.", "rationale": "The aggregate gate ended red solely on repository-wide lint snapshot baseline drift in unrelated files; snapshot updates require explicit user consent, and snapshots/quality_gates/timing.txt is unrelated modified user state.", "phase": "terminal"}
+  ],
+  "verification": {
+    "zig_core": "160/160 cases, 444287 assertions",
+    "wavefront_clang": "17/17 cases, 590 assertions",
+    "wavefront_zig": "17/17 cases, 590 assertions",
+    "heldout": "287 rows, domain 0.8397, effort 0.7631, zero tokenizer mismatches",
+    "scoped_gate": "runtime source head built and heldout passed",
+    "aggregate_gate": "red solely on repository-wide lint snapshot baseline drift listing unrelated files; no green aggregate claim",
+    "blind_reviews": "final rules/HSM and completeness reviews returned empty findings"
+  },
+  "uncommitted_files": [
+    {"path": "snapshots/quality_gates/timing.txt", "ownership": "unrelated user state", "action": "untouched"}
+  ],
+  "next_action": "Owner reviews open/current PR #116 and merges only with explicit authority.",
+  "context_notes": "Runtime/source repairs are complete with final runtime source commit a7fd218463cf50f239dea69819e7114c14774556. PR #116 is open/current and its branch includes that commit plus subsequent control-plane-only commits. There are no source blockers. Do not claim aggregate green, merge, cross-backend comparability, ratios/equivalence, or 435 tok/s."
+}

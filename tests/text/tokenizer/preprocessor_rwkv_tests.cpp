@@ -110,3 +110,37 @@ TEST_CASE("tokenizer_preprocessor_rwkv_parse_special_false") {
         emel::text::tokenizer::preprocessor::fragment_kind::raw_text);
   CHECK(fragments[1].text == std::string_view("BBB"));
 }
+
+TEST_CASE("tokenizer_preprocessor_rwkv_empty_invalid_and_recovery_paths") {
+  auto & vocab = make_rwkv_vocab_with_specials();
+  emel::text::tokenizer::preprocessor::rwkv::sm machine{};
+  std::array<emel::text::tokenizer::preprocessor::fragment,
+             emel::text::tokenizer::preprocessor::k_max_fragments>
+      fragments = {};
+
+  size_t count = 99;
+  bool preprocessed = false;
+  int32_t err = -1;
+  emel::text::tokenizer::preprocessor::event::preprocess empty(
+      vocab, "", true,
+      std::span<emel::text::tokenizer::preprocessor::fragment>(fragments), count, err);
+  empty.preprocessed_out = &preprocessed;
+  CHECK(machine.process_event(empty));
+  CHECK(count == 0);
+  CHECK(preprocessed);
+
+  emel::text::tokenizer::preprocessor::event::preprocess invalid(
+      vocab, "x", false, std::span<emel::text::tokenizer::preprocessor::fragment>{},
+      count, err);
+  CHECK_FALSE(machine.process_event(invalid));
+  CHECK(count == 0);
+
+  count = 0;
+  err = -1;
+  emel::text::tokenizer::preprocessor::event::preprocess recovered(
+      vocab, "again", false,
+      std::span<emel::text::tokenizer::preprocessor::fragment>(fragments), count, err);
+  CHECK(machine.process_event(recovered));
+  REQUIRE(count == 1);
+  CHECK(fragments[0].text == "again");
+}

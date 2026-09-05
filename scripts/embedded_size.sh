@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/build_jobs.sh
+source "$ROOT_DIR/scripts/build_jobs.sh"
 # shellcheck source=scripts/zig_toolchain.sh
 source "$ROOT_DIR/scripts/zig_toolchain.sh"
 BUILD_ROOT="${EMEL_EMBEDDED_SIZE_BUILD_ROOT:-$ROOT_DIR/build/embedded_size}"

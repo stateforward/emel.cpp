@@ -335,7 +335,7 @@ struct wavefront_dependencies {
   fake_encoder_actor &wavefront_encoder;
   frame::sm<frame_dependencies> &wavefront_middle;
   fake_decoder_actor &wavefront_decoder;
-  generator::action::wavefront_stage_pool *stage_pool;
+  generator::action::wavefront_stage_worker_pool *stage_pool;
   generator::action::wavefront_diagnostics &stage_diagnostics;
   generator::action::wavefront_stage_mode stage_mode;
   int32_t frame_samples;
@@ -370,7 +370,7 @@ struct fixture {
   frame::sm<frame_dependencies> middle{middle_dependencies};
   fake_encoder_actor encoder{.overlap = &overlap};
   fake_decoder_actor decoder{.overlap = &overlap};
-  generator::action::wavefront_stage_pool pool{};
+  generator::action::wavefront_stage_worker_pool pool{};
   generator::action::wavefront_diagnostics diagnostics{};
   wavefront_dependencies dependencies;
   generator::sm<wavefront_dependencies> machine;
@@ -500,7 +500,7 @@ struct production_wavefront_dependencies {
   fake_encoder_actor &wavefront_encoder;
   frame::sm<frame_dependencies> &wavefront_middle;
   fake_decoder_actor &wavefront_decoder;
-  generator::action::wavefront_stage_pool *stage_pool;
+  generator::action::wavefront_stage_worker_pool *stage_pool;
   generator::action::wavefront_stage_mode stage_mode;
   int32_t frame_samples;
   int32_t codebook_count;
@@ -827,7 +827,7 @@ TEST_CASE("speech_generator_wavefront_parallel_mode_requires_stage_pool") {
 }
 
 TEST_CASE(
-    "speech_generator_wavefront_drains_partial_submit_and_phase_failures") {
+    "speech_generator_wavefront_rejects_busy_pool_and_phase_failures") {
   SUBCASE("encode failure publishes no output") {
     fixture test{};
     test.encoder.error = 7;
@@ -868,7 +868,7 @@ TEST_CASE(
     CHECK(err == error_code(generator::error::decode_failed));
   }
 
-  SUBCASE("partial submit joins the accepted task then fails") {
+  SUBCASE("busy pool rejects the whole stage batch") {
     fixture test{};
     std::array<float, FRAME_SAMPLES> pcm{};
     std::array<int32_t, CODEBOOKS> tokens{};
@@ -878,7 +878,7 @@ TEST_CASE(
     REQUIRE(test.push(0u, produced, output, pcm, tokens, err));
     REQUIRE(test.push(1u, produced, output, pcm, tokens, err));
 
-    generator::action::wavefront_stage_pool::join_group blocker_group{};
+    generator::action::wavefront_stage_worker_pool::join_group blocker_group{};
     std::atomic<bool> blocker_started = false;
     std::atomic<bool> release_blocker = false;
     REQUIRE(test.pool.try_submit(blocker_group, [&]() noexcept {
@@ -895,8 +895,8 @@ TEST_CASE(
     CHECK_FALSE(test.push(2u, produced, output, pcm, tokens, err));
     CHECK_FALSE(produced);
     CHECK(err == error_code(generator::error::stage_submit_failed));
-    CHECK(test.diagnostics.submissions.load() - submissions_before == 1u);
-    CHECK(test.diagnostics.joins.load() - joins_before == 1u);
+    CHECK(test.diagnostics.submissions.load() - submissions_before == 0u);
+    CHECK(test.diagnostics.joins.load() - joins_before == 0u);
     release_blocker.store(true, std::memory_order_release);
     CHECK(blocker_group.wait());
   }
@@ -975,7 +975,7 @@ TEST_CASE(
     REQUIRE(drain.push(1u, produced, output, pcm, tokens, err));
 
     bool drain_accepted = true;
-    generator::action::wavefront_stage_pool::join_group drain_group{};
+    generator::action::wavefront_stage_worker_pool::join_group drain_group{};
     REQUIRE(drain.pool.try_submit(drain_group, [&]() noexcept {
       drain_accepted =
           drain.flush(produced, complete, output, pcm, tokens, err);
@@ -995,7 +995,7 @@ TEST_CASE(
     CHECK_FALSE(complete);
 
     bool final_accepted = true;
-    generator::action::wavefront_stage_pool::join_group final_group{};
+    generator::action::wavefront_stage_worker_pool::join_group final_group{};
     REQUIRE(final_decode.pool.try_submit(final_group, [&]() noexcept {
       final_accepted =
           final_decode.flush(produced, complete, output, pcm, tokens, err);

@@ -32,6 +32,34 @@ void write_file(const std::filesystem::path &path, const std::string &text) {
   REQUIRE(output.good());
 }
 
+std::string shell_quote(const std::string &text) {
+  std::string quoted{"'"};
+  for (const char ch : text) {
+    if (ch == '\'') quoted += "'\\''";
+    else quoted.push_back(ch);
+  }
+  quoted.push_back('\'');
+  return quoted;
+}
+
+struct command_result {
+  int status = 1;
+  std::string output;
+};
+
+command_result run_command(const std::string &command,
+                           const std::filesystem::path &output_path) {
+  const std::string full_command =
+      command + " >" + shell_quote(output_path.string()) + " 2>&1";
+  const int raw = std::system(full_command.c_str());
+  command_result result{};
+  result.status = raw == 0 ? 0 : 1;
+  result.output = read_file(output_path);
+  std::error_code ec;
+  std::filesystem::remove(output_path, ec);
+  return result;
+}
+
 // Run the extracted compare gate (scripts/bench_compare_gate.awk) against the
 // given baseline and current snapshots, returning the process exit status
 // (0 => gate passed, non-zero => gate failed).
@@ -93,6 +121,35 @@ TEST_CASE("quality gates full benchmark branch preserves failure status") {
   CHECK(full_branch.find("return $?") == std::string::npos);
 }
 
+TEST_CASE("fuzz smoke validates the selected compiler's libFuzzer support") {
+  const std::string script =
+      read_file(repo_root() / "scripts" / "fuzz_smoke.sh");
+
+  const std::size_t probe_start = script.find("check_libfuzzer_runtime()");
+  REQUIRE(probe_start != std::string::npos);
+  const std::size_t probe_call =
+      script.find("check_libfuzzer_runtime\n", probe_start);
+  REQUIRE(probe_call != std::string::npos);
+  const std::size_t cmake_call = script.find("cmake -S", probe_call);
+  REQUIRE(cmake_call != std::string::npos);
+
+  const std::string probe =
+      script.substr(probe_start, probe_call - probe_start);
+  CHECK(probe.find("\"$fuzz_cxx\"") != std::string::npos);
+  CHECK(probe.find("-fsanitize=fuzzer") != std::string::npos);
+  CHECK(probe.find("cannot link a libFuzzer executable") !=
+        std::string::npos);
+  CHECK(probe_call < cmake_call);
+  CHECK(script.find("lib/clang/*/lib/darwin/libclang_rt.fuzzer_osx.a") ==
+        std::string::npos);
+  CHECK(script.find("if [[ \"$fuzz_cc\" == \"clang\" ]]") ==
+        std::string::npos);
+  CHECK(script.find("if [[ \"$(uname -s)\" == \"Darwin\" ]]") !=
+        std::string::npos);
+  CHECK(script.find("/opt/homebrew/opt/llvm") != std::string::npos);
+  CHECK(script.find("/usr/local/opt/llvm") != std::string::npos);
+}
+
 TEST_CASE("quality gates exclude nested sml machine headers from coverage "
           "source set") {
   const std::string script =
@@ -109,6 +166,72 @@ TEST_CASE("quality gates exclude nested sml machine headers from coverage "
   CHECK(helper.find("src/emel/**/*/sm.hpp") != std::string::npos);
 }
 
+TEST_CASE("coverage domains use bounded doctest shards") {
+  const std::string cmake = read_file(repo_root() / "CMakeLists.txt");
+  CHECK(cmake.find("test_shard STREQUAL \"text_generator\"") !=
+        std::string::npos);
+  CHECK(cmake.find("test_source MATCHES \"^tests/text/generator/\"") !=
+        std::string::npos);
+  CHECK(cmake.find("test_shard STREQUAL \"embeddings\"") !=
+        std::string::npos);
+  CHECK(cmake.find("test_source MATCHES \"^tests/embeddings/\"") !=
+        std::string::npos);
+  CHECK(cmake.find("test_shard STREQUAL \"logits_and_token\"") !=
+        std::string::npos);
+  CHECK(cmake.find("test_source MATCHES \"^tests/(logits|token)/\"") !=
+        std::string::npos);
+  CHECK(cmake.find("\n    text_generator\n    \"*tests/text/generator/*\"") !=
+        std::string::npos);
+  CHECK(cmake.find("\n    embeddings\n    \"*tests/embeddings/*\"") !=
+        std::string::npos);
+  CHECK(cmake.find(
+            "\n    logits_and_token\n    \"*tests/logits/*,*tests/token/*\"") !=
+        std::string::npos);
+
+  const std::string coverage =
+      read_file(repo_root() / "scripts" / "test_with_coverage.sh");
+  CHECK(coverage.find("text_generator)\n"
+                      "      add_selected_test_dir tests/text/generator") !=
+        std::string::npos);
+  CHECK(coverage.find("embeddings)\n"
+                      "      add_selected_test_dir tests/embeddings") !=
+        std::string::npos);
+  CHECK(coverage.find("logits_and_token)\n"
+                      "      add_selected_test_dir tests/logits\n"
+                      "      add_selected_test_dir tests/token") !=
+        std::string::npos);
+  CHECK(coverage.find("src/emel/text/generator/*)\n"
+                      "        add_changed_shard text_generator") !=
+        std::string::npos);
+  CHECK(coverage.find("src/emel/embeddings/*)\n"
+                      "        add_changed_shard embeddings") !=
+        std::string::npos);
+  CHECK(coverage.find("src/emel/logits/*|src/emel/token/*)\n"
+                      "        add_changed_shard logits_and_token") !=
+        std::string::npos);
+
+  const std::string quality =
+      read_file(repo_root() / "scripts" / "quality_gates.sh");
+  CHECK(quality.find("tests/text/generator/*)\n"
+                     "      add_test_shard text_generator") !=
+        std::string::npos);
+  CHECK(quality.find("tests/embeddings/*)\n"
+                     "      add_test_shard embeddings") !=
+        std::string::npos);
+  CHECK(quality.find("tests/logits/*|tests/token/*)\n"
+                     "      add_test_shard logits_and_token") !=
+        std::string::npos);
+  CHECK(quality.find("src/emel/text/generator/*)\n"
+                     "      add_test_shard text_generator") !=
+        std::string::npos);
+  CHECK(quality.find("src/emel/embeddings/*)\n"
+                     "      add_test_shard embeddings") !=
+        std::string::npos);
+  CHECK(quality.find("src/emel/logits/*|src/emel/token/*)\n"
+                     "      add_test_shard logits_and_token") !=
+        std::string::npos);
+}
+
 TEST_CASE("coverage script enforces thresholds on changed executable lines") {
   const std::string script =
       read_file(repo_root() / "scripts" / "test_with_coverage.sh");
@@ -122,6 +245,39 @@ TEST_CASE("coverage script enforces thresholds on changed executable lines") {
   CHECK(script.find("--fail-under-line \"$LINE_COVERAGE_MIN\"") !=
         std::string::npos);
   CHECK(script.find("--fail-under-branch \"$BRANCH_COVERAGE_MIN\"") !=
+        std::string::npos);
+}
+
+TEST_CASE("coverage reports merge template instantiations by source line") {
+  const std::string script =
+      read_file(repo_root() / "scripts" / "test_with_coverage.sh");
+  const std::size_t threshold_start =
+      script.find("enforcing coverage thresholds:");
+  REQUIRE(threshold_start != std::string::npos);
+
+  const std::size_t json_report_start =
+      script.find("  gcovr \\", threshold_start);
+  REQUIRE(json_report_start != std::string::npos);
+  const std::size_t text_report_start =
+      script.find("  gcovr \\", json_report_start + 1);
+  REQUIRE(text_report_start != std::string::npos);
+
+  const std::string json_report =
+      script.substr(json_report_start, text_report_start - json_report_start);
+  const std::string text_report = script.substr(text_report_start);
+
+  CHECK(json_report.find("--merge-lines") != std::string::npos);
+  CHECK(json_report.find("--json \"$coverage_json\"") != std::string::npos);
+  CHECK(json_report.find("suspicious_hits.warn_once_per_file") !=
+        std::string::npos);
+
+  CHECK(text_report.find("--merge-lines") != std::string::npos);
+  CHECK(text_report.find("--txt-summary") != std::string::npos);
+  CHECK(text_report.find("suspicious_hits.warn_once_per_file") !=
+        std::string::npos);
+  CHECK(text_report.find("--fail-under-line \"$LINE_COVERAGE_MIN\"") !=
+        std::string::npos);
+  CHECK(text_report.find("--fail-under-branch \"$BRANCH_COVERAGE_MIN\"") !=
         std::string::npos);
 }
 
@@ -261,6 +417,21 @@ TEST_CASE(
         std::string::npos);
 }
 
+TEST_CASE("quality gate defaults are nounset-safe and use canonical evaluator path") {
+  const std::string script =
+      read_file(repo_root() / "scripts" / "quality_gates.sh");
+
+  CHECK(script.find(
+            "QUALITY_GATES_FUZZ=\"${EMEL_QUALITY_GATES_FUZZ:-auto}\"") !=
+        std::string::npos);
+  CHECK(script.find("QUALITY_GATES_DETERMINISM=\"${EMEL_QUALITY_GATES_"
+                    "DETERMINISM:-auto}\"") != std::string::npos);
+  CHECK(script.find("QUALITY_GATES_PARALLEL=\"${EMEL_QUALITY_GATES_"
+                    "PARALLEL:-auto}\"") != std::string::npos);
+  CHECK(script.find("build/zig/needle_eval/emel_needle_eval") !=
+        std::string::npos);
+}
+
 TEST_CASE("quality gates preserve fractional and disabled timeout budgets") {
   const std::string script =
       read_file(repo_root() / "scripts" / "quality_gates.sh");
@@ -350,6 +521,191 @@ TEST_CASE("bench script exposes unfiltered bench tool validation command") {
                                      "'quality_gates_tests|bench_runner_tests'";
   CHECK(script.find(ctest_contract) != std::string::npos);
 }
+
+TEST_CASE("quality gates wire the maintained Needle evaluator with release-safe resources") {
+  const std::string cmake = read_file(repo_root() / "CMakeLists.txt");
+  CHECK(cmake.find("EMEL_ENABLE_NEEDLE_EVAL") != std::string::npos);
+  CHECK(cmake.find("add_subdirectory(tools/needle_eval needle_eval)") !=
+        std::string::npos);
+
+  const std::string evaluator =
+      read_file(repo_root() / "tools" / "needle_eval" / "main.cpp");
+  CHECK(evaluator.find("vocab->bos_id") != std::string::npos);
+  CHECK(evaluator.find("vocab->eos_id") != std::string::npos);
+  CHECK(evaluator.find("min_domain_accuracy = 0.840") != std::string::npos);
+  CHECK(evaluator.find("min_effort_accuracy = 0.760") != std::string::npos);
+  CHECK(evaluator.find("max_no_parse = 1u") != std::string::npos);
+  CHECK(evaluator.find("comparison_precision=3dp") != std::string::npos);
+  CHECK(evaluator.find("domain_acc=%.4f") != std::string::npos);
+  CHECK(evaluator.find("effort_acc=%.4f") != std::string::npos);
+  CHECK(evaluator.find("accuracy thresholds unmet") != std::string::npos);
+
+  const std::string quality =
+      read_file(repo_root() / "scripts" / "quality_gates.sh");
+  CHECK(quality.find("run_needle_eval_gate()") != std::string::npos);
+  CHECK(quality.find("needle_eval required resources missing:") !=
+        std::string::npos);
+  CHECK(quality.find("QUALITY_GATES_SCOPE\" == \"full\"") !=
+        std::string::npos);
+  CHECK(quality.find("--min-domain-accuracy") != std::string::npos);
+  CHECK(quality.find("--min-effort-accuracy") != std::string::npos);
+  CHECK(quality.find("--max-no-parse") != std::string::npos);
+  CHECK(quality.find(
+            "QUALITY_GATES_NEEDLE_MAX_NO_PARSE=\"${EMEL_QUALITY_GATES_NEEDLE_MAX_NO_PARSE:-1}\"") !=
+        std::string::npos);
+  CHECK(quality.find("--activation-route f32") != std::string::npos);
+
+  CHECK(evaluator.find("emel/io/mmap/sm.hpp") != std::string::npos);
+  CHECK(evaluator.find("emel::io::mmap::event::map_tensor_request") !=
+        std::string::npos);
+  CHECK(evaluator.find("emel::io::mmap::event::release_mapping") !=
+        std::string::npos);
+  CHECK(evaluator.find("read_file_bytes") == std::string::npos);
+  CHECK(evaluator.find("k_max_model_bytes") != std::string::npos);
+  CHECK(evaluator.find("k_max_tsv_bytes") != std::string::npos);
+  CHECK(evaluator.find("k_max_tsv_rows") != std::string::npos);
+  CHECK(evaluator.find("k_max_tsv_line_bytes") != std::string::npos);
+  CHECK(evaluator.find("k_max_reference_ids_per_row") != std::string::npos);
+  CHECK(evaluator.find("std::strtoul") != std::string::npos);
+  CHECK(evaluator.find("std::bad_alloc") != std::string::npos);
+}
+
+TEST_CASE("Needle evaluator defaults to heldout f32 and retains explicit A8") {
+  const std::string evaluator =
+      read_file(repo_root() / "tools" / "needle_eval" / "main.cpp");
+  const std::string graph_events = read_file(
+      repo_root() / "src" / "emel" / "model" / "needle" / "graph" /
+      "events.hpp");
+
+  CHECK(evaluator.find("enum class activation_route { a8, f32 }") !=
+        std::string::npos);
+  CHECK(evaluator.find("activation_route route = activation_route::f32") !=
+        std::string::npos);
+  CHECK(evaluator.find("--activation-route") != std::string::npos);
+  CHECK(evaluator.find("value == \"a8\"") != std::string::npos);
+  CHECK(evaluator.find("value == \"f32\"") != std::string::npos);
+  CHECK(evaluator.find(
+            ".activation_quant = options.route == activation_route::a8") !=
+        std::string::npos);
+  CHECK(evaluator.find("activation_route_name(options.route)") !=
+        std::string::npos);
+  CHECK(evaluator.find("activation_route=%s") != std::string::npos);
+  CHECK(graph_events.find("bool activation_quant = false") !=
+        std::string::npos);
+  CHECK(read_file(repo_root() / "tests" / "model" / "needle" /
+                  "graph_parity_tests.cpp")
+            .find("graph::event::init{true}") != std::string::npos);
+}
+
+TEST_CASE("Needle evaluator compares published accuracy at three decimals") {
+  const std::string evaluator =
+      read_file(repo_root() / "tools" / "needle_eval" / "main.cpp");
+
+  CHECK(evaluator.find(
+            "static_assert(!accuracy_meets_threshold(0.8394, 0.840))") !=
+        std::string::npos);
+  CHECK(evaluator.find(
+            "static_assert(accuracy_meets_threshold(0.8395, 0.840))") !=
+        std::string::npos);
+  CHECK(evaluator.find(
+            "static_assert(!accuracy_meets_threshold(0.7594, 0.760))") !=
+        std::string::npos);
+  CHECK(evaluator.find(
+            "static_assert(accuracy_meets_threshold(0.7595, 0.760))") !=
+        std::string::npos);
+  CHECK(evaluator.find("static_assert(eval_options{}.max_no_parse == 1u)") !=
+        std::string::npos);
+}
+
+#if !defined(_WIN32) && defined(BENCH_NEEDLE_EVAL_BINARY)
+TEST_CASE(
+    "Needle evaluator rejects invalid activation routes before evaluation") {
+  const std::filesystem::path output =
+      std::filesystem::temp_directory_path() /
+      ("needle_eval_activation_route_" + std::to_string(std::rand()) +
+       ".txt");
+  const command_result result = run_command(
+      shell_quote(BENCH_NEEDLE_EVAL_BINARY) +
+          " unused.cact unused.tsv --activation-route invalid",
+      output);
+
+  CHECK(result.status != 0);
+  CHECK(result.output.find("invalid CLI option or value") !=
+        std::string::npos);
+}
+
+TEST_CASE("Needle evaluator accepts maintained activation routes before model "
+          "evaluation") {
+  const std::filesystem::path output =
+      std::filesystem::temp_directory_path() /
+      ("needle_eval_activation_route_valid_" + std::to_string(std::rand()) +
+       ".txt");
+
+  for (const char *route : {"a8", "f32"}) {
+    const command_result result = run_command(
+        shell_quote(BENCH_NEEDLE_EVAL_BINARY) +
+            " unused.cact unused.tsv --activation-route " + route,
+        output);
+    CHECK(result.status != 0);
+    CHECK(result.output.find("open prompts tsv") != std::string::npos);
+    CHECK(result.output.find("invalid CLI option or value") ==
+          std::string::npos);
+  }
+}
+
+TEST_CASE("Needle evaluator rejects malformed IDs before model evaluation") {
+  static int fixture_counter = 0;
+  const std::filesystem::path dir =
+      std::filesystem::temp_directory_path() /
+      ("needle_eval_contract_" + std::to_string(++fixture_counter) + "_" +
+       std::to_string(std::rand()));
+  std::filesystem::create_directories(dir);
+  const std::filesystem::path prompts = dir / "prompts.tsv";
+  const std::filesystem::path output = dir / "output.txt";
+  write_file(prompts, "routing\tlow\t1 junk\t6869\n");
+
+  const command_result result = run_command(
+      shell_quote(BENCH_NEEDLE_EVAL_BINARY) + " " +
+          shell_quote((repo_root() / "tests" / "models" /
+                       "route-w4-qat.cact")
+                          .string()) +
+          " " + shell_quote(prompts.string()) + " 0 1",
+      output);
+  CHECK(result.status != 0);
+  CHECK(result.output.find("invalid reference IDs") != std::string::npos);
+  CHECK(result.output.find("native tokenizer ids differ") ==
+        std::string::npos);
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+}
+
+TEST_CASE("Needle evaluator rejects oversized resources before evaluation") {
+  static int fixture_counter = 0;
+  const std::filesystem::path dir =
+      std::filesystem::temp_directory_path() /
+      ("needle_eval_bounds_" + std::to_string(++fixture_counter) + "_" +
+       std::to_string(std::rand()));
+  std::filesystem::create_directories(dir);
+  const std::filesystem::path prompts = dir / "prompts.tsv";
+  const std::filesystem::path output = dir / "output.txt";
+  write_file(prompts, "routing\tlow\t1\t" + std::string(65538u, '0') + "\n");
+
+  const command_result result = run_command(
+      shell_quote(BENCH_NEEDLE_EVAL_BINARY) + " " +
+          shell_quote((repo_root() / "tests" / "models" /
+                       "route-w4-qat.cact")
+                          .string()) +
+          " " + shell_quote(prompts.string()) + " 0 1",
+      output);
+  CHECK(result.status != 0);
+  CHECK(result.output.find("prompts tsv line too large") !=
+        std::string::npos);
+  CHECK(result.output.find("row i=") == std::string::npos);
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+}
+#endif
+
 
 TEST_CASE("bench script routes Moshi LM suite through the wrapper") {
   const std::string script = read_file(repo_root() / "scripts" / "bench.sh");
@@ -447,6 +803,30 @@ TEST_CASE("bench script bounds default generation workload") {
   CHECK(diarization_bench.find("EMEL_BENCH_DIARIZATION_ITERS") !=
         std::string::npos);
   CHECK(diarization_bench.find("EMEL_BENCH_DIARIZATION_RUNS") !=
+        std::string::npos);
+}
+
+TEST_CASE("bench combined gate snapshots EMEL before paired comparison") {
+  const std::string script = read_file(repo_root() / "scripts" / "bench.sh");
+  const std::size_t combined_start = script.find("if $COMBINED; then");
+  REQUIRE(combined_start != std::string::npos);
+  const std::size_t combined_end = script.find("if $SNAPSHOT; then", combined_start);
+  REQUIRE(combined_end != std::string::npos);
+  const std::string combined =
+      script.substr(combined_start, combined_end - combined_start);
+
+  CHECK(combined.find("run_bench_runner \"$build_dir\" --mode=emel > "
+                      "\"$snapshot_output\"") != std::string::npos);
+  CHECK(combined.find("run_bench_runner \"$build_dir\" --mode=compare > "
+                      "\"$compare_output\"") != std::string::npos);
+  CHECK(combined.find("filter_snapshot_regression_rows \"$snapshot_output\" "
+                      "\"$current_snapshot\"") != std::string::npos);
+  CHECK(combined.find("snapshot_gate_has_only_live_needle_diagnostics "
+                      "\"$snapshot_output\"") != std::string::npos);
+  CHECK(combined.find("snapshot_measurement_rows=\"$(awk '") !=
+        std::string::npos);
+  CHECK(combined.find("elif [[ -z \"$SUITE_FILTER\" || "
+                      "\"$snapshot_measurement_rows\" == \"0\" ]]") !=
         std::string::npos);
 }
 
@@ -833,3 +1213,374 @@ TEST_CASE("bench runner emits a host-arch marker the compare gate consumes") {
   // host-arch exemption logic has a single home.
   CHECK(script.find("-v host_arch=\"$host_arch\"") != std::string::npos);
 }
+
+#if !defined(_WIN32)
+TEST_CASE("memory envelope computes half of effective total memory") {
+  const auto output = std::filesystem::temp_directory_path() /
+                      "emel_memory_cap_half_test.txt";
+  const auto script = repo_root() / "scripts" / "build_jobs.sh";
+  const command_result result = run_command(
+      "env EMEL_MEMORY_TEST_OS=Linux EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "EMEL_MEMORY_TEST_ANCESTOR_MAXES=max "
+      "EMEL_MEMORY_TEST_CURRENT_MAX=max EMEL_MEMORY_TEST_CURRENT_SWAP=max "
+      "EMEL_MEMORY_TEST_CORES=64 bash " +
+          shell_quote(script.string()) + " --memory-cap-check",
+      output);
+  CHECK(result.status == 0);
+  CHECK(result.output.find("effective_total_bytes=107374182400") !=
+        std::string::npos);
+  CHECK(result.output.find("cap_bytes=53687091200") != std::string::npos);
+}
+
+TEST_CASE("memory envelope honors a finite parent cgroup limit") {
+  const auto output = std::filesystem::temp_directory_path() /
+                      "emel_memory_cap_cgroup_test.txt";
+  const auto script = repo_root() / "scripts" / "build_jobs.sh";
+  const command_result result = run_command(
+      "env EMEL_MEMORY_TEST_OS=Linux EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "EMEL_MEMORY_TEST_ANCESTOR_MAXES=42949672960,max "
+      "EMEL_MEMORY_TEST_CURRENT_MAX=42949672960 "
+      "EMEL_MEMORY_TEST_CURRENT_SWAP=0 EMEL_MEMORY_TEST_CORES=64 bash " +
+          shell_quote(script.string()) + " --memory-cap-check",
+      output);
+  CHECK(result.status == 0);
+  CHECK(result.output.find("effective_total_bytes=42949672960") !=
+        std::string::npos);
+  CHECK(result.output.find("cap_bytes=21474836480") != std::string::npos);
+}
+
+TEST_CASE("memory overrides validate and build jobs clamp to the cap") {
+  const auto output = std::filesystem::temp_directory_path() /
+                      "emel_memory_override_test.txt";
+  const auto script = repo_root() / "scripts" / "build_jobs.sh";
+  const std::string base =
+      "env EMEL_MEMORY_TEST_OS=Linux EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "EMEL_MEMORY_TEST_ANCESTOR_MAXES=max "
+      "EMEL_MEMORY_TEST_CURRENT_MAX=max EMEL_MEMORY_TEST_CURRENT_SWAP=max "
+      "EMEL_MEMORY_TEST_CORES=64 ";
+
+  command_result result = run_command(
+      base + "EMEL_MEMORY_CAP_PERCENT=51 bash " +
+          shell_quote(script.string()) + " --memory-cap-check",
+      output);
+  CHECK(result.status != 0);
+  CHECK(result.output.find("EMEL_MEMORY_CAP_PERCENT must be 1..50") !=
+        std::string::npos);
+
+  result = run_command(base + "EMEL_BUILD_JOBS=40 bash " +
+                           shell_quote(script.string()) +
+                           " --memory-cap-check",
+                       output);
+  CHECK(result.status == 0);
+  CHECK(result.output.find("safe_build_jobs=7") != std::string::npos);
+  CHECK(result.output.find("build_jobs=7") != std::string::npos);
+  CHECK(result.output.find("clamping EMEL_BUILD_JOBS=40") !=
+        std::string::npos);
+
+  result = run_command(base + "EMEL_BUILD_JOBS=invalid bash " +
+                           shell_quote(script.string()) +
+                           " --memory-cap-check",
+                       output);
+  CHECK(result.status != 0);
+  CHECK(result.output.find("EMEL_BUILD_JOBS must be a positive integer") !=
+        std::string::npos);
+}
+
+TEST_CASE("memory envelope constructs Linux scope and fails closed on Darwin") {
+  const auto output = std::filesystem::temp_directory_path() /
+                      "emel_memory_envelope_command_test.txt";
+  const auto script = repo_root() / "scripts" / "build_jobs.sh";
+  const std::string base =
+      "env EMEL_MEMORY_TEST_OS=Linux EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "EMEL_MEMORY_TEST_ANCESTOR_MAXES=max "
+      "EMEL_MEMORY_TEST_CURRENT_MAX=max EMEL_MEMORY_TEST_CURRENT_SWAP=max "
+      "EMEL_MEMORY_TEST_CORES=64 ";
+
+  command_result result = run_command(
+      base + "EMEL_MEMORY_TEST_OS=Linux bash " +
+          shell_quote(script.string()) + " --memory-cap-check",
+      output);
+  CHECK(result.status == 0);
+  CHECK(result.output.find("systemd-run --user --scope --quiet --same-dir") !=
+        std::string::npos);
+  CHECK(result.output.find("--property=MemoryMax=53687091200") !=
+        std::string::npos);
+  CHECK(result.output.find("--property=MemorySwapMax=0") !=
+        std::string::npos);
+
+  result = run_command(base + "EMEL_MEMORY_TEST_OS=Darwin bash " +
+                           shell_quote(script.string()) +
+                           " --memory-cap-check",
+                       output);
+  CHECK(result.status != 0);
+  CHECK(result.output.find("macOS has no supported native aggregate descendant "
+                           "memory controller") != std::string::npos);
+  CHECK(result.output.find("sampled watchdogs") != std::string::npos);
+}
+
+TEST_CASE("memory envelope marker requires observable cgroup limits") {
+  const auto output = std::filesystem::temp_directory_path() /
+                      "emel_memory_envelope_failure_test.txt";
+  const auto script = repo_root() / "scripts" / "build_jobs.sh";
+  const std::string base =
+      "env EMEL_MEMORY_TEST_OS=Linux EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "EMEL_MEMORY_TEST_CORES=64 "
+      "EMEL_MEMORY_TEST_MEMBERSHIP=/user.slice/emel-build-test.scope "
+      "EMEL_MEMORY_TEST_SYSTEMD_CONTROL_GROUP=/user.slice/emel-build-test.scope "
+      "EMEL_MEMORY_TEST_ANCESTOR_MAXES=max ";
+
+  command_result result = run_command(
+      base + "EMEL_MEMORY_TEST_CURRENT_MAX=53687091200 "
+             "EMEL_MEMORY_TEST_CURRENT_SWAP=0 bash " +
+          shell_quote(script.string()) + " --memory-cap-check",
+      output);
+  CHECK(result.status == 0);
+  CHECK(result.output.find("cap_bytes=53687091200") != std::string::npos);
+
+  result = run_command(
+      base + "EMEL_MEMORY_TEST_CURRENT_MAX=53687091201 "
+             "EMEL_MEMORY_TEST_CURRENT_SWAP=0 bash " +
+          shell_quote(script.string()) + " --memory-cap-check",
+      output);
+  CHECK(result.status != 0);
+  CHECK(result.output.find("memory.max=53687091201 exceeds recomputed cap") !=
+        std::string::npos);
+
+  result = run_command(
+      "env EMEL_MEMORY_TEST_OS=Linux EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "EMEL_MEMORY_TEST_CORES=64 "
+      "EMEL_MEMORY_TEST_MEMBERSHIP=/user.slice/emel-build-test.scope "
+      "EMEL_MEMORY_TEST_SYSTEMD_CONTROL_GROUP=/user.slice/emel-build-test.scope "
+      "EMEL_MEMORY_TEST_ANCESTOR_MAXES=max,42949672960,85899345920 "
+      "EMEL_MEMORY_TEST_CURRENT_MAX=21474836481 "
+      "EMEL_MEMORY_TEST_CURRENT_SWAP=0 bash " +
+          shell_quote(script.string()) + " --memory-cap-check",
+      output);
+  CHECK(result.status != 0);
+  CHECK(result.output.find("exceeds recomputed cap 21474836480") !=
+        std::string::npos);
+
+  result = run_command(
+      base + "EMEL_MEMORY_TEST_CURRENT_MAX=53687091200 "
+             "EMEL_MEMORY_TEST_CURRENT_SWAP=max bash " +
+          shell_quote(script.string()) + " --memory-cap-check",
+      output);
+  CHECK(result.status != 0);
+  CHECK(result.output.find("memory.swap.max=max, required 0") !=
+        std::string::npos);
+
+  result = run_command(
+      "env EMEL_MEMORY_TEST_OS=Linux EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "EMEL_MEMORY_TEST_CORES=64 "
+      "EMEL_MEMORY_TEST_MEMBERSHIP=/user.slice/emel-build-forged.scope "
+      "EMEL_MEMORY_TEST_CGROUP_V2=present "
+      "EMEL_MEMORY_TEST_ANCESTOR_MAXES=max "
+      "EMEL_MEMORY_TEST_CURRENT_MAX=53687091200 "
+      "EMEL_MEMORY_TEST_CURRENT_SWAP=0 bash " +
+          shell_quote(script.string()) + " --memory-cap-check",
+      output);
+  CHECK(result.status == 0);
+  CHECK(result.output.find("systemd-run --user --scope") !=
+        std::string::npos);
+}
+
+TEST_CASE("sourced production entry ignores memory test environment") {
+  const auto output = std::filesystem::temp_directory_path() /
+                      "emel_memory_source_trust_test.txt";
+  const auto helper = repo_root() / "scripts" / "build_jobs.sh";
+  const auto fake_bin = std::filesystem::temp_directory_path() /
+                        "emel_memory_fake_systemd_bin";
+  std::filesystem::create_directories(fake_bin);
+  for (const std::string tool : {"systemctl", "systemd-run", "uname"}) {
+    const auto path = fake_bin / tool;
+    write_file(path, tool == "uname" ? "#!/bin/sh\necho Linux\n"
+                                      : "#!/bin/sh\nexit 99\n");
+    std::filesystem::permissions(
+        path, std::filesystem::perms::owner_exec |
+                  std::filesystem::perms::owner_read |
+                  std::filesystem::perms::owner_write,
+        std::filesystem::perm_options::replace);
+  }
+
+  const command_result result = run_command(
+      "env PATH=" + shell_quote(fake_bin.string() + ":/usr/bin:/bin") +
+          " EMEL_MEMORY_TEST_OS=Darwin EMEL_MEMORY_TEST_PHYSICAL_BYTES=1 "
+          "EMEL_MEMORY_TEST_CURRENT_MAX=1 EMEL_MEMORY_TEST_CURRENT_SWAP=0 "
+          "bash -c " + shell_quote("source " + shell_quote(helper.string())),
+      output);
+  CHECK(result.status != 0);
+  const bool source_failed_closed =
+      result.output.find("verified systemd --user scopes") != std::string::npos ||
+      result.output.find("cgroup v2 with a readable unified") != std::string::npos;
+  CHECK(source_failed_closed);
+  CHECK(result.output.find("macOS has no supported") == std::string::npos);
+  std::error_code ec;
+  std::filesystem::remove_all(fake_bin, ec);
+}
+
+TEST_CASE("memory-cap-run never executes payload without an envelope") {
+  const auto output = std::filesystem::temp_directory_path() /
+                      "emel_memory_run_fail_closed_test.txt";
+  const auto helper = repo_root() / "scripts" / "build_jobs.sh";
+  const auto fake_bin = std::filesystem::temp_directory_path() /
+                        "emel_memory_run_fake_systemd_bin";
+  const auto sentinel = std::filesystem::temp_directory_path() /
+                        "emel_memory_run_payload_sentinel";
+  std::filesystem::create_directories(fake_bin);
+  for (const std::string tool : {"systemctl", "systemd-run", "uname"}) {
+    const auto path = fake_bin / tool;
+    write_file(path, tool == "uname" ? "#!/bin/sh\necho Linux\n"
+                                      : "#!/bin/sh\nexit 99\n");
+    std::filesystem::permissions(
+        path, std::filesystem::perms::owner_exec |
+                  std::filesystem::perms::owner_read |
+                  std::filesystem::perms::owner_write,
+        std::filesystem::perm_options::replace);
+  }
+  std::error_code ec;
+  std::filesystem::remove(sentinel, ec);
+
+  const command_result result = run_command(
+      "env PATH=" + shell_quote(fake_bin.string() + ":/usr/bin:/bin") +
+          " bash " + shell_quote(helper.string()) +
+          " --memory-cap-run touch " + shell_quote(sentinel.string()),
+      output);
+  CHECK(result.status != 0);
+  const bool run_failed_closed =
+      result.output.find("verified systemd --user scopes") != std::string::npos ||
+      result.output.find("cgroup v2 with a readable unified") != std::string::npos;
+  CHECK(run_failed_closed);
+  CHECK_FALSE(std::filesystem::exists(sentinel));
+  std::filesystem::remove_all(fake_bin, ec);
+}
+
+TEST_CASE("memory command construction fails without cgroup v2") {
+  const auto output = std::filesystem::temp_directory_path() /
+                      "emel_memory_missing_cgroup_v2_test.txt";
+  const auto helper = repo_root() / "scripts" / "build_jobs.sh";
+  const command_result result = run_command(
+      "env EMEL_MEMORY_TEST_OS=Linux EMEL_MEMORY_TEST_CGROUP_V2=missing "
+      "EMEL_MEMORY_TEST_PHYSICAL_BYTES=107374182400 "
+      "EMEL_MEMORY_TEST_ANCESTOR_MAXES=max "
+      "EMEL_MEMORY_TEST_CURRENT_MAX=max EMEL_MEMORY_TEST_CURRENT_SWAP=max "
+      "bash " + shell_quote(helper.string()) + " --memory-cap-check",
+      output);
+  CHECK(result.status != 0);
+  CHECK(result.output.find("cgroup v2 with a readable unified") !=
+        std::string::npos);
+}
+TEST_CASE("every native build or installer enters the hard envelope first") {
+  const auto scripts = repo_root() / "scripts";
+  for (const auto &entry : std::filesystem::directory_iterator(scripts)) {
+    if (!entry.is_regular_file() || entry.path().extension() != ".sh") continue;
+    const std::string text = read_file(entry.path());
+    std::size_t first_work = std::string::npos;
+    for (const std::string needle : {"cmake --build", "zig build", "ninja ",
+                                     "pip install", "pip3 install", "uv pip",
+                                     "uv sync"}) {
+      const std::size_t position = text.find(needle);
+      if (position < first_work) first_work = position;
+    }
+    if (first_work != std::string::npos) {
+      CAPTURE(entry.path().filename().string());
+      const std::size_t source = text.find("build_jobs.sh");
+      CHECK(source != std::string::npos);
+      CHECK(source < first_work);
+    }
+  }
+}
+
+TEST_CASE("material setup scripts enter the hard envelope first") {
+  const auto scripts = repo_root() / "scripts";
+  for (const std::string name : {"setup_diarization_pytorch_ref_env.sh",
+                                 "setup_moshi_cpp_reference.sh",
+                                 "setup_personaplex_mlx_reference.sh",
+                                 "setup_whisper_cpp_reference.sh"}) {
+    const std::string text = read_file(scripts / name);
+    CAPTURE(name);
+    const std::size_t source = text.find("build_jobs.sh");
+    CHECK(source != std::string::npos);
+    CHECK(source < text.find("python"));
+    CHECK(source < text.find("cmake"));
+  }
+}
+
+TEST_CASE("direct check and lint gates enter the hard envelope first") {
+  const auto scripts = repo_root() / "scripts";
+  for (const auto &entry : std::filesystem::directory_iterator(scripts)) {
+    if (!entry.is_regular_file() || entry.path().extension() != ".sh") continue;
+    const std::string name = entry.path().filename().string();
+    if (!(name.starts_with("check_") || name.starts_with("lint_"))) continue;
+    const std::string text = read_file(entry.path());
+    CAPTURE(name);
+    const std::size_t source = text.find("build_jobs.sh");
+    CHECK(source != std::string::npos);
+    CHECK(source < text.find("if "));
+    CHECK(source < text.find("rg "));
+  }
+
+  for (const std::string name : {"quality_gates.sh", "build_with_zig.sh",
+                                 "test_with_coverage.sh",
+                                 "test_with_sanitizers.sh", "fuzz_smoke.sh",
+                                 "lint_snapshot.sh", "bench.sh",
+                                 "generate_docs.sh", "embedded_size.sh"}) {
+    const std::string text = read_file(scripts / name);
+    CAPTURE(name);
+    CHECK(text.find("build_jobs.sh") != std::string::npos);
+  }
+}
+
+
+TEST_CASE("profile scripts enter the hard envelope first") {
+  const auto scripts = repo_root() / "scripts";
+  for (const auto &entry : std::filesystem::directory_iterator(scripts)) {
+    if (!entry.is_regular_file() || entry.path().extension() != ".sh") continue;
+    const std::string name = entry.path().filename().string();
+    if (!name.starts_with("profile_")) continue;
+    const std::string text = read_file(entry.path());
+    CAPTURE(name);
+    const std::size_t source = text.find("build_jobs.sh");
+    CHECK(source != std::string::npos);
+    CHECK(source < text.find("xctrace"));
+    CHECK(source < text.find("bench_runner"));
+  }
+}
+
+TEST_CASE("benchmark direct-exec wrappers enter the hard envelope first") {
+  const auto scripts = repo_root() / "scripts";
+  for (const auto &entry : std::filesystem::directory_iterator(scripts)) {
+    if (!entry.is_regular_file() || entry.path().extension() != ".sh") continue;
+    const std::string name = entry.path().filename().string();
+    if (!name.starts_with("bench_")) continue;
+    const std::string text = read_file(entry.path());
+    std::size_t direct_exec = text.find("exec \"${EMEL_");
+    if (direct_exec == std::string::npos) direct_exec = text.find("exec \"$EMEL_");
+    if (direct_exec == std::string::npos) continue;
+    CAPTURE(name);
+    const std::size_t source = text.find("build_jobs.sh");
+    CHECK(source != std::string::npos);
+    CHECK(source < direct_exec);
+  }
+}
+TEST_CASE("removed memory bypasses and sampled watchdog stay absent") {
+  const std::string helper =
+      read_file(repo_root() / "scripts" / "build_jobs.sh");
+  const std::string gates =
+      read_file(repo_root() / "scripts" / "quality_gates.sh");
+  CHECK(helper.find("EMEL_ALLOW_UNCAPPED_MEMORY") == std::string::npos);
+  CHECK(helper.find("DANGEROUS_ALLOW") == std::string::npos);
+  CHECK(gates.find("darwin-rss-watchdog") == std::string::npos);
+  CHECK(gates.find("process_tree_rss") == std::string::npos);
+  CHECK(helper.find("emel_run_delegated_cgroup") == std::string::npos);
+  CHECK(helper.find("delegated cgroup") == std::string::npos);
+  CHECK(helper.find("verified systemd --user scopes") != std::string::npos);
+}
+
+
+TEST_CASE("CMake presets expose configuration only") {
+  const std::string presets = read_file(repo_root() / "CMakePresets.json");
+  CHECK(presets.find("\"buildPresets\"") == std::string::npos);
+  CHECK(presets.find("\"testPresets\"") == std::string::npos);
+  CHECK(presets.find("\"configurePresets\"") != std::string::npos);
+}
+#endif

@@ -272,7 +272,7 @@ struct guard_wavefront_stage_configuration_valid {
              const action::context<dependencies_type> &ctx) const noexcept {
     return ctx.collaborators.stage_mode !=
                action::wavefront_stage_mode::parallel ||
-           static_cast<action::wavefront_stage_pool *>(
+           static_cast<action::wavefront_stage_worker_pool *>(
                ctx.collaborators.stage_pool) != nullptr;
   }
 };

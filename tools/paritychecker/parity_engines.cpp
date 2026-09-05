@@ -157,7 +157,7 @@ struct parser_error_capture {
 };
 
 bool on_gbnf_done(void *owner,
-                  const emel::gbnf::rule_parser::events::parsing_done &ev) {
+                  const emel::gbnf::rule_parser::events::parsing_done &ev) noexcept {
   auto *capture = static_cast<parser_done_capture *>(owner);
   capture->called = true;
   capture->grammar = &ev.grammar;
@@ -165,7 +165,7 @@ bool on_gbnf_done(void *owner,
 }
 
 bool on_gbnf_error(void *owner,
-                   const emel::gbnf::rule_parser::events::parsing_error &ev) {
+                   const emel::gbnf::rule_parser::events::parsing_error &ev) noexcept {
   auto *capture = static_cast<parser_error_capture *>(owner);
   capture->called = true;
   capture->grammar = &ev.grammar;
@@ -233,28 +233,28 @@ struct quantized_contract_summary {
 };
 
 bool on_jinja_parse_done(void *owner,
-                         const emel::text::jinja::events::parsing_done &) {
+                         const emel::text::jinja::events::parsing_done &) noexcept {
   auto *capture = static_cast<jinja_parse_capture *>(owner);
   capture->done_called = true;
   return true;
 }
 
 bool on_jinja_parse_error(void *owner,
-                          const emel::text::jinja::events::parsing_error &) {
+                          const emel::text::jinja::events::parsing_error &) noexcept {
   auto *capture = static_cast<jinja_parse_capture *>(owner);
   capture->error_called = true;
   return true;
 }
 
 bool on_jinja_render_done(void *owner,
-                          const emel::text::jinja::events::rendering_done &) {
+                          const emel::text::jinja::events::rendering_done &) noexcept {
   auto *capture = static_cast<jinja_render_capture *>(owner);
   capture->done_called = true;
   return true;
 }
 
 bool on_jinja_render_error(void *owner,
-                           const emel::text::jinja::events::rendering_error &) {
+                           const emel::text::jinja::events::rendering_error &) noexcept {
   auto *capture = static_cast<jinja_render_capture *>(owner);
   capture->error_called = true;
   return true;
@@ -950,7 +950,7 @@ struct argmax_summary {
 
 argmax_summary summarize_argmax_scores(const int32_t &candidate_ids,
                                        const float &candidate_scores,
-                                       const int32_t &candidate_count) {
+                                       const int32_t &candidate_count) noexcept {
   argmax_summary summary{};
   if (candidate_count <= 0) {
     return summary;
@@ -977,7 +977,7 @@ argmax_summary summarize_argmax_scores(const int32_t &candidate_ids,
 }
 
 void append_trace_token(generation_trace &trace, const int32_t token_id,
-                        const float best_score, const float second_best_score) {
+                        const float best_score, const float second_best_score) noexcept {
   if (trace.token_count < 0 ||
       static_cast<size_t>(trace.token_count) >= trace.token_ids.size()) {
     return;
@@ -995,10 +995,10 @@ emel::error::type sampler_select_argmax(generation_load_state &state,
                                         int32_t &candidate_ids,
                                         float &candidate_scores,
                                         int32_t &candidate_count,
-                                        int32_t &selected_token_out);
+                                        int32_t &selected_token_out) noexcept;
 
 emel::error::type
-run_emel_parse_model(void *owner, const emel::model::loader::event::load &req);
+run_emel_parse_model(void *owner, const emel::model::loader::event::load &req) noexcept;
 
 struct generation_load_state {
   std::unique_ptr<emel::model::data> model_data =
@@ -1014,7 +1014,7 @@ struct generation_load_state {
   emel::text::tokenizer::sm tokenizer = {};
   emel::text::conditioner::sm conditioner = {};
   emel::model::generation::contract generation_contract = {};
-  emel::kernel::matmul::lane_pool
+  emel::kernel::matmul::worker_pool
       parallel_matmul_lanes = {};
   std::unique_ptr<emel::text::generator::sm> generator = {};
   reference_backend reference = {};
@@ -1109,7 +1109,7 @@ emel::error::type sampler_select_argmax(generation_load_state &state,
                                         int32_t &candidate_ids,
                                         float &candidate_scores,
                                         int32_t &candidate_count,
-                                        int32_t &selected_token_out) {
+                                        int32_t &selected_token_out) noexcept {
   const argmax_summary summary =
       summarize_argmax_scores(candidate_ids, candidate_scores, candidate_count);
   selected_token_out = summary.selected_token;
@@ -1200,16 +1200,16 @@ emel::error::type map_gguf_error(const emel::error::type err) {
 
 void reset_gguf_capture(generation_load_state &state);
 void on_probe_done(void *owner,
-                   const emel::gguf::loader::events::probe_done &ev);
+                   const emel::gguf::loader::events::probe_done &ev) noexcept;
 void on_probe_error(void *owner,
-                    const emel::gguf::loader::events::probe_error &ev);
-void on_bind_done(void *owner, const emel::gguf::loader::events::bind_done &ev);
+                    const emel::gguf::loader::events::probe_error &ev) noexcept;
+void on_bind_done(void *owner, const emel::gguf::loader::events::bind_done &ev) noexcept;
 void on_bind_error(void *owner,
-                   const emel::gguf::loader::events::bind_error &ev);
+                   const emel::gguf::loader::events::bind_error &ev) noexcept;
 void on_parse_done(void *owner,
-                   const emel::gguf::loader::events::parse_done &ev);
+                   const emel::gguf::loader::events::parse_done &ev) noexcept;
 void on_parse_error(void *owner,
-                    const emel::gguf::loader::events::parse_error &ev);
+                    const emel::gguf::loader::events::parse_error &ev) noexcept;
 
 emel::error::type
 prebind_gguf_kv_storage(generation_load_state &state,
@@ -1310,7 +1310,7 @@ void reset_generation_capture(generation_load_state &state) {
 }
 
 void on_probe_done(void *owner,
-                   const emel::gguf::loader::events::probe_done &ev) {
+                   const emel::gguf::loader::events::probe_done &ev) noexcept {
   auto &state = *static_cast<generation_load_state *>(owner);
   state.gguf.probe_done = true;
   state.gguf.probe_error = false;
@@ -1318,21 +1318,21 @@ void on_probe_done(void *owner,
 }
 
 void on_probe_error(void *owner,
-                    const emel::gguf::loader::events::probe_error &ev) {
+                    const emel::gguf::loader::events::probe_error &ev) noexcept {
   auto &state = *static_cast<generation_load_state *>(owner);
   state.gguf.probe_done = false;
   state.gguf.probe_error = true;
   state.gguf.err = ev.err;
 }
 
-void on_bind_done(void *owner, const emel::gguf::loader::events::bind_done &) {
+void on_bind_done(void *owner, const emel::gguf::loader::events::bind_done &) noexcept {
   auto &state = *static_cast<generation_load_state *>(owner);
   state.gguf.bind_done = true;
   state.gguf.bind_error = false;
 }
 
 void on_bind_error(void *owner,
-                   const emel::gguf::loader::events::bind_error &ev) {
+                   const emel::gguf::loader::events::bind_error &ev) noexcept {
   auto &state = *static_cast<generation_load_state *>(owner);
   state.gguf.bind_done = false;
   state.gguf.bind_error = true;
@@ -1340,14 +1340,14 @@ void on_bind_error(void *owner,
 }
 
 void on_parse_done(void *owner,
-                   const emel::gguf::loader::events::parse_done &) {
+                   const emel::gguf::loader::events::parse_done &) noexcept {
   auto &state = *static_cast<generation_load_state *>(owner);
   state.gguf.parse_done = true;
   state.gguf.parse_error = false;
 }
 
 void on_parse_error(void *owner,
-                    const emel::gguf::loader::events::parse_error &ev) {
+                    const emel::gguf::loader::events::parse_error &ev) noexcept {
   auto &state = *static_cast<generation_load_state *>(owner);
   state.gguf.parse_done = false;
   state.gguf.parse_error = true;
@@ -1355,7 +1355,7 @@ void on_parse_error(void *owner,
 }
 
 void on_load_done(void *owner,
-                  const emel::model::loader::events::load_done &ev) {
+                  const emel::model::loader::events::load_done &ev) noexcept {
   auto &state = *static_cast<generation_load_state *>(owner);
   state.load.done = true;
   state.load.error = false;
@@ -1367,7 +1367,7 @@ void on_load_done(void *owner,
 }
 
 void on_load_error(void *owner,
-                   const emel::model::loader::events::load_error &ev) {
+                   const emel::model::loader::events::load_error &ev) noexcept {
   auto &state = *static_cast<generation_load_state *>(owner);
   state.load.done = false;
   state.load.error = true;
@@ -1377,7 +1377,7 @@ void on_load_error(void *owner,
 }
 
 void on_initialize_done(
-    void *owner, const emel::text::generator::events::initialize_done &) {
+    void *owner, const emel::text::generator::events::initialize_done &) noexcept {
   auto &state = *static_cast<generation_load_state *>(owner);
   state.initialize.done = true;
   state.initialize.error = false;
@@ -1385,7 +1385,7 @@ void on_initialize_done(
 }
 
 void on_initialize_error(
-    void *owner, const emel::text::generator::events::initialize_error &ev) {
+    void *owner, const emel::text::generator::events::initialize_error &ev) noexcept {
   auto &state = *static_cast<generation_load_state *>(owner);
   state.initialize.done = false;
   state.initialize.error = true;
@@ -1393,7 +1393,7 @@ void on_initialize_error(
 }
 
 void on_generation_done(
-    void *owner, const emel::text::generator::events::generation_done &ev) {
+    void *owner, const emel::text::generator::events::generation_done &ev) noexcept {
   auto &state = *static_cast<generation_load_state *>(owner);
   state.generation.done = true;
   state.generation.error = false;
@@ -1404,7 +1404,7 @@ void on_generation_done(
 }
 
 void on_generation_error(
-    void *owner, const emel::text::generator::events::generation_error &ev) {
+    void *owner, const emel::text::generator::events::generation_error &ev) noexcept {
   auto &state = *static_cast<generation_load_state *>(owner);
   state.generation.done = false;
   state.generation.error = true;
@@ -16675,7 +16675,7 @@ void print_generation_formatter_contract(
 }
 
 emel::error::type
-run_emel_parse_model(void *owner, const emel::model::loader::event::load &req) {
+run_emel_parse_model(void *owner, const emel::model::loader::event::load &req) noexcept {
   auto &state = *static_cast<generation_load_state *>(owner);
 
   if (req.file_image == nullptr || req.file_size == 0u) {
@@ -16703,7 +16703,7 @@ run_emel_parse_model(void *owner, const emel::model::loader::event::load &req) {
 }
 
 emel::error::type
-run_emel_map_layers(void *, const emel::model::loader::event::load &req) {
+run_emel_map_layers(void *, const emel::model::loader::event::load &req) noexcept {
   int32_t max_block_index = -1;
   for (uint32_t i = 0u; i < req.model_data.n_tensors; ++i) {
     int32_t block_index = -1;
@@ -16731,7 +16731,7 @@ run_emel_map_layers(void *, const emel::model::loader::event::load &req) {
 
 emel::error::type
 run_emel_validate_structure(void *,
-                            const emel::model::loader::event::load &req) {
+                            const emel::model::loader::event::load &req) noexcept {
   if (req.model_data.n_tensors == 0u || req.model_data.n_layers <= 0 ||
       req.model_data.weights_data == nullptr ||
       req.model_data.weights_size == 0u) {
@@ -16743,7 +16743,7 @@ run_emel_validate_structure(void *,
 
 emel::error::type
 run_emel_validate_architecture(void *,
-                               const emel::model::loader::event::load &req) {
+                               const emel::model::loader::event::load &req) noexcept {
   return emel::model::validate_execution_contract(req.model_data);
 }
 

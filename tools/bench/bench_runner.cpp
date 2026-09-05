@@ -231,6 +231,14 @@ bool is_sm_scheduler_case_name(const std::string &name) {
   return name.rfind("sm_scheduler/", 0u) == 0u;
 }
 
+bool is_needle_graph_case_name(const std::string &name) {
+  return name.rfind("needle/graph/", 0u) == 0u;
+}
+
+bool is_needle_internal_microbenchmark(const bench::result &entry) {
+  return entry.comparison_mode == "emel_internal_microbenchmark";
+}
+
 bool case_supported_on_host(const bench::test_case &tc) {
   if (tc.append_emel == bench::append_emel_kernel_x86_64_cases ||
       tc.append_reference == bench::append_reference_kernel_x86_64_cases) {
@@ -408,6 +416,25 @@ void print_snapshot(const std::vector<bench::result> &results,
           entry.output_checksum, entry.note.c_str());
     }
     if (is_generation_case_name(entry.name)) {
+      std::printf("%s ns_per_op=%.3f tokens_per_second=%.3f iter=%" PRIu64
+                  " runs=%zu\n",
+                  entry.name.c_str(), entry.ns_per_op, entry.tokens_per_second,
+                  entry.iterations, entry.runs);
+      continue;
+    }
+    if (is_needle_internal_microbenchmark(entry)) {
+      std::printf("# needle_microbenchmark: lane=%s case=%s %s\n",
+                  entry.lane.c_str(), entry.name.c_str(), entry.note.c_str());
+    }
+    if (is_needle_graph_case_name(entry.name) && !entry.output_text.empty()) {
+      std::fwrite(entry.output_text.data(), 1u, entry.output_text.size(), stdout);
+    }
+    if (is_needle_graph_case_name(entry.name)) {
+      std::printf("# needle_graph: lane=%s case=%s model_id=%s workload_id=%s "
+                  "%s\n",
+                  entry.lane.c_str(), entry.name.c_str(),
+                  entry.model_id.c_str(), entry.workload_id.c_str(),
+                  entry.note.c_str());
       std::printf("%s ns_per_op=%.3f tokens_per_second=%.3f iter=%" PRIu64
                   " runs=%zu\n",
                   entry.name.c_str(), entry.ns_per_op, entry.tokens_per_second,
@@ -1125,6 +1152,13 @@ void print_compare(const std::vector<bench::result> &emel_results,
                   ref_entry.tokens_per_second, ratio);
       continue;
     }
+    if (is_needle_graph_case_name(emel_entry.name)) {
+      std::fprintf(stderr,
+                   "error: needle_graph in-process compare is unsupported; "
+                   "use scripts/bench.sh --compare --suite=needle_graph for "
+                   "the isolated live Cactus request lane\n");
+      std::exit(1);
+    }
     const double ratio = emel_entry.ns_per_op / ref_entry.ns_per_op;
     std::printf("%s emel.cpp %.3f ns/op, llama.cpp %.3f ns/op, ratio=%.3fx\n",
                 emel_entry.name.c_str(), emel_entry.ns_per_op,
@@ -1355,63 +1389,71 @@ validate_process_runner_request(const bench::runner_request &request) {
 }
 
 int execute_runner_request(const bench::runner_request &request) {
+  bench::config cfg = request.cfg;
+
   if (request.mode == bench::runner_mode::kernel_emel) {
+    cfg.mode = bench::case_mode::emel;
     const auto results = run_benchmarks(
-        request.cfg, bench::kernel_runner_cases(), false, false, request.suite);
-    print_snapshot(results, request.cfg);
+        cfg, bench::kernel_runner_cases(), false, false, request.suite);
+    print_snapshot(results, cfg);
     return 0;
   }
 
   if (request.mode == bench::runner_mode::kernel_reference) {
+    cfg.mode = bench::case_mode::reference;
     const auto results = run_benchmarks(
-        request.cfg, bench::kernel_runner_cases(), true, false, request.suite);
-    print_snapshot(results, request.cfg);
+        cfg, bench::kernel_runner_cases(), true, false, request.suite);
+    print_snapshot(results, cfg);
     return 0;
   }
 
   if (request.mode == bench::runner_mode::kernel_compare) {
+    cfg.mode = bench::case_mode::compare;
     const auto emel_results = run_benchmarks(
-        request.cfg, bench::kernel_runner_cases(), false, false, request.suite);
+        cfg, bench::kernel_runner_cases(), false, false, request.suite);
     const auto ref_results = run_benchmarks(
-        request.cfg, bench::kernel_runner_cases(), true, false, request.suite);
-    print_compare(emel_results, ref_results, request.cfg);
+        cfg, bench::kernel_runner_cases(), true, false, request.suite);
+    print_compare(emel_results, ref_results, cfg);
     return 0;
   }
 
   if (request.mode == bench::runner_mode::emel) {
+    cfg.mode = bench::case_mode::emel;
     bench::set_generation_lane_mode(bench::generation_lane_mode::emel);
     const auto results = run_benchmarks(
-        request.cfg, bench::default_runner_cases(), false, true, request.suite);
+        cfg, bench::default_runner_cases(), false, true, request.suite);
     if (request.generation_jsonl) {
       print_generation_jsonl(results);
     } else if (request.diarization_jsonl) {
       print_diarization_jsonl(results);
     } else {
-      print_snapshot(results, request.cfg);
+      print_snapshot(results, cfg);
     }
     return 0;
   }
 
   if (request.mode == bench::runner_mode::reference) {
+    cfg.mode = bench::case_mode::reference;
     bench::set_generation_lane_mode(bench::generation_lane_mode::reference);
     const auto results = run_benchmarks(
-        request.cfg, bench::default_runner_cases(), true, true, request.suite);
+        cfg, bench::default_runner_cases(), true, true, request.suite);
     if (request.generation_jsonl) {
       print_generation_jsonl(results);
     } else if (request.diarization_jsonl) {
       print_diarization_jsonl(results);
     } else {
-      print_snapshot(results, request.cfg);
+      print_snapshot(results, cfg);
     }
     return 0;
   }
 
+  cfg.mode = bench::case_mode::compare;
   bench::set_generation_lane_mode(bench::generation_lane_mode::compare);
   const auto emel_results = run_benchmarks(
-      request.cfg, bench::default_runner_cases(), false, true, request.suite);
+      cfg, bench::default_runner_cases(), false, true, request.suite);
   const auto ref_results = run_benchmarks(
-      request.cfg, bench::default_runner_cases(), true, true, request.suite);
-  print_compare(emel_results, ref_results, request.cfg);
+      cfg, bench::default_runner_cases(), true, true, request.suite);
+  print_compare(emel_results, ref_results, cfg);
   return 0;
 }
 

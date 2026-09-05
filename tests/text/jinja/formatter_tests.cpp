@@ -20,11 +20,11 @@ using emel::text::jinja::formatter::unexpected;
 using done_cb = emel::callback<bool(const emel::text::jinja::events::rendering_done &)>;
 using error_cb = emel::callback<bool(const emel::text::jinja::events::rendering_error &)>;
 
-bool ignore_done_callback(const emel::text::jinja::events::rendering_done &) {
+bool ignore_done_callback(const emel::text::jinja::events::rendering_done &) noexcept {
   return true;
 }
 
-bool ignore_error_callback(const emel::text::jinja::events::rendering_error &) {
+bool ignore_error_callback(const emel::text::jinja::events::rendering_error &) noexcept {
   return true;
 }
 
@@ -39,14 +39,14 @@ struct callback_tracker {
   int32_t error_code = static_cast<int32_t>(error::none);
   size_t error_pos = 0;
 
-  bool on_done(const emel::text::jinja::events::rendering_done & ev) {
+  bool on_done(const emel::text::jinja::events::rendering_done & ev) noexcept {
     done_called = true;
     done_length = ev.output_length;
     done_truncated = ev.output_truncated;
     return ev.request.output_capacity > 0;
   }
 
-  bool on_error(const emel::text::jinja::events::rendering_error & ev) {
+  bool on_error(const emel::text::jinja::events::rendering_error & ev) noexcept {
     error_called = true;
     error_code = ev.err;
     error_pos = ev.error_pos;
@@ -290,4 +290,109 @@ TEST_CASE("jinja_formatter_unexpected_event_transitions_state") {
   machine.process_event(unknown_event{});
 
   CHECK(machine.is(stateforward::sml::state<unexpected>));
+}
+
+TEST_CASE("jinja_formatter_reuses_machine_across_terminal_states") {
+  emel::text::jinja::program program{};
+  std::array<char, 16> buffer = {};
+  context ctx{};
+  sm machine{ctx};
+
+  size_t output_length = 0;
+  int32_t err = static_cast<int32_t>(error::none);
+  render first{
+      program,
+      "first",
+      buffer[0],
+      buffer.size(),
+      k_ignore_done_callback,
+      k_ignore_error_callback,
+      nullptr,
+      &output_length,
+      nullptr,
+      &err,
+  };
+  CHECK(machine.process_event(first));
+  CHECK(std::string_view(buffer.data(), output_length) == "first");
+
+  size_t failed_length = 9;
+  bool truncated = false;
+  int32_t failed_err = static_cast<int32_t>(error::none);
+  render failed{
+      program,
+      "too long",
+      buffer[0],
+      2,
+      k_ignore_done_callback,
+      k_ignore_error_callback,
+      nullptr,
+      &failed_length,
+      &truncated,
+      &failed_err,
+  };
+  CHECK_FALSE(machine.process_event(failed));
+  CHECK(failed_err == static_cast<int32_t>(error::invalid_request));
+  CHECK(truncated);
+
+  output_length = 0;
+  err = static_cast<int32_t>(error::invalid_request);
+  render recovered{
+      program,
+      "ok",
+      buffer[0],
+      buffer.size(),
+      k_ignore_done_callback,
+      k_ignore_error_callback,
+      nullptr,
+      &output_length,
+      nullptr,
+      &err,
+  };
+  CHECK(machine.process_event(recovered));
+  CHECK(err == static_cast<int32_t>(error::none));
+  CHECK(std::string_view(buffer.data(), output_length) == "ok");
+}
+
+TEST_CASE("jinja_formatter_runtime_reentry_reports_error_callback") {
+  emel::text::jinja::program program{};
+  std::array<char, 8> buffer = {};
+  size_t output_length = 4;
+  bool output_truncated = false;
+  int32_t err = static_cast<int32_t>(error::none);
+  size_t error_pos = 8;
+  callback_tracker tracker{};
+  render request{
+      program,
+      "data",
+      buffer[0],
+      buffer.size(),
+      done_cb::from<callback_tracker, &callback_tracker::on_done>(&tracker),
+      error_cb::from<callback_tracker, &callback_tracker::on_error>(&tracker),
+      nullptr,
+      &output_length,
+      &output_truncated,
+      &err,
+      &error_pos,
+  };
+  emel::text::jinja::event::render_ctx runtime_ctx{
+      output_length,
+      output_truncated,
+      err,
+      error_pos,
+  };
+  emel::text::jinja::event::render_runtime runtime{request, runtime_ctx};
+  context ctx{};
+  stateforward::sml::sm<emel::text::jinja::formatter::model,
+                        stateforward::sml::testing>
+      machine{ctx};
+  machine.set_current_states(stateforward::sml::state<emel::text::jinja::formatter::copy_exec>);
+
+  (void)machine.process_event(runtime);
+  CHECK(machine.is(stateforward::sml::state<unexpected>));
+  CHECK(tracker.error_called);
+  CHECK_FALSE(tracker.done_called);
+  CHECK(err == static_cast<int32_t>(error::invalid_request));
+  CHECK(output_length == 0);
+  CHECK(output_truncated);
+  CHECK(error_pos == 0);
 }

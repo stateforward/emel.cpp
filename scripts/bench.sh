@@ -24,6 +24,122 @@ RUN_ONLY=false
 DEFAULT_GENERATION_WORKLOAD_ID="${EMEL_BENCH_DEFAULT_GENERATION_WORKLOAD_ID:-lfm2_single_user_hello_max_tokens_1_v1}"
 DEFAULT_DIARIZATION_ITERS="${EMEL_BENCH_DEFAULT_DIARIZATION_ITERS:-1}"
 DEFAULT_DIARIZATION_RUNS="${EMEL_BENCH_DEFAULT_DIARIZATION_RUNS:-3}"
+DEFAULT_NEEDLE_REQUEST_ITERS="${EMEL_BENCH_NEEDLE_REQUEST_ITERS:-1}"
+DEFAULT_NEEDLE_REQUEST_RUNS="${EMEL_BENCH_NEEDLE_REQUEST_RUNS:-3}"
+DEFAULT_NEEDLE_REQUEST_WARMUP_ITERS="${EMEL_BENCH_NEEDLE_REQUEST_WARMUP_ITERS:-1}"
+DEFAULT_NEEDLE_REQUEST_WARMUP_RUNS="${EMEL_BENCH_NEEDLE_REQUEST_WARMUP_RUNS:-1}"
+NEEDLE_REQUEST_MAX_ITERATIONS=32
+NEEDLE_REQUEST_MAX_RUNS=25
+NEEDLE_PYTHON_SHA256="1643dacd9feaedc58f3cc581e4d22577dfe25c09b10282936186ccf0f2e61118"
+NEEDLE_PYTHON_EXECUTABLE=""
+NEEDLE_AUTHENTICATED_EXEC=""
+resolve_needle_python() {
+  local python_executable="$1"
+  local resolved_python=""
+  local link_target
+  local directory
+  local link_count=0
+
+  if resolved_python="$(readlink -f "$python_executable" 2>/dev/null)" &&
+     [[ -n "$resolved_python" ]]; then
+    printf '%s\n' "$resolved_python"
+    return 0
+  fi
+  if command -v realpath >/dev/null 2>&1 &&
+     resolved_python="$(realpath "$python_executable" 2>/dev/null)" &&
+     [[ -n "$resolved_python" ]]; then
+    printf '%s\n' "$resolved_python"
+    return 0
+  fi
+
+  case "$python_executable" in
+    /*) resolved_python="$python_executable" ;;
+    *) resolved_python="$PWD/$python_executable" ;;
+  esac
+  while [[ -L "$resolved_python" ]]; do
+    ((link_count += 1))
+    if (( link_count > 40 )); then
+      return 1
+    fi
+    link_target="$(readlink "$resolved_python")" || return 1
+    case "$link_target" in
+      /*) resolved_python="$link_target" ;;
+      *) resolved_python="$(dirname "$resolved_python")/$link_target" ;;
+    esac
+  done
+  directory="$(cd -P "$(dirname "$resolved_python")" && pwd)" || return 1
+  printf '%s/%s\n' "$directory" "$(basename "$resolved_python")"
+}
+
+validate_needle_python() {
+  local python_executable="$1"
+  local resolved_python
+  local platform
+  resolved_python="$(resolve_needle_python "$python_executable")" || true
+  if [[ -z "$resolved_python" || "$resolved_python" != /* ||
+        ! -f "$resolved_python" || -L "$resolved_python" ||
+        ! -x "$resolved_python" ]]; then
+    echo "error: cannot resolve canonical regular-file Needle Python executable" >&2
+    exit 1
+  fi
+  platform="$(uname -s)"
+  if [[ "$platform" != "Linux" ]]; then
+    echo "error: authenticated Needle Python execution is unsupported on platform: $platform" >&2
+    exit 1
+  fi
+  NEEDLE_PYTHON_EXECUTABLE="$resolved_python"
+}
+cleanup_needle_python() {
+  NEEDLE_PYTHON_EXECUTABLE=""
+}
+trap cleanup_needle_python EXIT
+NEEDLE_INJECTION_VARIABLES=(
+  LD_PRELOAD
+  LD_LIBRARY_PATH
+  LD_AUDIT
+  DYLD_LIBRARY_PATH
+  DYLD_INSERT_LIBRARIES
+  DYLD_FRAMEWORK_PATH
+  DYLD_FALLBACK_LIBRARY_PATH
+  DYLD_FALLBACK_FRAMEWORK_PATH
+  PYTHONPATH
+  PYTHONHOME
+  PYTHONSTARTUP
+  PYTHONINSPECT
+)
+validate_needle_process_environment() {
+  local platform
+  local variable
+  platform="$(uname -s)"
+  if [[ "$platform" != "Linux" ]]; then
+    echo "error: canonical Needle Python loader contract is unsupported on platform: $platform" >&2
+    exit 1
+  fi
+  for variable in "${NEEDLE_INJECTION_VARIABLES[@]}"; do
+    if [[ "${!variable+x}" ]]; then
+      echo "error: dynamic-loader/Python injection variable is set: $variable" >&2
+      exit 1
+    fi
+  done
+}
+run_clean_needle_python() {
+  local python_executable="$1"
+  shift
+  "$NEEDLE_AUTHENTICATED_EXEC" "$python_executable" \
+    "$NEEDLE_PYTHON_SHA256" -- "$python_executable" "$@"
+}
+
+validate_needle_request_count() {
+  local name="$1"
+  local value="$2"
+  local minimum="$3"
+  local maximum="$4"
+  if [[ ! "$value" =~ ^[0-9]+$ ]] ||
+     (( value < minimum || value > maximum )); then
+    echo "error: $name must be an integer in [$minimum, $maximum]" >&2
+    exit 1
+  fi
+}
 
 usage() {
   cat <<'USAGE'
@@ -42,7 +158,9 @@ usage: scripts/bench.sh [--snapshot] [--compare] [--compare-update] [--update] [
   --suite=...  run only the named benchmark suite
   --memory-max=<bytes|NNpct|none> weight_streaming only: wrap the runner in a
                systemd-run user scope with MemoryMax (and MemorySwapMax=0);
-               NNpct derives bytes from the fixture size; none runs unwrapped.
+               NNpct derives bytes from the fixture size; none disables only
+               the additional benchmark-local cap and remains inside the
+               repository-wide 50% safety envelope.
                Runs the suite directly (no snapshot/compare gating).
 USAGE
 }
@@ -127,6 +245,91 @@ resolve_bench_host_arch() {
   fi
   printf "%s\n" "$arch"
 }
+
+filter_snapshot_regression_rows() {
+  local snapshot_output="$1"
+  local current_snapshot="$2"
+  local suite_filter="$3"
+  local exclude_live_needle_diagnostics=0
+
+  if [[ "$suite_filter" == "needle_graph" ]]; then
+    exclude_live_needle_diagnostics=1
+  fi
+  awk -v exclude_live_needle_diagnostics="$exclude_live_needle_diagnostics" '
+    /^#/ {
+      measurement_only = ($0 ~ /proof_status=measurement_only/);
+      live_needle_diagnostic = (exclude_live_needle_diagnostics &&
+                                $0 ~ /reference=live_cactus_native/);
+      skip_next = measurement_only || live_needle_diagnostic;
+      next;
+    }
+    /^[^#]/ {
+      if (skip_next) {
+        skip_next = 0;
+        next;
+      }
+      name = $1;
+      for (i = 2; i <= NF; ++i) {
+        if ($i ~ /^ns_per_op=/) {
+          ns_per_op = $i;
+        } else if ($i ~ /^tokens_per_second=/) {
+          tokens_per_second = $i;
+        }
+      }
+      if (name != "" && ns_per_op != "") {
+        if (tokens_per_second != "") {
+          printf("%s %s tokens_per_second=%s\n", name, ns_per_op,
+                 substr(tokens_per_second, 19));
+        } else {
+          printf("%s %s\n", name, ns_per_op);
+        }
+      }
+      skip_next = 0;
+      ns_per_op = "";
+      tokens_per_second = "";
+    }
+  ' "$snapshot_output" > "$current_snapshot"
+}
+
+snapshot_gate_has_only_live_needle_diagnostics() {
+  local snapshot_output="$1"
+  local suite_filter="$2"
+
+  [[ "$suite_filter" == "needle_graph" ]] || return 1
+  awk '
+    /^#/ {
+      live_needle_diagnostic = ($0 ~ /reference=live_cactus_native/);
+      next;
+    }
+    /^[^#]/ {
+      row_count += 1;
+      if (live_needle_diagnostic) {
+        diagnostic_count += 1;
+      }
+      live_needle_diagnostic = 0;
+    }
+    END {
+      exit !(row_count > 0 && diagnostic_count == row_count);
+    }
+  ' "$snapshot_output"
+}
+
+if [[ "${EMEL_BENCH_TEST_SNAPSHOT_FILTER:-0}" == "1" ]]; then
+  if [[ -z "${EMEL_BENCH_TEST_SNAPSHOT_OUTPUT:-}" ||
+        -z "${EMEL_BENCH_TEST_CURRENT_SNAPSHOT:-}" ]]; then
+    echo "error: snapshot filter test requires snapshot and output fixture paths" >&2
+    exit 1
+  fi
+  filter_snapshot_regression_rows "$EMEL_BENCH_TEST_SNAPSHOT_OUTPUT" \
+    "$EMEL_BENCH_TEST_CURRENT_SNAPSHOT" "${EMEL_BENCH_TEST_SUITE_FILTER:-}"
+  if snapshot_gate_has_only_live_needle_diagnostics \
+    "$EMEL_BENCH_TEST_SNAPSHOT_OUTPUT" "${EMEL_BENCH_TEST_SUITE_FILTER:-}"; then
+    printf 'live-diagnostics-only\n'
+  else
+    printf 'baseline-required\n'
+  fi
+  exit 0
+fi
 
 if [[ -n "$MEMORY_MAX_RAW" && "$SUITE_FILTER" != "weight_streaming" ]]; then
   echo "error: --memory-max requires --suite=weight_streaming" >&2
@@ -223,6 +426,36 @@ if [[ "$SUITE_FILTER" == "speech_lm_moshi" ]] && ! $TEST_TOOLS; then
   bash "$ROOT_DIR/scripts/bench_moshi_lm_compare.sh" "${moshi_lm_args[@]}"
   exit $?
 fi
+if $COMPARE && [[ "$SUITE_FILTER" == "needle_graph" ]]; then
+  validate_needle_process_environment
+  if [[ -n "${EMEL_BENCH_NEEDLE_MODEL:-}" ]]; then
+    echo "error: EMEL_BENCH_NEEDLE_MODEL is unsupported for canonical needle_graph compare" >&2
+    exit 1
+  fi
+  if [[ -n "${NEEDLE_LIB_PATH:-}" ]]; then
+    echo "error: NEEDLE_LIB_PATH is unsupported for canonical needle_graph compare" >&2
+    exit 1
+  fi
+  validate_needle_request_count EMEL_BENCH_NEEDLE_REQUEST_ITERS \
+    "$DEFAULT_NEEDLE_REQUEST_ITERS" 1 "$NEEDLE_REQUEST_MAX_ITERATIONS"
+  validate_needle_request_count EMEL_BENCH_NEEDLE_REQUEST_RUNS \
+    "$DEFAULT_NEEDLE_REQUEST_RUNS" 1 "$NEEDLE_REQUEST_MAX_RUNS"
+  validate_needle_request_count EMEL_BENCH_NEEDLE_REQUEST_WARMUP_ITERS \
+    "$DEFAULT_NEEDLE_REQUEST_WARMUP_ITERS" 0 "$NEEDLE_REQUEST_MAX_ITERATIONS"
+  validate_needle_request_count EMEL_BENCH_NEEDLE_REQUEST_WARMUP_RUNS \
+    "$DEFAULT_NEEDLE_REQUEST_WARMUP_RUNS" 1 "$NEEDLE_REQUEST_MAX_RUNS"
+  validate_needle_request_count EMEL_BENCH_NEEDLE_TIMEOUT_SECONDS \
+    "${EMEL_BENCH_NEEDLE_TIMEOUT_SECONDS:-600}" 1 3600
+  if [[ -z "${EMEL_BENCH_NEEDLE_PYTHON:-}" ]]; then
+    echo "error: EMEL_BENCH_NEEDLE_PYTHON is required for --compare --suite=needle_graph" >&2
+    exit 1
+  fi
+  validate_needle_python "${EMEL_BENCH_NEEDLE_PYTHON}"
+  if [[ -z "${EMEL_BENCH_NEEDLE_ROOT:-}" || ! -d "${EMEL_BENCH_NEEDLE_ROOT}" ]]; then
+    echo "error: EMEL_BENCH_NEEDLE_ROOT must name the installed Needle package root" >&2
+    exit 1
+  fi
+fi
 
 prepare_toolchain() {
   bench_cc="${BENCH_CC:-cc}"
@@ -241,6 +474,53 @@ prepare_toolchain() {
     bench_c_flags="-fno-sanitize=undefined"
     bench_cxx_flags="-fno-sanitize=undefined"
   fi
+}
+run_needle_graph_compare() {
+  local build_dir="$1"
+  local python_executable="$NEEDLE_PYTHON_EXECUTABLE"
+  local needle_root="${EMEL_BENCH_NEEDLE_ROOT:-}"
+  local driver="$TOOLS_DIR/model/needle/cactus_reference.py"
+  local model="$ROOT_DIR/tests/models/route-w4-qat.cact"
+  local fixture="$ROOT_DIR/tests/fixtures/cact/needle-heldout-prompts.tsv"
+  local emel_output
+  local reference_output
+
+  if [[ -z "$python_executable" ]]; then
+    echo "error: canonical Needle Python executable was not validated" >&2
+    exit 1
+  fi
+  if [[ -n "${NEEDLE_LIB_PATH:-}" ]]; then
+    echo "error: NEEDLE_LIB_PATH is unsupported for canonical needle_graph compare" >&2
+    exit 1
+  fi
+  if [[ -z "$needle_root" || ! -d "$needle_root" ]]; then
+    echo "error: EMEL_BENCH_NEEDLE_ROOT must name the installed Needle package root" >&2
+    exit 1
+  fi
+  if [[ ! -f "$model" || ! -f "$fixture" || ! -f "$driver" ]]; then
+    echo "error: needle_graph live reference fixture or driver is missing" >&2
+    exit 1
+  fi
+
+  emel_output="$(mktemp)"
+  reference_output="$(mktemp)"
+  trap 'rm -f "$emel_output" "$reference_output"' RETURN
+  EMEL_BENCH_NEEDLE_REQUEST_COMPARE=1 \
+    EMEL_BENCH_ITERS="$DEFAULT_NEEDLE_REQUEST_ITERS" \
+    EMEL_BENCH_RUNS="$DEFAULT_NEEDLE_REQUEST_RUNS" \
+    EMEL_BENCH_WARMUP_ITERS="$DEFAULT_NEEDLE_REQUEST_WARMUP_ITERS" \
+    EMEL_BENCH_WARMUP_RUNS="$DEFAULT_NEEDLE_REQUEST_WARMUP_RUNS" \
+    run_bench_runner "$build_dir" --mode=emel > "$emel_output"
+  NEEDLE_THREADS=1 run_clean_needle_python "$python_executable" -I -S -B \
+    "$driver" run-reference --model "$model" --fixture "$fixture" \
+    --needle-root "$needle_root" \
+    --warmup-iterations "$DEFAULT_NEEDLE_REQUEST_WARMUP_ITERS" \
+    --warmup-runs "$DEFAULT_NEEDLE_REQUEST_WARMUP_RUNS" \
+    --iterations "$DEFAULT_NEEDLE_REQUEST_ITERS" \
+    --runs "$DEFAULT_NEEDLE_REQUEST_RUNS" --output "$reference_output" \
+    --timeout-seconds "${EMEL_BENCH_NEEDLE_TIMEOUT_SECONDS:-600}"
+  run_clean_needle_python "$python_executable" -I -S -B "$driver" compare \
+    --emel-input "$emel_output" --reference-input "$reference_output"
 }
 
 run_bench_runner() {
@@ -288,7 +568,9 @@ configure_bench_build() {
   cmake_args=(-S "$TOOLS_DIR" -B "$build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release
               -DEMEL_ENABLE_TESTS=OFF
               -DREF_IMPL_REF="$ref_value"
-              -DEMEL_BENCH_SUITE_FILTER="$build_suite_filter")
+              -DEMEL_BENCH_SUITE_FILTER="$build_suite_filter"
+              -DEMEL_BENCH_NEEDLE_PYTHON="${EMEL_BENCH_NEEDLE_PYTHON:-}"
+              -DEMEL_BENCH_NEEDLE_ROOT="${EMEL_BENCH_NEEDLE_ROOT:-}")
   cmake_args+=("-DCMAKE_C_COMPILER=$bench_cc")
   cmake_args+=("-DCMAKE_CXX_COMPILER=$bench_cxx")
   cmake_args+=("-DCMAKE_ASM_COMPILER=$bench_cc")
@@ -310,7 +592,17 @@ configure_bench_build() {
   fi
 
   cmake "${cmake_args[@]}" >&2
-  cmake --build "$build_dir" --parallel "$EMEL_BUILD_JOBS" --target bench_runner >&2
+  if [[ "$SUITE_FILTER" == "needle_graph" ]]; then
+    cmake --build "$build_dir" --parallel "$EMEL_BUILD_JOBS" --target \
+      bench_runner needle_authenticated_exec >&2
+    NEEDLE_AUTHENTICATED_EXEC="$build_dir/needle_authenticated_exec"
+    if [[ ! -x "$NEEDLE_AUTHENTICATED_EXEC" ]]; then
+      echo "error: maintained authenticated Needle Python exec helper is unavailable" >&2
+      exit 1
+    fi
+  else
+    cmake --build "$build_dir" --parallel "$EMEL_BUILD_JOBS" --target bench_runner >&2
+  fi
 }
 
 update_snapshot_baseline() {
@@ -425,44 +717,41 @@ if $COMBINED; then
   build_dir="${BENCH_COMPARE_BUILD_DIR:-$(bench_suite_build_dir "$SUITE_FILTER")}"
   configure_bench_build "$build_dir"
 
+  snapshot_output="$(mktemp)"
   compare_output="$(mktemp)"
-  run_bench_runner "$build_dir" --mode=compare > "$compare_output"
-
   current_snapshot="$(mktemp)"
-  trap 'rm -f "$compare_output" "$current_snapshot"' EXIT
-  awk '
+  trap 'rm -f "$snapshot_output" "$compare_output" "$current_snapshot"; cleanup_needle_python' EXIT
+
+  if [[ "$SUITE_FILTER" == "needle_graph" ]]; then
+    EMEL_BENCH_NEEDLE_REQUEST_COMPARE=1 run_bench_runner "$build_dir" --mode=emel > "$snapshot_output"
+    run_needle_graph_compare "$build_dir" > "$compare_output"
+  else
+    run_bench_runner "$build_dir" --mode=emel > "$snapshot_output"
+    run_bench_runner "$build_dir" --mode=compare > "$compare_output"
+  fi
+
+  filter_snapshot_regression_rows "$snapshot_output" "$current_snapshot" \
+    "$SUITE_FILTER"
+
+  snapshot_measurement_rows="$(awk '
     /^#/ {
-      skip_next = ($0 ~ /proof_status=measurement_only/);
+      measurement_only = ($0 ~ /proof_status=measurement_only/);
       next;
     }
     /^[^#]/ {
-      if (skip_next) {
-        skip_next = 0;
-        next;
+      if (measurement_only) {
+        count += 1;
       }
-      name = $1;
-      emel = $3;
-      if (name != "" && emel != "") {
-        tokens_per_second = "";
-        if ($4 == "ns/op" && $5 ~ /^\([0-9.]+$/ && $6 == "tokens/s),") {
-          tokens_per_second = $5;
-          sub(/^\(/, "", tokens_per_second);
-        }
-        if (tokens_per_second != "") {
-          printf("%s ns_per_op=%s tokens_per_second=%s\n",
-                 name, emel, tokens_per_second);
-        } else {
-          printf("%s ns_per_op=%s\n", name, emel);
-        }
-      }
-      skip_next = 0;
+      measurement_only = 0;
     }
-  ' "$compare_output" > "$current_snapshot"
+    END { print count + 0 }
+  ' "$snapshot_output")"
+
 
   TOLERANCE="${BENCH_TOLERANCE:-0.30}"
   ABS_TOLERANCE_NS="${BENCH_ABS_TOLERANCE_NS:-5000}"
   BASELINE="$ROOT_DIR/snapshots/bench/benchmarks.txt"
-  host_arch="$(resolve_bench_host_arch "$compare_output")"
+  host_arch="$(resolve_bench_host_arch "$snapshot_output")"
 
   new_sms=()
   base_ref="${BENCH_BASE_REF:-origin/main}"
@@ -511,12 +800,20 @@ if $COMBINED; then
       exit 1
     fi
 
-    awk -v tol="$TOLERANCE" -v abs_tol="$ABS_TOLERANCE_NS" \
-      -v strict_regression="${EMEL_BENCH_STRICT_REGRESSION:-0}" \
-      -v scoped="$([[ -n "$SUITE_FILTER" ]] && echo 1 || echo 0)" \
-      -v host_arch="$host_arch" \
-      -f "$ROOT_DIR/scripts/bench_compare_gate.awk" \
-      "$BASELINE" "$current_snapshot"
+    if [[ -s "$current_snapshot" ]]; then
+      awk -v tol="$TOLERANCE" -v abs_tol="$ABS_TOLERANCE_NS" \
+        -v strict_regression="${EMEL_BENCH_STRICT_REGRESSION:-0}" \
+        -v scoped="$([[ -n "$SUITE_FILTER" ]] && echo 1 || echo 0)" \
+        -v host_arch="$host_arch" \
+        -f "$ROOT_DIR/scripts/bench_compare_gate.awk" \
+        "$BASELINE" "$current_snapshot"
+    elif snapshot_gate_has_only_live_needle_diagnostics "$snapshot_output" \
+      "$SUITE_FILTER"; then
+      : # Live request diagnostics are compared only by run_needle_graph_compare.
+    elif [[ -z "$SUITE_FILTER" || "$snapshot_measurement_rows" == "0" ]]; then
+      echo "error: no benchmark entries matched selected suite" >&2
+      exit 1
+    fi
   fi
 
   if $COMPARE_UPDATE; then
@@ -539,7 +836,7 @@ if $SNAPSHOT; then
   ABS_TOLERANCE_NS="${BENCH_ABS_TOLERANCE_NS:-5000}"
   BASELINE="$ROOT_DIR/snapshots/bench/benchmarks.txt"
   CURRENT="$(mktemp)"
-  trap 'rm -f "$CURRENT"' EXIT
+  trap 'rm -f "$CURRENT"; cleanup_needle_python' EXIT
 
   for tool in cmake ninja git; do
     if ! command -v "$tool" >/dev/null 2>&1; then
@@ -690,7 +987,9 @@ if $COMPARE; then
   cmake_args=(-S "$TOOLS_DIR" -B "$compare_build_dir" -G Ninja -DCMAKE_BUILD_TYPE=Release
               -DEMEL_ENABLE_TESTS=OFF
               -DREF_IMPL_REF="$ref_value"
-              -DEMEL_BENCH_SUITE_FILTER="$SUITE_FILTER")
+              -DEMEL_BENCH_SUITE_FILTER="$SUITE_FILTER"
+              -DEMEL_BENCH_NEEDLE_PYTHON="${EMEL_BENCH_NEEDLE_PYTHON:-}"
+              -DEMEL_BENCH_NEEDLE_ROOT="${EMEL_BENCH_NEEDLE_ROOT:-}")
   cmake_args+=("-DCMAKE_C_COMPILER=$bench_cc")
   cmake_args+=("-DCMAKE_CXX_COMPILER=$bench_cxx")
   cmake_args+=("-DCMAKE_ASM_COMPILER=$bench_cc")
@@ -712,8 +1011,28 @@ if $COMPARE; then
   fi
 
   cmake "${cmake_args[@]}" >&2
-  cmake --build "$compare_build_dir" --parallel "$EMEL_BUILD_JOBS" --target bench_runner >&2
-  if $COMPARE_UPDATE; then
+  if [[ "$SUITE_FILTER" == "needle_graph" ]]; then
+    cmake --build "$compare_build_dir" --parallel "$EMEL_BUILD_JOBS" --target \
+      bench_runner needle_authenticated_exec >&2
+    NEEDLE_AUTHENTICATED_EXEC="$compare_build_dir/needle_authenticated_exec"
+    if [[ ! -x "$NEEDLE_AUTHENTICATED_EXEC" ]]; then
+      echo "error: maintained authenticated Needle Python exec helper is unavailable" >&2
+      exit 1
+    fi
+  else
+    cmake --build "$compare_build_dir" --parallel "$EMEL_BUILD_JOBS" --target bench_runner >&2
+  fi
+  if [[ "$SUITE_FILTER" == "needle_graph" ]]; then
+    if $COMPARE_UPDATE; then
+      echo "error: needle_graph live Cactus comparison has no snapshot update path" >&2
+      exit 1
+    fi
+    if [[ -n "$MODE_FLAG" ]]; then
+      echo "error: --llama-only/--emel-only is unsupported for the isolated needle_graph compare" >&2
+      exit 1
+    fi
+    run_needle_graph_compare "$compare_build_dir"
+  elif $COMPARE_UPDATE; then
     compare_baseline="$ROOT_DIR/snapshots/bench/benchmarks_compare.txt"
     {
       printf "# ref=%s\n" "$ref_value"
@@ -721,12 +1040,10 @@ if $COMPARE; then
       run_bench_runner "$compare_build_dir" --mode=compare
     } > "$compare_baseline"
     echo "updated $compare_baseline"
+  elif [[ -n "$MODE_FLAG" ]]; then
+    run_bench_runner "$compare_build_dir" "$MODE_FLAG"
   else
-    if [[ -n "$MODE_FLAG" ]]; then
-      run_bench_runner "$compare_build_dir" "$MODE_FLAG"
-    else
-      run_bench_runner "$compare_build_dir" --mode=compare
-    fi
+    run_bench_runner "$compare_build_dir" --mode=compare
   fi
 fi
 
@@ -775,9 +1092,10 @@ if $RUN_ONLY; then
   cmake "${cmake_args[@]}" >&2
   cmake --build "$run_only_build_dir" --parallel "$EMEL_BUILD_JOBS" --target bench_runner >&2
   if [[ -n "$MEMORY_MAX_BYTES" ]]; then
-    # Capped runs measure the EMEL lanes only: the llama.cpp baseline comes
-    # from the unwrapped --memory-max=none run (its 385MiB compute buffer would
-    # otherwise dominate any meaningful MemoryMax).
+    # --memory-max=none disables only the benchmark-local cap. The llama.cpp
+    # baseline still inherits the repository-wide 50% process-tree envelope;
+    # omitting the inner cap prevents its compute buffer from dominating the
+    # requested benchmark-local pressure limit.
     run_bench_runner "$run_only_build_dir" --mode=emel
   else
     run_bench_runner "$run_only_build_dir" --mode=compare

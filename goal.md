@@ -33,18 +33,17 @@ path beats `llama.cpp` on this CPU.
 - Working branch: `codex/sml17-async-threadpool-cutover`.
 - Merged local non-draft PR heads: `emel.cpp#95`, `#96`, `#97`, `#98`, `#99`.
 - Explicitly not merged: draft PRs `emel.cpp#48` and `#49`.
-- Upstream scheduler fix: `stateforward/sml.cpp#17` merged as
-  `49207123cd3f39767764bae774932cb48623f92f`.
-- Local SML pin should point at that merge commit.
+- Upstream scheduler fix: `stateforward/sml.cpp` commit
+  `67f898e6e19d516bb445841263fd35db3f3cd3c3` is the reviewed upstream head
+  used here. It retains the batch-reservation rollback queue-wake fix and adds
+  deterministic fixes for out-of-order MPMC head publication and stale worker
+  permits after a peer drains the queue. The local SML pin points at that exact
+  commit.
 - Local wrapper state: `src/emel/sm.hpp` no longer flattens
   `process_event_async(...)` through `.result()`, and wrapper-level event
-  error normalization has been removed.
-- Scheduler finding: upstream `thread_pool_scheduler` is correct for the SML
-  coroutine scheduler cutover but still has too much shared-queue wake/claim
-  overhead for the hot row-sliced matmul actor fanout. The matmul route now
-  uses an EMEL-owned fixed fork/join lane pool with one direct slot per worker
-  behind an explicit `emel::kernel::matmul::sm` actor. The caller
-  still joins every submitted lane actor before dispatch returns, so no
+  error normalization has been removed. Matmul fanout uses the upstream fixed
+  thread-pool scheduler behind an explicit `emel::kernel::matmul::sm` actor.
+  Every submitted lane actor is joined before dispatch returns, so no
   deferred work escapes the RTC boundary.
 - Benchmark finding: the aarch64 f32 GEMV path has a 4-row RHS-reuse kernel,
   q4_k has a 4-row q4_k x q8_k NEON helper, q8_0 avoids stack lane/scale arrays
@@ -53,8 +52,8 @@ path beats `llama.cpp` on this CPU.
   EMEL prepared weight layout for q4_k/q8_0 (one-time setup, outside the timed
   dispatch), quantizes the RHS vector inside the measured EMEL function for
   quantized GEMV cases, then dispatches the explicit prepared-input route. It
-  uses the same fixed lane pool as production.
-- Dual-review blocker fixes now applied: `fork_join_lane_pool::wait()` cannot
+  uses the same fixed worker pool as production.
+- Dual-review blocker fixes now applied: `thread_pool_scheduler::wait()` cannot
   observe completion before the worker slot is reusable, production and
   benchmark fork/join callers no longer ignore failed lane submission or join
   failure, and the SML rules text records the corrected upstream
@@ -62,7 +61,7 @@ path beats `llama.cpp` on this CPU.
 - Dual-review follow-up fixes now applied: the production-layout
   `parallel_matmul` benchmark slices packed q4_k/q8_0/q6 weight storage by
   packed row groups instead of raw logical rows, and production parallel
-  matmul treats lane-pool absence, failed lane submission, or join rejection as
+  matmul treats worker-pool absence, failed lane submission, or join rejection as
   scheduler contract violations (`std::terminate`) instead of returning a
   normal data-plane `false` from `detail.hpp`.
 - Latest measured compare
@@ -88,7 +87,7 @@ path beats `llama.cpp` on this CPU.
   gate got `ggml_gemv_q6_k=24473.750` vs llama `24602.080` but still lost
   f32, q4_k, and q8_0. This supports an upstream scheduler fix around
   warm-poll/fair batch wake latency, but it is not enough alone.
-- Gate-shaped fair fixed-lane-pool compare after switching the benchmark to the
+- Gate-shaped fair fixed-worker-pool compare after switching the benchmark to the
   production EMEL packed q4_k/q8_0 weight layout
   (`EMEL_BENCH_SUITE=parallel_matmul`, `EMEL_BENCH_ITERS=2000`,
   `EMEL_BENCH_RUNS=5`, `EMEL_BENCH_WARMUP_ITERS=200`,
@@ -102,7 +101,7 @@ path beats `llama.cpp` on this CPU.
 - `snapshots/bench/benchmarks.txt` was updated for the scoped
   `parallel_matmul` suite with the verified production-layout EMEL rows.
 - Validation so far: `EMEL_BUILD_JOBS=4 scripts/build_with_zig.sh`,
-  `./build/zig/emel_tests_bin --test-case='fork_join_lane_pool_wait_returns_after_worker_slot_reusable' --no-skip`,
+  `./build/zig/emel_tests_bin --test-case='thread_pool_scheduler_wait_returns_after_worker_slot_reusable' --no-skip`,
   `./build/zig/emel_tests_bin --test-case='co_sm_thread_pool_scheduler*' --no-skip`,
   `./build/zig/emel_tests_bin --test-case='kernel_aarch64_raw_quantized_prepared_rhs_routes_are_explicit_and_numeric_match' --no-skip`,
   `./build/zig/emel_tests_bin --test-case='kernel_aarch64_q4_k_4rows_neon_matches_scalar' --no-skip`,
@@ -113,7 +112,7 @@ path beats `llama.cpp` on this CPU.
   and `scripts/bench.sh --snapshot --compare --suite=parallel_matmul`
   passed after the implementation changes. After the follow-up blocker fixes,
   `./build/zig/emel_tests_bin --test-case='parallel matmul*' --no-skip`,
-  `./build/zig/emel_tests_bin --test-case='fork_join_lane_pool_wait_returns_after_worker_slot_reusable' --no-skip`,
+  `./build/zig/emel_tests_bin --test-case='thread_pool_scheduler_wait_returns_after_worker_slot_reusable' --no-skip`,
   `./build/zig/emel_tests_bin --test-case='co_sm_thread_pool_scheduler*' --no-skip`,
   `./build/zig/emel_tests_bin --test-case='kernel_aarch64_raw_quantized_prepared_rhs_routes_are_explicit_and_numeric_match' --no-skip`,
   `./build/zig/emel_tests_bin --test-case='kernel_aarch64_q4_k_4rows_neon_matches_scalar' --no-skip`,
@@ -164,17 +163,17 @@ path beats `llama.cpp` on this CPU.
   reaching into internals.
 - Local DI correction applied: `emel::text::generator::sm` now has a
   single public constructor that accepts an explicit `dependencies` aggregate.
-  The generator no longer default-constructs or owns a hidden lane pool. Owners
+  The generator no longer default-constructs or owns a hidden worker pool. Owners
   must provide the model, conditioner, `matmul::execution_policy`, and generator
   `runtime_policy`. `make_auto_dependencies(...)` still builds the matmul auto
-  policy from the injected lane pool, but route thresholds now come from the
+  policy from the injected worker pool, but route thresholds now come from the
   caller-supplied runtime policy instead of a generator-owned default.
 - Local matmul correction applied: `matmul::sm` no longer has a
-  default constructor or `lane_pool&` constructor that auto-detects host kernel
+  default constructor or `worker_pool&` constructor that auto-detects host kernel
   kind. The actor is constructed from `matmul::execution_policy`, which carries
-  the injected lane pool, kernel kind, and active lane count. Lane topology is
-  now caller-owned through the `lane_pool<worker_lanes, ...>` alias and
-  type-erased `lane_pool_ref`; the production actor allocates per-lane child
+  the injected worker pool, kernel kind, and active lane count. Lane topology is
+  now caller-owned through the `worker_pool<worker_lanes, ...>` alias and
+  type-erased `worker_pool_ref`; the production actor allocates per-lane child
   actor scratch once at construction.
 - Local route-policy correction applied: generator prefill/decode
   route thresholds now live in injected `runtime_policy.routes`; the numeric
@@ -311,8 +310,8 @@ path beats `llama.cpp` on this CPU.
 - Current generation DI audit:
   - Now dependency-injected: `emel::text::generator::sm` requires a
     `dependencies` aggregate; the generator no longer owns or constructs a
-    hidden matmul lane pool. `matmul::sm` requires an explicit
-    `matmul::execution_policy` containing the injected lane pool, kernel kind,
+    hidden matmul worker pool. `matmul::sm` requires an explicit
+    `matmul::execution_policy` containing the injected worker pool, kernel kind,
     and active lane count. Generator route thresholds and host kernel kind flow
     through `runtime_policy`, with tool and test defaults held in
     `tools/generation_route_policy.hpp` and
@@ -651,6 +650,20 @@ path beats `llama.cpp` on this CPU.
   generation benchmark still reports LFM2 single-lane behind llama.cpp and
   multithreaded ahead, with benchmark-regression warnings non-fatal under the
   scoped gate.
+- Scheduler pin refresh verification: reconfiguring `build/zig` fetched exact
+  dependency HEAD `67f898e6e19d516bb445841263fd35db3f3cd3c3`. Upstream focused
+  `test_thread_pool_scheduler` and `test_co_sm_thread_pool` passed, including
+  the deterministic batch-rollback queue-wake, out-of-order MPMC head
+  publication, and stale worker-permit regressions. `/tmp/probe7` completed 10
+  consecutive contention runs. After rebuilding `emel_tests_bin`, focused
+  `thread_pool_scheduler*` (14 cases / 49 assertions),
+  `co_sm_thread_pool_scheduler*` (5 / 23), and `parallel matmul*` (15 / 352)
+  filters all passed.
+- Final engineering recheck of exact head `67f898e6e19d516bb445841263fd35db3f3cd3c3`
+  returned Proven-for with no findings: the `dequeue_result` protocol discards
+  stale permits while retaining the reserved-unpublished spin, and rollback
+  wake, publication ordering, batch-state, stop, join, and queue/batch
+  coexistence contracts remain correct.
 
 ## Completion Bar
 

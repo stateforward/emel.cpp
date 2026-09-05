@@ -78,35 +78,35 @@ int32_t g_frame_samples = 0;
 int32_t g_n_q = 0;
 uint32_t g_encode_done_count = 0;
 uint32_t g_decode_done_count = 0;
-void on_initialize_done(const mimi::events::initialize_done &done) {
+void on_initialize_done(const mimi::events::initialize_done &done) noexcept {
   g_frame_samples = done.frame_samples;
   g_n_q = done.n_q;
 }
-void on_encode_frame_done(const mimi::events::encode_frame_done &) {
+void on_encode_frame_done(const mimi::events::encode_frame_done &) noexcept {
   ++g_encode_done_count;
 }
-void on_decode_frame_done(const mimi::events::decode_frame_done &) {
+void on_decode_frame_done(const mimi::events::decode_frame_done &) noexcept {
   ++g_decode_done_count;
 }
 emel::error::type g_init_error = 0;
 uint32_t g_encode_error_count = 0;
 uint32_t g_decode_error_count = 0;
-void on_initialize_error(const mimi::events::initialize_error &error_ev) {
+void on_initialize_error(const mimi::events::initialize_error &error_ev) noexcept {
   g_init_error = error_ev.err;
 }
-void on_encode_frame_error(const mimi::events::encode_frame_error &) {
+void on_encode_frame_error(const mimi::events::encode_frame_error &) noexcept {
   ++g_encode_error_count;
 }
-void on_decode_frame_error(const mimi::events::decode_frame_error &) {
+void on_decode_frame_error(const mimi::events::decode_frame_error &) noexcept {
   ++g_decode_error_count;
 }
 
-void noop_probe_done(const emel::gguf::loader::events::probe_done &) {}
-void noop_probe_error(const emel::gguf::loader::events::probe_error &) {}
-void noop_bind_done(const emel::gguf::loader::events::bind_done &) {}
-void noop_bind_error(const emel::gguf::loader::events::bind_error &) {}
-void noop_parse_done(const emel::gguf::loader::events::parse_done &) {}
-void noop_parse_error(const emel::gguf::loader::events::parse_error &) {}
+void noop_probe_done(const emel::gguf::loader::events::probe_done &) noexcept {}
+void noop_probe_error(const emel::gguf::loader::events::probe_error &) noexcept {}
+void noop_bind_done(const emel::gguf::loader::events::bind_done &) noexcept {}
+void noop_bind_error(const emel::gguf::loader::events::bind_error &) noexcept {}
+void noop_parse_done(const emel::gguf::loader::events::parse_done &) noexcept {}
+void noop_parse_error(const emel::gguf::loader::events::parse_error &) noexcept {}
 
 std::filesystem::path repo_root() {
 #ifdef EMEL_TEST_REPO_ROOT
@@ -284,8 +284,13 @@ TEST_CASE("mimi codec facade initializes, encodes, and decodes frames") {
   mimi::event::diagnostics diagnostics_initialized{};
   REQUIRE(machine.process_event(
       mimi::event::capture_diagnostics{diagnostics_initialized}));
+#if defined(__aarch64__) || defined(_M_ARM64)
   CHECK(diagnostics_initialized.projection_prepare_calls > 0u);
   CHECK(diagnostics_initialized.projection_prepared_floats > 0u);
+#else
+  CHECK(diagnostics_initialized.projection_prepare_calls == 0u);
+  CHECK(diagnostics_initialized.projection_prepared_floats == 0u);
+#endif
 
   const auto pcm = deterministic_pcm(g_frame_samples);
   std::vector<int32_t> codes(static_cast<size_t>(g_n_q), -1);

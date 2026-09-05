@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/build_jobs.sh
+source "$ROOT_DIR/scripts/build_jobs.sh"
 PROFILE_DIR="${EMEL_PROFILE_DIR:-$ROOT_DIR/tmp/profiles}"
 TRACE_TEMPLATE="${EMEL_PROFILE_TEMPLATE:-Time Profiler}"
 CASE_INDEX="${EMEL_PROFILE_CASE_INDEX:-7}"
@@ -14,15 +16,17 @@ usage() {
 usage: scripts/profile_generation.sh [--case-index N] [--out-basename NAME] [--time-limit DURATION]
                                     [--no-flamegraph]
 
-Profiles the maintained generation benchmark group with macOS xctrace Time Profiler.
+Intentionally unavailable on macOS under the repository hard memory-envelope
+contract: macOS has no supported native aggregate descendant memory controller.
+The script fails closed before xctrace or bench_runner execution.
 
-Outputs:
+If a future native hard-envelope backend makes profiling available, outputs are:
   tmp/profiles/<name>.trace
   tmp/profiles/<name>.stdout
   tmp/profiles/<name>_time_profile.xml
   tmp/profiles/<name>_summary.txt
 
-Optional outputs when FlameGraph helpers are available:
+Conditional FlameGraph outputs when helpers are available:
   tmp/profiles/<name>.folded
   tmp/profiles/<name>.svg
   tmp/profiles/<name>_bench_only.folded
